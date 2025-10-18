@@ -38,6 +38,8 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   connections: Connection[];
   onUpdateConnections: (connections: Connection[]) => void;
+  defaultTab?: string;
+  onDefaultTabChange?: (tab: string) => void;
 }
 
 interface User {
@@ -48,7 +50,7 @@ interface User {
   status: 'active' | 'suspended';
 }
 
-export function SettingsDialog({ open, onOpenChange, connections: initialConnections, onUpdateConnections }: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange, connections: initialConnections, onUpdateConnections, defaultTab = 'general', onDefaultTabChange }: SettingsDialogProps) {
   const [adminSettings, setAdminSettings] = useState({
     allowNewUsers: true,
     requireApproval: false,
@@ -178,12 +180,12 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
           <DialogHeader>
             <DialogTitle>Admin Panel</DialogTitle>
             <DialogDescription>
-              Manage your chat interface settings and connection strings
+              Manage your Talk2Tables settings and database connections
             </DialogDescription>
           </DialogHeader>
         </div>
 
-        <Tabs defaultValue="general" className="flex-1 flex flex-col min-h-0">
+        <Tabs value={defaultTab} onValueChange={onDefaultTabChange} className="flex-1 flex flex-col min-h-0">
           <div className="px-4 sm:px-6">
             <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 h-auto p-1">
               <TabsTrigger value="general" className="text-xs sm:text-sm flex-col sm:flex-row py-2 sm:py-2 gap-1 sm:gap-2">
@@ -217,7 +219,7 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                 </div>
                 <Switch
                   checked={adminSettings.allowNewUsers}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked: any) =>
                     setAdminSettings({ ...adminSettings, allowNewUsers: checked })
                   }
                 />
@@ -232,7 +234,7 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                 </div>
                 <Switch
                   checked={adminSettings.requireApproval}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked: any) =>
                     setAdminSettings({ ...adminSettings, requireApproval: checked })
                   }
                 />
@@ -247,7 +249,7 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                 </div>
                 <Switch
                   checked={adminSettings.enableNotifications}
-                  onCheckedChange={(checked) =>
+                  onCheckedChange={(checked: any) =>
                     setAdminSettings({ ...adminSettings, enableNotifications: checked })
                   }
                 />
@@ -578,7 +580,7 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                 <Label>User Role</Label>
                 <Select 
                   value={managingUser.role} 
-                  onValueChange={(value) => handleUpdateUserRole(managingUser.id, value as 'Admin' | 'User' | 'Moderator')}
+                  onValueChange={(value: string) => handleUpdateUserRole(managingUser.id, value as 'Admin' | 'User' | 'Moderator')}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -679,7 +681,7 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
               <Label>User Role</Label>
               <Select 
                 value={newUser.role} 
-                onValueChange={(value) => setNewUser({...newUser, role: value as 'Admin' | 'User' | 'Moderator'})}
+                onValueChange={(value: string) => setNewUser({...newUser, role: value as 'Admin' | 'User' | 'Moderator'})}
               >
                 <SelectTrigger>
                   <SelectValue />

@@ -47,7 +47,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 <p className="break-words leading-relaxed text-white">{message.content}</p>
               </div>
               {/* Hover Actions */}
-              <div className="absolute -top-3 left-4 hidden group-hover:flex items-center gap-1 bg-card border border-border rounded-lg shadow-lg p-1">
+              {/* <div className="absolute -top-3 left-4 hidden group-hover:flex items-center gap-1 bg-card border border-border rounded-lg shadow-lg p-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
@@ -56,8 +56,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7">
                   <Smile className="h-4 w-4" />
-                </Button>
-              </div>
+                </Button> 
+              </div> */}
             </div>
           </div>
           <Avatar className="shrink-0 h-10 w-10 mt-1 ring-2 ring-violet-500/30">
@@ -88,7 +88,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             <p className="break-words leading-relaxed">{message.content}</p>
           </div>
           {/* Hover Actions */}
-          <div className="absolute -top-3 right-4 hidden group-hover:flex items-center gap-1 bg-card border border-border rounded-lg shadow-lg p-1">
+          {/* <div className="absolute -top-3 right-4 hidden group-hover:flex items-center gap-1 bg-card border border-border rounded-lg shadow-lg p-1">
             <Button variant="ghost" size="icon" className="h-7 w-7">
               <Smile className="h-4 w-4" />
             </Button>
@@ -97,8 +97,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7">
               <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </div>
+            </Button> 
+          </div> */}
         </div>
       </div>
     </div>

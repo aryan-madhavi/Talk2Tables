@@ -35,6 +35,7 @@ interface ChatInterfaceProps {
   onConnectionChange: (value: string) => void;
   onUpdateMessages: (messages: Message[]) => void;
   onToggleStar: () => void;
+  onOpenSettingsWithTab?: (tab: string) => void;
 }
 
 export function ChatInterface({
@@ -46,6 +47,7 @@ export function ChatInterface({
   onConnectionChange,
   onUpdateMessages,
   onToggleStar,
+  onOpenSettingsWithTab,
 }: ChatInterfaceProps) {
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -98,7 +100,8 @@ export function ChatInterface({
 
   const handleConnectionChange = (value: string) => {
     if (value === "add-new") {
-      console.log("Add new connection clicked");
+      // Open settings dialog with connections tab
+      onOpenSettingsWithTab?.('connections');
     } else {
       onConnectionChange(value);
     }

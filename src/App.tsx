@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ChatInterface } from './components/ChatInterface';
 import { SettingsDialog } from './components/SettingsDialog';
+import { AuthPage } from './components/AuthPage';
 
 export interface Message {
   id: string;
@@ -56,7 +57,7 @@ const initialChat: Chat = {
     },
     {
       id: "4",
-      content: "A chat interface with an admin panel. It has connection string management and a lot of cool features.",
+      content: "Talk2Tables - a database console with connection management and powerful query features.",
       sender: "You",
       timestamp: new Date(2025, 9, 13, 10, 35),
       isOwn: true,
@@ -67,6 +68,8 @@ const initialChat: Chat = {
 };
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string>('');
   const [connections, setConnections] = useState<Connection[]>([
     { id: 'main-db', name: 'Main Database', host: 'main.db.example.com', port: '5432', database: 'main_db', username: 'admin', active: true },
     { id: 'dev-db', name: 'Development DB', host: 'dev.db.example.com', port: '5432', database: 'dev_db', username: 'dev_user', active: false },
@@ -75,6 +78,7 @@ export default function App() {
   ]);
   const [selectedConnection, setSelectedConnection] = useState('main-db');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState<string>('general');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [chats, setChats] = useState<Chat[]>([initialChat]);
   const [activeChatId, setActiveChatId] = useState('1');
@@ -102,6 +106,12 @@ export default function App() {
   const handleToggleStar = (chatId: string) => {
     setChats(prev => prev.map(chat => 
       chat.id === chatId ? { ...chat, starred: !chat.starred } : chat
+    ));
+  };
+
+  const handleRenameChat = (chatId: string, newTitle: string) => {
+    setChats(prev => prev.map(chat => 
+      chat.id === chatId ? { ...chat, title: newTitle } : chat
     ));
   };
 
@@ -135,6 +145,31 @@ export default function App() {
     }
   };
 
+  const handleAuthenticated = (username: string) => {
+    setCurrentUser(username);
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setCurrentUser('');
+    // Reset to initial state
+    setChats([initialChat]);
+    setActiveChatId('1');
+    setIsSidebarOpen(false);
+    setIsSettingsOpen(false);
+  };
+
+  const handleOpenSettingsWithTab = (tab: string) => {
+    setSettingsDefaultTab(tab);
+    setIsSettingsOpen(true);
+  };
+
+  // Show login page if not authenticated
+  if (!isAuthenticated) {
+    return <AuthPage onAuthenticated={handleAuthenticated} />;
+  }
+
   return (
     <div className="flex h-screen bg-background overflow-hidden touch-none">
       <Sidebar 
@@ -146,6 +181,9 @@ export default function App() {
         activeChatId={activeChatId}
         onSwitchChat={handleSwitchChat}
         onToggleStar={handleToggleStar}
+        onRenameChat={handleRenameChat}
+        onLogout={handleLogout}
+        currentUser={currentUser}
       />
       <ChatInterface 
         chat={activeChat}
@@ -156,12 +194,15 @@ export default function App() {
         onConnectionChange={handleConnectionChange}
         onUpdateMessages={handleUpdateMessages}
         onToggleStar={() => handleToggleStar(activeChatId)}
+        onOpenSettingsWithTab={handleOpenSettingsWithTab}
       />
       <SettingsDialog 
         open={isSettingsOpen}
         onOpenChange={setIsSettingsOpen}
         connections={connections}
         onUpdateConnections={handleUpdateConnections}
+        defaultTab={settingsDefaultTab}
+        onDefaultTabChange={setSettingsDefaultTab}
       />
     </div>
   );
