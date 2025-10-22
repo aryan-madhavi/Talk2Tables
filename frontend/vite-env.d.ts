@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_API_LOGIN_URL: string;
   readonly VITE_API_LOGOUT_URL: string;
   readonly VITE_API_SESSION_URL: string;
+  readonly VITE_API_CHAT_URL: string;
 }
 
 interface ImportMeta {

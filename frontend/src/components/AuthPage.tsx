@@ -5,14 +5,33 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card } from './ui/card';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { auth } from './firebase/FirebaseApp';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, deleteUser } from 'firebase/auth';
+import { auth, db } from './firebase/FirebaseApp';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+
 
 interface AuthPageProps {
   onAuthenticated: (username: string, email: string) => void;
 }
 
 const LOGIN_URL = import.meta.env.VITE_API_LOGIN_URL;
+
+async function createUserDocument(uid: string, username: string, email: string) {
+  try {
+    // users/{uid} document
+    await setDoc(doc(db, "users", uid), {
+      username: username,
+      email: email,
+      createdAt: serverTimestamp(), // Firestore timestamp
+      chat_ids: [],
+      access: {}, // example: { db_id: "access_level" }
+    });
+
+    console.log("User document created successfully!");
+  } catch (error) {
+    console.error("Error creating user document:", error);
+  }
+}
 
 export function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [isLogin, setIsLogin] = useState(true);
@@ -30,23 +49,21 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
     setError('');
     setIsLoading(true);
 
-    // Simulate API call delay
-    // await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // Basic validation
-    try{
+    try {
       let userCredential;
+
       if (isLogin) {
-      if (!email || !password) {
-        setError('Please fill in all fields');
-        setIsLoading(false);
-        return;
-      }
-  
-      // Firebase Login
-      userCredential = await signInWithEmailAndPassword(auth, email, password);
-    
+        // --- LOGIN ---
+        if (!email || !password) {
+          setError('Please fill in all fields');
+          setIsLoading(false);
+          return;
+        }
+
+        // Firebase Login
+        userCredential = await signInWithEmailAndPassword(auth, email, password);
       } else {
+        // --- SIGNUP ---
         if (!username || !email || !password || !confirmPassword) {
           setError('Please fill in all fields');
           setIsLoading(false);
@@ -62,35 +79,48 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
           setIsLoading(false);
           return;
         }
+
+        // Create Firebase user
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
-
-        await updateProfile(userCredential.user, { displayName: username,});
-
+        await updateProfile(userCredential.user, { displayName: username });
       }
 
-      const user = userCredential.user;
-      const token = await user.getIdToken(true);
+      // Get Firebase token
+      const token = await userCredential.user.getIdToken(true);
 
-      console.log("token: ", token )
-
-      const req = await fetch(LOGIN_URL,{
+      // Send token to backend
+      const req = await fetch(LOGIN_URL, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json',},
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token, }),
+        body: JSON.stringify({ token }),
       });
 
       const data = await req.json();
-
       console.log("Backend response:", data);
 
-      if (!req.ok) throw new Error(data.message || 'Authentication failed');
+      // If backend fails, rollback
+      if (!req.ok) {
+        if (!isLogin) {
+          console.warn("Backend rejected signup, rolling back user...");
+          await deleteUser(userCredential.user).catch(err =>
+            console.error("Rollback user failed:", err)
+          );
+        }
+        throw new Error(data.message || 'Authentication failed');
+      }
 
+      // If backend succeeded, create Firestore doc (signup only)
+      if (!isLogin) {
+        await createUserDocument(userCredential.user.uid, username, email);
+      }
+
+      // Notify parent
       onAuthenticated(userCredential.user.displayName ?? email, email);
-      setIsLoading(false);
-
-    }catch(err:any){
+    } catch (err: any) {
+      console.error(err);
       setError(err.message || 'Authentication failed');
+    } finally {
       setIsLoading(false);
     }
   };

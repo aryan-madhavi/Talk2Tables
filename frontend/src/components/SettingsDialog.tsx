@@ -13,7 +13,7 @@ import { Button } from './ui/button';
 import { Switch } from './ui/switch';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
-import { Shield, Database, Bell, User, Trash2, Edit, UserCog, UserX, UserCheck, UserPlus } from 'lucide-react';
+import { Shield, Database, Bell, User, Trash2, Edit, UserCog, UserX, UserCheck, UserPlus, Loader2 } from 'lucide-react';
 import type { Connection } from '../App';
 import {
   AlertDialog,
@@ -32,6 +32,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import {doc, setDoc, serverTimestamp, collection, updateDoc } from 'firebase/firestore';
+import { db, auth } from './firebase/FirebaseApp';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -71,8 +73,12 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
   const [deleteConnectionId, setDeleteConnectionId] = useState<string | null>(null);
   const [managingUser, setManagingUser] = useState<User | null>(null);
   const [addingUser, setAddingUser] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingEditConnection, setIsLoadingEditConnection] = useState(false);  
+  
   
   const [newConnection, setNewConnection] = useState({
+    typeo: '',
     name: '',
     host: '',
     port: '',
@@ -99,40 +105,99 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
     setDeleteConnectionId(null);
   };
 
-  const handleSaveConnection = () => {
-    if (editingConnection) {
-      const updatedConnections = connections.map(conn => 
-        conn.id === editingConnection.id ? editingConnection : conn
+  const handleSaveConnection = async () => {
+    if (!editingConnection) return;
+
+    setIsLoadingEditConnection(true);
+
+    const user = auth.currentUser;
+    if(!user){
+      setIsLoadingEditConnection(false);
+      return; // Exit early if no user
+    }
+
+    try{
+      const connRef = doc(db, 'connections', editingConnection.id);
+
+      // Update Firestore
+      const updatedData = {
+        ...editingConnection,
+        updatedby: user.uid,
+        updatedat: serverTimestamp(),
+      }
+
+      await updateDoc(connRef, updatedData);
+
+      // Update local state
+      const updatedConnections = connections.map((conn) =>
+        conn.id === editingConnection.id ? { ...conn, ...updatedData } : conn
       );
+
       setConnections(updatedConnections);
       onUpdateConnections(updatedConnections);
       setEditingConnection(null);
+
+    } catch (error) {
+      console.error("Failed to update connection in Firestore:", error);
+    } finally{
+      setIsLoadingEditConnection(false);  
     }
+    
   };
 
-  const handleAddConnection = () => {
-    if (newConnection.name && newConnection.host) {
-      const newConn: Connection = {
-        id: Date.now().toString(),
+  const handleAddConnection = async () => {
+    setIsLoading(true);
+
+    const user = auth.currentUser;
+    if (!user) {
+      console.error("User not logged in");
+      setIsLoading(false);
+      return; // Exit early if no user
+    }
+
+    try{
+
+      //Create a Docunment ID
+      const docRef = doc(collection(db, 'connections'));
+      const newConn: Connection & { createdAt: any } = {
+        id: docRef.id,
+        typeo: newConnection.typeo,
         name: newConnection.name,
         host: newConnection.host,
         port: newConnection.port,
         database: newConnection.database,
         username: newConnection.username,
+        password: newConnection.password,
         active: false,
+        addedby: user.uid ,
+        createdAt: serverTimestamp(),
       };
+
+      // Save to Firestore
+      await setDoc(docRef, newConn);
+
+      // Update local state
       const updatedConnections = [...connections, newConn];
       setConnections(updatedConnections);
       onUpdateConnections(updatedConnections);
+
+      // Reset input fields
       setNewConnection({
-        name: '',
-        host: '',
-        port: '',
-        database: '',
-        username: '',
-        password: '',
+        typeo: "",
+        name: "",
+        host: "",
+        port: "",
+        database: "",
+        username: "",
+        password: "",
       });
-    }
+      
+    } catch (error) {
+      console.error("Failed to add connection to Firestore:", error);
+      setIsLoading(false);
+    } finally{
+      setIsLoading(false);
+    }  
   };
 
   const handleAddUser = () => {
@@ -327,6 +392,11 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                         onChange={(e) => setEditingConnection({...editingConnection, name: e.target.value})}
                         placeholder="Connection Name"
                       />
+                      <Input
+                        value={editingConnection.typeo}
+                        onChange={(e) => setEditingConnection({...editingConnection, typeo: e.target.value})}
+                        placeholder="Type (e.g., PostgreSQL, MySQL)"
+                      />
                       <Input 
                         value={editingConnection.host}
                         onChange={(e) => setEditingConnection({...editingConnection, host: e.target.value})}
@@ -349,7 +419,16 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                       />
                       <div className="flex gap-2">
                         <Button size="sm" onClick={handleSaveConnection}>
-                          Save
+                          {isLoadingEditConnection ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              Save
+                            </>
+                          )}
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setEditingConnection(null)}>
                           Cancel
@@ -410,6 +489,11 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                   value={newConnection.name}
                   onChange={(e) => setNewConnection({...newConnection, name: e.target.value})}
                 />
+                <Input
+                  placeholder="Type (e.g., PostgreSQL, MySQL)"
+                  value={newConnection.typeo}
+                  onChange={(e) => setNewConnection({...newConnection, typeo: e.target.value})}
+                />
                 <Input 
                   placeholder="Host (e.g., db.example.com)" 
                   value={newConnection.host}
@@ -440,10 +524,19 @@ export function SettingsDialog({ open, onOpenChange, connections: initialConnect
                 <Button 
                   className="w-full"
                   onClick={handleAddConnection}
-                  disabled={!newConnection.name || !newConnection.host}
+                  disabled={!newConnection.name && !newConnection.host && !newConnection.port && !newConnection.database && !newConnection.username && !newConnection.password}
                 >
-                  <Database className="h-4 w-4 mr-2" />
-                  Add New Connection
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Add New Connection
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

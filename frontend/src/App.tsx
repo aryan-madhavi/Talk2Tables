@@ -5,6 +5,9 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { AuthPage } from './components/AuthPage';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner@2.0.3';
+import { db, auth } from './components/firebase/FirebaseApp';
+import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+
 
 export interface Message {
   id: string;
@@ -23,16 +26,21 @@ export interface Chat {
 }
 
 export interface Connection {
+  typeo?: string;
   id: string;
   name: string;
   host: string;
   port?: string;
   database?: string;
   username?: string;
+  password?: string;
   active: boolean;
+  addedby?: string;     
+  createdAt?: any;  
 }
 
 export interface UserData {
+  uid: string;
   username: string;
   email: string;
   allowedDatabases: string[]; // IDs of databases this user can access
@@ -43,65 +51,35 @@ const SESSION_URL = import.meta.env.VITE_API_SESSION_URL;
 
 
 const initialChat: Chat = {
-  id: '1',
+  id: crypto.randomUUID(),
   title: 'New Chat',
-  messages: [
-    {
-      id: "1",
-      content: "Hey! How are you doing?",
-      sender: "John Doe",
-      timestamp: new Date(2025, 9, 13, 10, 30),
-      isOwn: false,
-    },
-    {
-      id: "2",
-      content: "I'm doing great! Just working on some new features.",
-      sender: "You",
-      timestamp: new Date(2025, 9, 13, 10, 32),
-      isOwn: true,
-    },
-    {
-      id: "3",
-      content: "That sounds exciting! What are you building?",
-      sender: "John Doe",
-      timestamp: new Date(2025, 9, 13, 10, 33),
-      isOwn: false,
-    },
-    {
-      id: "4",
-      content: "Talk2Tables - a database console with connection management and powerful query features.",
-      sender: "You",
-      timestamp: new Date(2025, 9, 13, 10, 35),
-      isOwn: true,
-    },
-  ],
+  messages: [],
   starred: false,
-  timestamp: new Date(2025, 9, 13, 10, 30),
+  timestamp: new Date(),
 };
 
 // All available database connections
-const allConnections: Connection[] = [
-  { id: 'main-db', name: 'Main Database', host: 'main.db.example.com', port: '5432', database: 'main_db', username: 'admin', active: true },
-  { id: 'dev-db', name: 'Development DB', host: 'dev.db.example.com', port: '5432', database: 'dev_db', username: 'dev_user', active: false },
-  { id: 'staging-db', name: 'Staging DB', host: 'staging.db.example.com', port: '5432', database: 'staging_db', username: 'staging_user', active: false },
-  { id: 'prod-db', name: 'Production DB', host: 'prod.db.example.com', port: '5432', database: 'prod_db', username: 'prod_user', active: false },
-  { id: 'analytics-db', name: 'Analytics DB', host: 'analytics.db.example.com', port: '5432', database: 'analytics_db', username: 'analyst', active: false },
-  { id: 'backup-db', name: 'Backup DB', host: 'backup.db.example.com', port: '5432', database: 'backup_db', username: 'backup_user', active: false },
-];
+const allConnections: Connection[] = [];
+
+
+
 
 // Mock user database - In production, this would come from a backend
 const mockUserDatabase: Record<string, UserData> = {
   'admin': {
+    uid: 'admin-uid',
     username: 'admin',
     email: 'admin@example.com',
     allowedDatabases: ['main-db', 'dev-db', 'staging-db', 'prod-db', 'analytics-db', 'backup-db'], // Admin has access to all
   },
   'developer': {
+    uid: 'developer-uid',
     username: 'developer',
     email: 'developer@example.com',
     allowedDatabases: ['dev-db', 'staging-db'], // Developer has limited access
   },
   'analyst': {
+    uid: 'analyst-uid',
     username: 'analyst',
     email: 'analyst@example.com',
     allowedDatabases: ['analytics-db', 'main-db'], // Analyst has specific access
@@ -122,9 +100,40 @@ export default function App() {
 
   const activeChat = chats.find(chat => chat.id === activeChatId) || chats[0];
 
+  // All available database connections
+    useEffect(() => {
+      if (!isAuthenticated || !currentUser) return;
+
+      // console.log("Setting up Firestore listener for user connections:", currentUser.uid);
+
+      const q = query(
+        collection(db, "connections"),
+        where("addedby", "==", currentUser.uid),
+        orderBy("createdAt", "desc")
+      );
+
+      // Real-time updates using onSnapshot
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const userConnections = snapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<Connection, "id">;
+        return { id: doc.id, ...data };
+      });
+
+        setConnections(userConnections);
+
+        // Auto-select the first connection if none selected
+        if (!selectedConnection && userConnections.length > 0) {
+          setSelectedConnection(userConnections[0].id);
+        }
+      });
+
+      return () => unsubscribe(); // cleanup listener when unmounts
+    }, [isAuthenticated, currentUser]);
+
+
   const handleNewChat = () => {
     const newChat: Chat = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       title: 'New Chat',
       messages: [],
       starred: false,
@@ -194,8 +203,14 @@ export default function App() {
   };
 
   const handleAuthenticated = (username: string, email: string) => {
+    const user = auth.currentUser;
+    if (!user) {
+      console.error("No authenticated user found in Firebase Auth");
+      return;
+    }
     // Get user data from mock database
     const userData = mockUserDatabase[username.toLowerCase()] || {
+      uid: user.uid,
       username: username,
       email: email,
       allowedDatabases: ['main-db', 'dev-db'], // Default access for new users

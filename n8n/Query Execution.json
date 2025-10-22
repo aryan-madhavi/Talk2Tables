@@ -1,0 +1,542 @@
+{
+  "name": "Query Execution",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "e360d54d-32ba-406c-aaff-bd9616f25dd8"
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        336
+      ],
+      "id": "7f5f8ae7-1d3b-483a-b989-351c749e96c9",
+      "name": "MCP Server Trigger",
+      "webhookId": "e360d54d-32ba-406c-aaff-bd9616f25dd8"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Database Type:{{ $json.DatabaseType }} \nUser Chat Message: {{ $json.chatInput }}",
+        "options": {}
+      },
+      "id": "34a24c05-8695-421d-a02c-27f75d7accb7",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        624,
+        416
+      ],
+      "typeVersion": 1.7,
+      "retryOnFail": true,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "content": "## Postgress Sql\n\n",
+        "height": 256,
+        "width": 656
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        864,
+        800
+      ],
+      "typeVersion": 1,
+      "id": "950c7f0e-c3f2-4d8f-a249-81623dddf0ee",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## MySql\n\n\n",
+        "height": 256,
+        "width": 672,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1568,
+        816
+      ],
+      "typeVersion": 1,
+      "id": "1080c8c9-1ca4-4d4f-a885-8d96a5beb721",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get table definition to find all columns and types (Postgres)",
+        "operation": "executeQuery",
+        "query": "select\n c.column_name,\n c.data_type,\n c.is_nullable,\n c.column_default,\n tc.constraint_type,\n ccu.table_name AS referenced_table,\n ccu.column_name AS referenced_column\nfrom\n information_schema.columns c\nLEFT join\n information_schema.key_column_usage kcu\n ON c.table_name = kcu.table_name\n AND c.column_name = kcu.column_name\nLEFT join\n information_schema.table_constraints tc\n ON kcu.constraint_name = tc.constraint_name\n AND tc.constraint_type = 'FOREIGN KEY'\nLEFT join\n information_schema.constraint_column_usage ccu\n ON tc.constraint_name = ccu.constraint_name\nwhere\n c.table_name = '{{ $fromAI(\"table_name\") }}'\n AND c.table_schema = '{{ $fromAI(\"schema_name\") }}'\norder by\n c.ordinal_position",
+        "options": {}
+      },
+      "id": "393d1acf-182e-464f-8753-4ee2eb6f2f27",
+      "name": "PG_GET_TableDefinition",
+      "type": "n8n-nodes-base.postgresTool",
+      "position": [
+        944,
+        864
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "zNXgokEKVW2EqmQd",
+          "name": "Postgres dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "=Get list of all tables with their schema in the database (Postgres)",
+        "operation": "executeQuery",
+        "query": "SELECT \n table_schema,\n table_name\nFROM information_schema.tables\nWHERE table_type = 'BASE TABLE'\n AND table_schema NOT IN ('pg_catalog', 'information_schema')\nORDER BY table_schema, table_name;",
+        "options": {}
+      },
+      "id": "17c3d68c-f190-4e81-8c44-7613a5f54911",
+      "name": "PG_GET_DbSchemaAndTablesList",
+      "type": "n8n-nodes-base.postgresTool",
+      "position": [
+        1152,
+        864
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "zNXgokEKVW2EqmQd",
+          "name": "Postgres dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get all the data from Postgres, make sure you append the tables with correct schema. Every table is associated with some schema in the database. (Postgres)",
+        "operation": "executeQuery",
+        "query": "{{ $fromAI(\"sql_query\", \"SQL Query\") }}",
+        "options": {}
+      },
+      "id": "8839acae-9b14-4ff5-98e5-f347e20c36d5",
+      "name": "PG_EXEC_SqlQuery",
+      "type": "n8n-nodes-base.postgresTool",
+      "position": [
+        1360,
+        864
+      ],
+      "typeVersion": 2.5,
+      "credentials": {
+        "postgres": {
+          "id": "zNXgokEKVW2EqmQd",
+          "name": "Postgres dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get table definition to find all columns and types (Mysql)",
+        "operation": "executeQuery",
+        "query": "SELECT\n    c.COLUMN_NAME,\n    c.DATA_TYPE,\n    c.IS_NULLABLE,\n    c.COLUMN_DEFAULT,\n    tc.CONSTRAINT_TYPE,\n    kcu.REFERENCED_TABLE_NAME AS referenced_table,\n    kcu.REFERENCED_COLUMN_NAME AS referenced_column\nFROM\n    INFORMATION_SCHEMA.COLUMNS c\nLEFT JOIN\n    INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu\n    ON c.TABLE_NAME = kcu.TABLE_NAME\n    AND c.COLUMN_NAME = kcu.COLUMN_NAME\n    AND c.TABLE_SCHEMA = kcu.TABLE_SCHEMA\nLEFT JOIN\n    INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc\n    ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME\n    AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY'\nWHERE\n    c.TABLE_NAME = '{{ $fromAI(\"table_name\") }}'\n    AND c.TABLE_SCHEMA = '{{ $fromAI(\"schema_name\") }}'\nORDER BY\n    c.ORDINAL_POSITION;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySqlTool",
+      "typeVersion": 2.5,
+      "position": [
+        1664,
+        864
+      ],
+      "id": "ec82440f-577e-44f9-878e-9fdc8ce7abac",
+      "name": "MySQL_GET_TableDefinition",
+      "credentials": {
+        "mySql": {
+          "id": "abc7723YW95XlwbV",
+          "name": "MySQL dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get list of all tables with their schema in the database (Mysql)",
+        "operation": "executeQuery",
+        "query": "SELECT \n  table_schema,\n  table_name\nFROM information_schema.tables\nWHERE table_type = 'BASE TABLE'\n  AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')\nORDER BY table_schema, table_name;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySqlTool",
+      "typeVersion": 2.5,
+      "position": [
+        1888,
+        864
+      ],
+      "id": "4ffa3018-0563-40cd-bc90-30c7724e11dd",
+      "name": "MySQL_GET_DbSchemaAndTablesList",
+      "credentials": {
+        "mySql": {
+          "id": "abc7723YW95XlwbV",
+          "name": "MySQL dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Get all the data from MySQL, make sure you append the tables with correct schema. Every table is associated with some schema in the database. (Mysql)",
+        "operation": "executeQuery",
+        "query": "{{ $fromAI(\"sql_query\", \"SQL Query\") }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySqlTool",
+      "typeVersion": 2.5,
+      "position": [
+        2112,
+        864
+      ],
+      "id": "a2cda04a-a806-48e8-83bc-fb533acebaa2",
+      "name": "MySQL_EXEC_SqlQuery",
+      "credentials": {
+        "mySql": {
+          "id": "abc7723YW95XlwbV",
+          "name": "MySQL dynamic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "endpointUrl": "https://weyofjohntest.app.n8n.cloud/mcp/e360d54d-32ba-406c-aaff-bd9616f25dd8",
+        "serverTransport": "httpStreamable",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.1,
+      "position": [
+        2032,
+        336
+      ],
+      "id": "6260db04-474d-4ba4-bc6c-97f23cbb7a4a",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -480,
+        464
+      ],
+      "id": "e95b4e13-3ae2-44c3-a169-e323d2cdb6c9",
+      "name": "When chat message received",
+      "webhookId": "e4bd468b-927d-4dbf-8663-ada73f35e984"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        480,
+        672
+      ],
+      "id": "4860a845-eef6-49de-9333-d7a9f038d4e1",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "NRs3BKY25VWLYX46",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 8
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        736
+      ],
+      "id": "97512b35-af98-45b5-954c-84ee339f51d7",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "GsPEuA7KgRcGCyyi",
+          "name": "Postgres chat memory"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "f999a27b-b48b-44bf-bd72-1e9694872d07",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -32,
+        416
+      ],
+      "id": "0a707bcf-e545-443c-9ff4-17d5cb6fdd11",
+      "name": "Webhook",
+      "webhookId": "f999a27b-b48b-44bf-bd72-1e9694872d07"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3b4aa656-4826-4ccb-a72e-e711e4cf28fe",
+              "name": "hostname",
+              "value": "={{ $json.host }}",
+              "type": "string"
+            },
+            {
+              "id": "30c689ee-9d52-414f-930b-2d75c28d5cd6",
+              "name": "dbName",
+              "value": "={{ $json.database }}",
+              "type": "string"
+            },
+            {
+              "id": "132c71ba-df9f-43d0-a47c-b2ccf8043533",
+              "name": "dbUser",
+              "value": "={{ $json.username }}",
+              "type": "string"
+            },
+            {
+              "id": "612d1052-4c6b-4004-a237-72087215c112",
+              "name": "=pass",
+              "value": "={{ $json.password }}",
+              "type": "string"
+            },
+            {
+              "id": "2dc9502f-be43-4dee-93bb-2ec7c7323ce8",
+              "name": "port",
+              "value": "={{ $json.port }}",
+              "type": "string"
+            },
+            {
+              "id": "5d977222-40c8-45f1-88e0-f9ace7eac1db",
+              "name": "sessionId",
+              "value": "={{ $('Webhook').item.json.body.chat_id }}",
+              "type": "string"
+            },
+            {
+              "id": "54e54346-e903-40e3-8f53-542aa09e2cda",
+              "name": "chatInput",
+              "value": "={{ $('Webhook').item.json.body.query }}",
+              "type": "string"
+            },
+            {
+              "id": "863bd2db-1b65-4c41-9248-c0672cf304dc",
+              "name": "DatabaseType",
+              "value": "={{ $json.typeo }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        384,
+        416
+      ],
+      "id": "49410409-b091-46f6-b318-9e7fa35ce958",
+      "name": "DB_CREDS"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": "talk2tables-475312",
+        "collection": "connections",
+        "documentId": "={{ $json.body.connection_id }}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        416
+      ],
+      "id": "ab8d6b63-7d67-4806-b09d-0b2abd6d6b61",
+      "name": "Get a document",
+      "credentials": {
+        "googleApi": {
+          "id": "hUzq6EXV9MCCQg3v",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1008,
+        416
+      ],
+      "id": "86565548-fd05-476b-a10f-bd89b4728013",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "PG_GET_TableDefinition": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_GET_DbSchemaAndTablesList": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PG_EXEC_SqlQuery": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL_GET_TableDefinition": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL_GET_DbSchemaAndTablesList": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MySQL_EXEC_SqlQuery": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        []
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB_CREDS": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a document": {
+      "main": [
+        [
+          {
+            "node": "DB_CREDS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fdfd2caf-8b1d-44fa-90de-5fc7c501ee69",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8eea7658e9513ad1b325c8e030cbe1fccc3b5c091831c9552d6981c65484c605"
+  },
+  "id": "6fDZOf0dzxmNLvLz",
+  "tags": []
+}

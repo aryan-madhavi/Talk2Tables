@@ -26,6 +26,8 @@ import {
 import { Separator } from "./ui/separator";
 import type { Chat, Message, Connection } from "../App";
 
+const CHAT_URL = import.meta.env.VITE_API_CHAT_URL;
+
 interface ChatInterfaceProps {
   chat: Chat;
   connectionString: string;
@@ -64,32 +66,76 @@ export function ChatInterface({
     }
   }, [chat.messages]);
 
-  const handleSend = () => {
-    if (inputValue.trim()) {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        content: inputValue,
-        sender: "You",
-        timestamp: new Date(),
-        isOwn: true,
-      };
-      const updatedMessages = [...chat.messages, newMessage];
-      onUpdateMessages(updatedMessages);
-      setInputValue("");
-      
-      // Simulate AI response after a short delay
-      setTimeout(() => {
+  const handleSend = async () => {
+    if (!inputValue.trim()) return;
+
+    const messageToSend = inputValue; // capture input
+    const currentConn = selectedConn?.id; // capture selected connection
+    const chatid = chat.id; // capture current chat ID
+
+    console.log("Sending message:", { messageToSend, currentConn, chatid });
+    
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      content: inputValue,
+      sender: "You",
+      timestamp: new Date(),
+      isOwn: true,
+    };
+
+
+    const updatedMessages = [...chat.messages, newMessage];
+    onUpdateMessages(updatedMessages);
+    setInputValue("");
+
+    try {
+      if (selectedConn) {
+
+        const response = await fetch(CHAT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            connectionId: currentConn, // Firestore UID or DB id
+            userMessage: messageToSend,       // the user’s message
+            chatId: chatid,               // current chat session ID
+          }),
+        });
+
+        const data = await response.json();
+
         const aiResponse: Message = {
           id: (Date.now() + 1).toString(),
-          content: "Thanks for your message! I'm processing your request.",
+          content: `**AI Response:**\n${data.response ?? JSON.stringify(data, null, 2)}`,
+          sender: "AI Assistant",
+          timestamp: new Date(),
+          isOwn: false,
+        };
+
+        onUpdateMessages([...updatedMessages, aiResponse]);
+      } else {
+        const aiResponse: Message = {
+          id: (Date.now() + 1).toString(),
+          content: "No database connection selected. Please select one first.",
           sender: "AI Assistant",
           timestamp: new Date(),
           isOwn: false,
         };
         onUpdateMessages([...updatedMessages, aiResponse]);
-      }, 1000);
+      }
+    } catch (err) {
+      console.error(err);
+      const aiResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "Failed to reach AI service.",
+        sender: "AI Assistant",
+        timestamp: new Date(),
+        isOwn: false,
+      };
+      onUpdateMessages([...updatedMessages, aiResponse]);
     }
   };
+
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -238,7 +284,7 @@ export function ChatInterface({
                       <SelectItem value="add-new">
                         <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
                           <Plus className="h-3 w-3" />
-                          <span>View All Connections</span>
+                          <span>Add New Connection</span>
                         </div>
                       </SelectItem>
                     </>
