@@ -179,7 +179,7 @@ export default function QueryInterface() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask anything... e.g. Show all sensors due for calibration"
-                  className="w-full py-3 pl-4 pr-24 bg-transparent border-none focus:ring-0 resize-none min-h-[60px] max-h-[120px] text-sm"
+                  className="relative rounded-xl w-full py-3 pl-4 pr-24 bg-transparent border-none focus:ring-0 resize-none min-h-[60px] max-h-[120px] text-sm"
                   rows={2}
                 />
                 <div className="absolute bottom-2 right-2 flex items-center gap-1">

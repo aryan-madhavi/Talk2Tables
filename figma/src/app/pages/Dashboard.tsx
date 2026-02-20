@@ -18,11 +18,11 @@ export default function Dashboard() {
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-900 rounded-xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 opacity-10 transform translate-x-1/4 -translate-y-1/4">
-          <svg width="400" height="400" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* <svg width="400" height="400" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="100" cy="100" r="80" stroke="white" strokeWidth="20" />
             <path d="M100 20V180" stroke="white" strokeWidth="20" />
             <path d="M20 100H180" stroke="white" strokeWidth="20" />
-          </svg>
+          </svg> */}
         </div>
         <div className="relative z-10">
           <h1 className="text-3xl font-bold mb-2">Good morning, {currentUser.name.split(' ')[0]} 👋</h1>
@@ -52,7 +52,7 @@ export default function Dashboard() {
           </div>
         </Link>
         
-        <Link to="/reports" className="group p-6 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all flex items-start gap-4">
+        <Link to="/comingsoon" className="group p-6 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all flex items-start gap-4">
           <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center text-green-600 group-hover:bg-green-100 transition-colors">
             <BarChart2 className="w-6 h-6" />
           </div>

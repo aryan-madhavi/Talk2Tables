@@ -2,10 +2,10 @@ import { User, QueryEntry, DatabaseConnection, TableSchema, AuditLogEntry } from
 
 export const currentUser: User = {
   id: 'u1',
-  name: 'Sarah Sharma',
-  email: 'sarah.sharma@talk2tables.gov.in',
+  name: 'Sahil Gangani',
+  email: 'user1@email.com',
   role: 'admin',
-  avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=100'
+  avatarUrl: 'https://img.icons8.com/?size=100&id=fUUEbUbXhzOA&format=png&color=000000'
 };
 
 export const databases: DatabaseConnection[] = [
@@ -23,7 +23,7 @@ export const queryHistory: QueryEntry[] = [
     database: 'Plant Instrumentation DB',
     type: 'SELECT',
     status: 'success',
-    user: 'Sarah Sharma'
+    user: 'Sahil Gangani'
   },
   {
     id: 'q2',
@@ -33,7 +33,7 @@ export const queryHistory: QueryEntry[] = [
     database: 'Plant Instrumentation DB',
     type: 'SELECT',
     status: 'success',
-    user: 'Sarah Sharma'
+    user: 'Sahil Gangani'
   },
   {
     id: 'q3',
@@ -43,7 +43,7 @@ export const queryHistory: QueryEntry[] = [
     database: 'Plant Instrumentation DB',
     type: 'UPDATE',
     status: 'success',
-    user: 'Sarah Sharma'
+    user: 'Sahil Gangani'
   }
 ];
 
@@ -72,7 +72,7 @@ export const tableSchemas: TableSchema[] = [
 ];
 
 export const auditLogs: AuditLogEntry[] = [
-  { id: 'l1', action: 'Query Execution', user: 'Sarah Sharma', timestamp: '2023-10-25T09:15:00', details: 'Executed SELECT on sensors', severity: 'info' },
-  { id: 'l2', action: 'Data Update', user: 'Sarah Sharma', timestamp: '2023-10-24T16:45:00', details: 'Updated sensor #405', severity: 'warning' },
+  { id: 'l1', action: 'Query Execution', user: 'Sahil Gangani', timestamp: '2023-10-25T09:15:00', details: 'Executed SELECT on sensors', severity: 'info' },
+  { id: 'l2', action: 'Data Update', user: 'Sahil Gangani', timestamp: '2023-10-24T16:45:00', details: 'Updated sensor #405', severity: 'warning' },
   { id: 'l3', action: 'Login Failed', user: 'admin', timestamp: '2023-10-24T10:00:00', details: 'Invalid password attempt', severity: 'critical' },
 ];

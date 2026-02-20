@@ -6,6 +6,7 @@ import {
 import { cn } from '../../lib/utils';
 import { databases, auditLogs, currentUser } from '../data/mockData';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ComingSoon } from '../routes';
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'databases' | 'stats'>('users');
@@ -83,11 +84,11 @@ export default function AdminPanel() {
                      <tr key={i} className="hover:bg-gray-50 transition-colors">
                        <td className="px-6 py-4 font-medium text-gray-900 flex items-center gap-3">
                          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
-                           {i === 1 ? 'SS' : i === 2 ? 'JD' : 'MK'}
+                           {i === 1 ? 'SG' : i === 2 ? 'AM' : 'SD'}
                          </div>
                          <div>
-                           <div className="font-bold">{i === 1 ? 'Sarah Sharma' : i === 2 ? 'John Doe' : 'Mukesh Kumar'}</div>
-                           <div className="text-xs text-gray-500 font-normal">user{i}@talk2tables.gov.in</div>
+                           <div className="font-bold">{i === 1 ? 'Sahil Gangani' : i === 2 ? 'Aryan Madhavi' : 'Sankalp Dawada'}</div>
+                           <div className="text-xs text-gray-500 font-normal">user{i}@email.com</div>
                          </div>
                        </td>
                        <td className="px-6 py-4 text-gray-600">
@@ -121,7 +122,8 @@ export default function AdminPanel() {
         )}
 
         {activeTab === 'audit' && (
-          <div className="p-6 animate-in fade-in">
+          <ComingSoon />
+          /* <div className="p-6 animate-in fade-in">
              <h3 className="text-lg font-bold text-gray-900 mb-6">System Audit Log</h3>
              <div className="space-y-4">
                {auditLogs.map((log) => (
@@ -151,7 +153,7 @@ export default function AdminPanel() {
                  </div>
                ))}
              </div>
-          </div>
+          </div> */
         )}
 
         {activeTab === 'databases' && (
@@ -189,7 +191,8 @@ export default function AdminPanel() {
         )}
 
         {activeTab === 'stats' && (
-           <div className="p-6 animate-in fade-in h-full flex flex-col">
+          <ComingSoon />
+           /* <div className="p-6 animate-in fade-in h-full flex flex-col">
              <h3 className="text-lg font-bold text-gray-900 mb-6">System Usage Statistics</h3>
              <div className="h-[400px] w-full flex items-center justify-center">
                <ResponsiveContainer width="100%" height="100%">
@@ -213,7 +216,7 @@ export default function AdminPanel() {
                  </AreaChart>
                </ResponsiveContainer>
              </div>
-           </div>
+           </div> */
         )}
       </div>
     </div>
