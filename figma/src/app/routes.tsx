@@ -6,10 +6,12 @@ import Dashboard from "./pages/Dashboard";
 import QueryInterface from "./pages/QueryInterface";
 import History from "./pages/History";
 import SchemaBrowser from "./pages/SchemaBrowser";
-import AdminPanel from "./pages/AdminPanel";
+import AdminPanel from './pages/AdminPanel';
 import Settings from "./pages/Settings";
 
 const NotFound = () => <div className="p-8 text-center text-gray-500">Page Not Found</div>;
+
+export const ComingSoon = () => ( <div className="p-8 text-center text-gray-500">Coming Soon</div> );
 
 export const router = createBrowserRouter([
   {
@@ -26,7 +28,9 @@ export const router = createBrowserRouter([
       { path: "schema", element: <SchemaBrowser /> },
       { path: "admin", element: <AdminPanel /> },
       { path: "settings", element: <Settings /> },
+      { path: "comingsoon", element: <ComingSoon /> },
       { path: "*", element: <NotFound /> },
+      
     ],
   },
 ]);
