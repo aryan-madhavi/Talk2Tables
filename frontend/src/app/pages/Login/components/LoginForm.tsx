@@ -16,7 +16,7 @@ export function LoginForm({ onSubmit }: LoginFormProps) {
           type="email"
           id="email"
           required
-          placeholder="sarah@talk2tables.gov.in"
+          placeholder="user@email.com"
           className="w-full px-4 py-3 rounded-lg border border-gray-300 text-sm
                      focus:ring-2 focus:ring-blue-500 focus:border-blue-500
                      transition-colors outline-none"

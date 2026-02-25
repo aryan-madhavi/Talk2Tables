@@ -3,7 +3,7 @@ import { User, QueryEntry, DatabaseConnection, TableSchema, AuditLogEntry } from
 export const currentUser: User = {
   id: 'u1',
   name: 'Sahil Gangani',
-  email: 'user1@email.com',
+  email: 'sahilgangani@email.com',
   role: 'admin',
   avatarUrl: 'https://img.icons8.com/?size=100&id=fUUEbUbXhzOA&format=png&color=000000'
 };

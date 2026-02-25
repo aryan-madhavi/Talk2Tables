@@ -4,9 +4,9 @@ import { cn } from '../../../../lib/utils';
 
 // Mock user data — replace with real data / props when wiring up
 const MOCK_USERS = [
-  { id: 1, initials: 'SS', name: 'Sarah Sharma', email: 'user1@talk2tables.gov.in', role: 'Admin',  lastActive: '2 mins ago' },
-  { id: 2, initials: 'JD', name: 'John Doe',     email: 'user2@talk2tables.gov.in', role: 'User',   lastActive: '2 mins ago' },
-  { id: 3, initials: 'MK', name: 'Mukesh Kumar', email: 'user3@talk2tables.gov.in', role: 'User',   lastActive: '2 mins ago' },
+  { id: 1, initials: 'SG', name: 'Sahil Gangani', email: 'sahilgangani@email.com', role: 'Admin',  lastActive: '2 mins ago' },
+  { id: 2, initials: 'AM', name: 'Aryan Madhavi', email: 'aryanmadhavi@email.com', role: 'User',   lastActive: '2 mins ago' },
+  { id: 3, initials: 'SD', name: 'Sankalp Dawada',email: 'sankalpdawada@email.com', role: 'User',   lastActive: '2 mins ago' },
 ];
 
 export function UsersTab() {
