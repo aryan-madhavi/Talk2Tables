@@ -24,7 +24,7 @@ export function ChatHeader({ selectedDb, onSelectDb, currentResult }: ChatHeader
             <option key={db.id} value={db.id}>{db.name}</option>
           ))}
         </select>
-        <ChevronDown className="w-3 h-3 text-gray-400 pointer-events-none -ml-1" />
+        {/* <ChevronDown className="w-3 h-3 text-gray-400 pointer-events-none -ml-1" /> */}
       </div>
 
       <div className="text-xs text-gray-400">
