@@ -2,13 +2,12 @@
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-/** User profile as returned by GET /api/v1/auth/me (lives in Firestore) */
 export interface User {
   firebase_uid:   string;
   email:          string;
   display_name:   string | null;
   photo_url:      string | null;
-  role:           'admin' | 'db_manager' | 'power_user' | 'analyst';   /** RBAC role — set by admin, never overwritten on login */
+  role:           'admin' | 'db_manager' | 'power_user' | 'analyst';
   is_active:      boolean;
   email_verified: boolean;
   created_at?:    string;
@@ -40,12 +39,35 @@ export interface QueryEntry {
 
 // ── Database connections ──────────────────────────────────────────────────────
 
+/**
+ * Full connection shape — mirrors backend ConnectionOut.
+ * password / password_enc are NEVER present (stripped by backend).
+ *
+ * UI-only convenience fields (id, type, status) are derived by
+ * toUiConnection() in DatabasesTab and kept for backwards-compat.
+ */
 export interface DatabaseConnection {
-  id:     string;
-  name:   string;
-  host:   string;
-  type:   'PostgreSQL' | 'MySQL' | 'Oracle';
-  status: 'active' | 'inactive';
+  // ── Backend fields (ConnectionOut) ──
+  connection_id:  string;
+  name:           string;
+  db_type:        string;         // raw backend: 'postgresql' | 'mysql' | 'oracle' | 'sqlite'
+  host:           string;
+  port:           number;
+  database_name:  string;
+  username:       string;
+  ssl_enabled:    boolean;
+  is_active:      boolean;
+  description:    string | null;
+  created_by_uid: string;
+  created_at:     string;
+  updated_at:     string;
+  last_tested_at: string | null;
+  last_tested_ok: boolean | null;
+
+  // ── UI aliases (set by toUiConnection, kept for legacy components) ──
+  id:     string;                 // === connection_id
+  type:   string;                 // display label e.g. 'PostgreSQL'
+  status: 'active' | 'inactive'; // derived from is_active
 }
 
 // ── Schema browser ────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+// src/app/pages/AdminPanel/components/AddConnectionDialog.tsx
 import React, { useRef, useState } from 'react';
 import {
   Database, X, Eye, EyeOff, Loader2, Wifi,
@@ -13,7 +14,7 @@ import {
   DB_DEFAULTS,
   EMPTY_CONNECTION_FORM,
 } from '../types';
-import { Field } from '../../../components/shared/Field';
+import { Field }    from '../../../components/shared/Field';
 import { inputCls } from '../../../components/shared/inputCls';
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
@@ -21,14 +22,23 @@ import { inputCls } from '../../../components/shared/inputCls';
 interface AddConnectionDialogProps {
   open:         boolean;
   onClose:      () => void;
+  /** Called with validated form data — parent handles API call */
   onSave:       (data: ConnectionForm) => void;
   /** Pass an existing connection to open in edit/configure mode */
   initialData?: ConnectionForm;
+  /** True while parent is executing the API call — disables Save button */
+  saving?:      boolean;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 
-export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddConnectionDialogProps) {
+export function AddConnectionDialog({
+  open,
+  onClose,
+  onSave,
+  initialData,
+  saving = false,
+}: AddConnectionDialogProps) {
   const isEditMode = !!initialData;
 
   const [form, setForm]                 = useState<ConnectionForm>(initialData ?? EMPTY_CONNECTION_FORM);
@@ -36,18 +46,6 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
   const [testStatus, setTestStatus]     = useState<TestStatus>('idle');
   const [errors, setErrors]             = useState<ConnectionFormErrors>({});
   const fileInputRef                    = useRef<HTMLInputElement>(null);
-
-  // ── Reset / pre-fill state whenever dialog opens or initialData changes ───────
-
-  React.useEffect(() => {
-    if (open) {
-      setForm(initialData ?? EMPTY_CONNECTION_FORM);
-      setErrors({});
-      setTestStatus('idle');
-      setShowPassword(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [open, initialData]);
 
   if (!open) return null;
 
@@ -89,6 +87,8 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
       if (!form.database.trim()) e.database  = 'Database name is required';
       if (!form.host.trim())     e.host      = 'Host is required';
       if (!form.username.trim()) e.username  = 'Username is required';
+      // Password required only on create
+      if (!isEditMode && !form.password) e.password = 'Password is required';
     }
 
     setErrors(e);
@@ -97,10 +97,10 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
+  /** Test Connection — dummy UI, real endpoint wired later */
   const handleTest = () => {
     if (!validate()) return;
     setTestStatus('testing');
-    // TODO: replace setTimeout with real API call
     setTimeout(() => {
       setTestStatus(Math.random() > 0.3 ? 'success' : 'error');
     }, 1800);
@@ -109,9 +109,8 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
   const handleSave = () => {
     if (!validate()) return;
     onSave(form);
-    setForm(EMPTY_CONNECTION_FORM);
-    setTestStatus('idle');
-    onClose();
+    // NOTE: dialog stays open while parent awaits the API.
+    // Parent calls onClose() after success, or leaves it open on error.
   };
 
   const isSQLite = form.type === 'SQLite';
@@ -150,8 +149,9 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
             </div>
             <button
               onClick={onClose}
+              disabled={saving}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400
-                         hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                         hover:bg-gray-100 hover:text-gray-600 transition-colors disabled:opacity-40"
             >
               <X className="w-4 h-4" />
             </button>
@@ -222,7 +222,7 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
                 <Field label="Port">
                   <input
                     type="text"
-                    placeholder={DB_DEFAULTS[form.type].port}
+                    placeholder={DB_DEFAULTS[form.type]?.port ?? ''}
                     value={form.port}
                     onChange={e => setField('port', e.target.value)}
                     className={inputCls(false)}
@@ -231,7 +231,7 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
               </div>
             )}
 
-            {/* ── SQLite: Upload only ── */}
+            {/* SQLite: Upload only */}
             {isSQLite && (
               <Field label="Upload .db File" error={errors.database} required>
                 <input
@@ -242,7 +242,6 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
                   onChange={handleFileChange}
                 />
                 {!form.sqliteFile ? (
-                  /* Drop zone */
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className={cn(
@@ -267,7 +266,6 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
                     </div>
                   </button>
                 ) : (
-                  /* File selected — preview row */
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
                     <div className="w-9 h-9 rounded-lg bg-white border border-blue-200 shadow-sm
                                     flex items-center justify-center text-blue-600 shrink-0">
@@ -326,15 +324,15 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
                     className={inputCls(!!errors.username)}
                   />
                 </Field>
-                <Field label="Password">
+                <Field label={isEditMode ? 'New Password' : 'Password'} error={errors.password} required={!isEditMode}>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input
                       type={showPassword ? 'text' : 'password'}
-                      placeholder="••••••••"
+                      placeholder={isEditMode ? 'Leave blank to keep current' : '••••••••'}
                       value={form.password}
                       onChange={e => setField('password', e.target.value)}
-                      className={cn(inputCls(false), 'pl-8 pr-9')}
+                      className={cn(inputCls(!!errors.password), 'pl-8 pr-9')}
                     />
                     <button
                       type="button"
@@ -343,7 +341,7 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
                     >
                       {showPassword
                         ? <EyeOff className="w-3.5 h-3.5" />
-                        : <Eye   className="w-3.5 h-3.5" />}
+                        : <Eye    className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </Field>
@@ -399,13 +397,13 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
 
           {/* ── Footer ── */}
           <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t border-gray-100 gap-3">
-            {/* Test Connection */}
+            {/* Test Connection — dummy UI, real endpoint added later */}
             <button
               onClick={handleTest}
-              disabled={testStatus === 'testing'}
+              disabled={testStatus === 'testing' || saving}
               className={cn(
                 'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all',
-                testStatus === 'testing'
+                testStatus === 'testing' || saving
                   ? 'border-gray-200 text-gray-400 bg-white cursor-not-allowed'
                   : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-100 hover:border-gray-400',
               )}
@@ -419,16 +417,26 @@ export function AddConnectionDialog({ open, onClose, onSave, initialData }: AddC
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-200 transition-colors"
+                disabled={saving}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600
+                           hover:bg-gray-200 transition-colors disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
-                className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white
-                           hover:bg-blue-700 active:scale-95 transition-all shadow-sm"
+                disabled={saving}
+                className={cn(
+                  'px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm',
+                  saving
+                    ? 'bg-blue-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 active:scale-95',
+                )}
               >
-                {isEditMode ? 'Save Changes' : 'Save Connection'}
+                {saving
+                  ? <span className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>
+                  : isEditMode ? 'Save Changes' : 'Save Connection'
+                }
               </button>
             </div>
           </div>

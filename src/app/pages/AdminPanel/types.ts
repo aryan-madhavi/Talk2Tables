@@ -1,3 +1,5 @@
+// src/app/pages/AdminPanel/types.ts
+
 // ─── DB Types ─────────────────────────────────────────────────────────────────
 
 export type DbType = 'PostgreSQL' | 'MySQL' | 'Oracle' | 'SQLite';
@@ -46,19 +48,36 @@ export type ConnectionFormErrors = Partial<Record<keyof ConnectionForm, string>>
 
 // ─── Mapper: DatabaseConnection → ConnectionForm ───────────────────────────────
 // Used when opening the dialog in "edit / configure" mode from an existing DB card.
+// DatabaseConnection now carries the full backend shape (connection_id, database_name,
+// username, port, ssl_enabled) so we pre-fill all fields instead of leaving them blank.
 
 import { DatabaseConnection } from '../../types';
 
+/** Map backend db_type (lowercase) → form DbType (display label) */
+const BACKEND_TYPE_TO_FORM: Record<string, DbType> = {
+  postgresql: 'PostgreSQL',
+  mysql:      'MySQL',
+  oracle:     'Oracle',
+  sqlite:     'SQLite',
+};
+
 export function dbConnectionToForm(db: DatabaseConnection): ConnectionForm {
+  // db.type is already the display label ('PostgreSQL') set by toUiConnection()
+  // db.db_type is the raw backend value ('postgresql') — prefer display label
+  const formType: DbType =
+    (DB_DEFAULTS[db.type as DbType] ? db.type as DbType : null) ??
+    BACKEND_TYPE_TO_FORM[db.db_type] ??
+    'PostgreSQL';
+
   return {
     name:       db.name,
-    type:       db.type as DbType,
+    type:       formType,
     host:       db.host,
-    port:       DB_DEFAULTS[db.type as DbType]?.port ?? '',
-    database:   '',          // not stored in DatabaseConnection — user fills if needed
-    username:   '',          // same — not stored, user fills
-    password:   '',
-    ssl:        false,
+    port:       String(db.port) || DB_DEFAULTS[formType]?.port || '',
+    database:   db.database_name,   // ✅ pre-filled from backend
+    username:   db.username,        // ✅ pre-filled from backend
+    password:   '',                 // never returned by API — user types new one if changing
+    ssl:        db.ssl_enabled,     // ✅ pre-filled from backend
     sqliteFile: null,
   };
 }
