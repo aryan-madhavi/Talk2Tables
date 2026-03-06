@@ -54,3 +54,9 @@ httpx==0.27.2                  # Test client for FastAPI
 # ── Dev Tools ─────────────────────────────────────────────────
 # ruff==0.6.9                  # Linter (optional)
 # black==24.10.0               # Formatter (optional)
+
+# ── Firebase — Service Account + Firestore ───────────────────
+firebase-admin==6.5.0
+# firebase-admin includes:
+#   google-cloud-firestore  — Firestore client
+#   firebase-admin auth     — verify_id_token, create_custom_token, revoke_refresh_tokens

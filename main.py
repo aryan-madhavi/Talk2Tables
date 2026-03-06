@@ -1,24 +1,12 @@
 """
 Talk2Tables — FastAPI Application Entry Point
-==============================================
-Bootstraps the FastAPI app with:
-  - CORS middleware         (React frontend on port 3000/5173)
-  - JWT Auth middleware
-  - Route registration      (query, auth, admin, schema_docs)
-  - Database startup checks
-  - LangGraph agent warmup
-  - UX4G-compliant error responses
+=============================================
+Storage: Firebase Auth + Firestore (NO PostgreSQL, no SQLAlchemy)
+Auth:    Firebase Service Account (verify_id_token + create_custom_token)
 
-Run (development):
-    uvicorn main:app --reload --port 8000
-
-Run (production via Docker):
-    uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
-
-Author  : Member 1 (Backend Lead)
-Project : Talk2Tables — Diploma Final Year Project
+Run (dev):        uvicorn main:app --reload --port 8000
+Run (production): uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 """
-
 from __future__ import annotations
 
 import logging
@@ -26,70 +14,70 @@ import os
 import time
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
 
-# ── Load .env before anything else ───────────────────────────────────────────
+# Load .env before any module that reads settings
 load_dotenv()
 
-# ── Internal imports ──────────────────────────────────────────────────────────
-from ai_agent import get_agent               # Pre-warms the LangGraph agent
-from ai_agent.routes_query import router as query_router
+from auth import auth_router
+from auth.core.config import settings
+from auth.core.firebase import get_firebase_app, get_firestore_client
 
-# ---------------------------------------------------------------------------
-# Logging setup
-# ---------------------------------------------------------------------------
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    level   = os.getenv("LOG_LEVEL", "INFO").upper(),
+    level   = settings.log_level.upper(),
     format  = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt = "%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("talk2tables")
 
-# ---------------------------------------------------------------------------
-# Lifespan — startup & shutdown events
-# ---------------------------------------------------------------------------
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Runs startup tasks before the server accepts requests,
-    and cleanup tasks on shutdown.
-    """
-    # ── STARTUP ───────────────────────────────────────────────────────────
     logger.info("=" * 60)
-    logger.info("  Talk2Tables Backend — Starting up")
+    logger.info("  Talk2Tables — Starting up")
     logger.info("=" * 60)
 
-    # 1. Pre-compile the LangGraph agent (avoids cold-start on first request)
+    # 1. Initialise Firebase Admin SDK (validates Service Account credentials)
     try:
-        agent = get_agent()
-        logger.info("✅  LangGraph SQL Agent compiled and ready.")
+        get_firebase_app()
+        logger.info("✅  Firebase Admin SDK ready (Service Account loaded)")
     except Exception as exc:
-        logger.error(f"❌  LangGraph agent failed to compile: {exc}")
-        # Don't crash on startup — agent errors surface per-request
+        logger.error(f"❌  Firebase Admin SDK failed: {exc}")
+        raise   # Fatal — cannot run without Service Account
 
-    # 2. Log active LLM provider priority
-    llm_provider = os.getenv("LLM_PROVIDER", "auto (openrouter → groq → gemini → ollama)")
-    logger.info(f"✅  LLM Provider preference: {llm_provider}")
+    # 2. Ping Firestore to confirm connectivity
+    try:
+        get_firestore_client()
+        logger.info("✅  Firestore client ready")
+    except Exception as exc:
+        logger.error(f"❌  Firestore client failed: {exc}")
+        raise   # Fatal — all user/session data is in Firestore
 
-    # 3. Log environment
-    debug_mode = os.getenv("DEBUG", "false").lower() == "true"
-    logger.info(f"✅  Debug mode: {debug_mode}")
-    logger.info(f"✅  Docs available at: http://localhost:8000/docs")
+    # 3. Optional: pre-compile the LangGraph agent
+    try:
+        from ai_agent import get_agent  # type: ignore
+        get_agent()
+        logger.info("✅  LangGraph SQL Agent compiled and ready")
+    except ImportError:
+        logger.info("ℹ️   ai_agent module not found — skipping")
+    except Exception as exc:
+        logger.warning(f"⚠️   LangGraph agent warmup failed (non-fatal): {exc}")
+
+    logger.info(f"✅  Swagger UI: http://localhost:8000/docs")
     logger.info("=" * 60)
 
-    yield  # Server is now running and accepting requests
+    yield
 
-    # ── SHUTDOWN ──────────────────────────────────────────────────────────
-    logger.info("Talk2Tables Backend — Shutting down gracefully.")
+    logger.info("Talk2Tables — Shutting down gracefully.")
 
 
-# ---------------------------------------------------------------------------
-# FastAPI App Instance
-# ---------------------------------------------------------------------------
+# ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title       = "Talk2Tables API",
@@ -98,22 +86,15 @@ app = FastAPI(
         "Built with FastAPI + LangGraph. UX4G compliant. "
         "Diploma Final Year Project — Mumbai, 2025-26."
     ),
-    version     = "2.0.0",
-    docs_url    = "/docs",          # Swagger UI
-    redoc_url   = "/redoc",         # ReDoc UI
-    lifespan    = lifespan,
+    version  = "2.0.0",
+    docs_url = "/docs",
+    redoc_url= "/redoc",
+    lifespan = lifespan,
 )
 
-# ---------------------------------------------------------------------------
-# CORS Middleware — Allow React dev server and production frontend
-# ---------------------------------------------------------------------------
+# ── CORS ──────────────────────────────────────────────────────────────────────
 
-_cors_origins_raw = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:3000,http://localhost:5173"  # Vite + CRA defaults
-)
-_cors_origins = [origin.strip() for origin in _cors_origins_raw.split(",")]
-
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins     = _cors_origins,
@@ -122,80 +103,39 @@ app.add_middleware(
     allow_headers     = ["Authorization", "Content-Type", "X-Request-ID"],
 )
 
-logger.info(f"CORS enabled for: {_cors_origins}")
-
-# ---------------------------------------------------------------------------
-# Request Timing Middleware — adds X-Response-Time header (useful for perf)
-# ---------------------------------------------------------------------------
+# ── Timing middleware ──────────────────────────────────────────────────────────
 
 @app.middleware("http")
-async def add_response_time_header(request: Request, call_next):
-    t_start  = time.perf_counter()
+async def add_response_time(request: Request, call_next):
+    t0       = time.perf_counter()
     response = await call_next(request)
-    elapsed  = (time.perf_counter() - t_start) * 1000
-    response.headers["X-Response-Time"] = f"{elapsed:.0f}ms"
+    response.headers["X-Response-Time"] = f"{(time.perf_counter()-t0)*1000:.0f}ms"
     return response
 
-# ---------------------------------------------------------------------------
-# Global Exception Handler — UX4G-aligned error format
-# ---------------------------------------------------------------------------
+# ── Global error handler ──────────────────────────────────────────────────────
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Catch-all handler. Returns a consistent JSON error shape so the
-    React frontend can display a UX4G-compliant error alert.
-    """
     logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
     return JSONResponse(
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content     = {
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
             "error":   "Internal Server Error",
-            "message": "An unexpected error occurred. Please try again or contact support.",
+            "message": "An unexpected error occurred.",
             "path":    str(request.url),
         },
     )
 
-# ---------------------------------------------------------------------------
-# Route Registration
-# ---------------------------------------------------------------------------
+# ── Routes ────────────────────────────────────────────────────────────────────
 
-# Core NL2SQL query endpoints (the AI agent)
-app.include_router(query_router)
+app.include_router(auth_router)   # /api/v1/auth/*
 
-# TODO (Member 1 + Member 3): Add these routers as you build them:
-# from api.routes.auth        import router as auth_router
-# from api.routes.admin       import router as admin_router
-# from api.routes.schema_docs import router as schema_docs_router
-# from api.routes.connections import router as connections_router
-#
-# app.include_router(auth_router)         # /api/auth/login, /register, /refresh
-# app.include_router(admin_router)        # /api/admin/users
-# app.include_router(schema_docs_router)  # /api/schema-docs/upload
-# app.include_router(connections_router)  # /api/connections CRUD
-
-# ---------------------------------------------------------------------------
-# Health Check — used by Docker Compose and load balancers
-# ---------------------------------------------------------------------------
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["system"])
-async def health_check():
-    """
-    Lightweight liveness probe.
-    Docker Compose healthcheck and Kubernetes readiness probe call this.
-    """
-    return {
-        "status":  "ok",
-        "service": "talk2tables-backend",
-        "version": "2.0.0",
-    }
-
+async def health():
+    return {"status": "ok", "service": "talk2tables-backend", "version": "2.0.0"}
 
 @app.get("/", tags=["system"])
 async def root():
-    """API root — confirms the server is running."""
-    return {
-        "message": "Talk2Tables API is running. Visit /docs for the Swagger UI.",
-        "docs":    "/docs",
-        "health":  "/health",
-    }
+    return {"message": "Talk2Tables API running. See /docs", "docs": "/docs"}
