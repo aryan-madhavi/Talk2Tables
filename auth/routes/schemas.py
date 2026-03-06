@@ -85,13 +85,13 @@ class TokenActiveResponse(BaseModel):
 
 
 class MeResponse(BaseModel):
-    id: str
-    email: str
-    display_name: Optional[str]
-    photo_url: Optional[str]
-    role: str
+    firebase_uid:   str
+    email:          str
+    display_name:   Optional[str] = None
+    photo_url:      Optional[str] = None
+    role:           str
     email_verified: bool
-    is_active: bool
+    is_active:      bool
 
 
 class SessionOut(BaseModel):

@@ -361,17 +361,26 @@ def fs_create_session(
 
 
 def fs_get_active_sessions(firebase_uid: str) -> list[dict]:
-    """Return all non-revoked sessions for this user."""
+    """
+    Return all non-revoked sessions for this user, sorted newest first.
+
+    NOTE: We filter only on is_revoked (single-field, no composite index needed)
+    and sort in Python. Firestore requires a composite index if you both
+    .where() on one field and .order_by() on a different field — avoiding
+    that requirement keeps setup zero-config.
+    """
     db = get_firestore_client()
     docs = (
         db.collection(settings.firestore_users_collection)
           .document(firebase_uid)
           .collection(settings.firestore_sessions_collection)
-          .where("is_revoked", "==", False)
-          .order_by("created_at", direction=firestore.Query.DESCENDING)
+          .where(filter=firestore.FieldFilter("is_revoked", "==", False))
           .stream()
     )
-    return [d.to_dict() for d in docs]
+    sessions = [d.to_dict() for d in docs]
+    # Sort newest first in Python — no composite index required
+    sessions.sort(key=lambda s: s.get("created_at", ""), reverse=True)
+    return sessions
 
 
 def fs_get_latest_active_session(firebase_uid: str) -> Optional[dict]:
