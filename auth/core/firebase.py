@@ -183,7 +183,7 @@ def create_custom_token(uid: str, additional_claims: Optional[dict] = None) -> s
     Args:
         uid:               Firebase user UID.
         additional_claims: Extra claims embedded in the token.
-                           We use {"role": "viewer", "db_user_id": "..."}.
+                           We use {"role": "analyst", "db_user_id": "..."}.
                            Max 1000 bytes total.
 
     Returns:
@@ -281,7 +281,7 @@ def fs_upsert_user(
 ) -> dict:
     """
     Create or update a user document in Firestore.
-    Role is NEVER changed here — only set to 'viewer' on first creation.
+    Role is NEVER changed here — only set to 'analyst' on first creation.
     Returns the final user document dict.
     """
     db  = get_firestore_client()
@@ -299,7 +299,7 @@ def fs_upsert_user(
             "photo_url":        photo_url or "",
             "email_verified":   email_verified,
             "sign_in_provider": sign_in_provider,
-            "role":             "viewer",   # default RBAC role
+            "role":             "analyst",  # default RBAC role — change via admin panel
             "is_active":        True,
             "created_at":       now,
             "last_login_at":    now,
