@@ -1,0 +1,203 @@
+# connections/routes/connection_routes.py
+"""
+Database Connection endpoints.
+
+All routes require at minimum db_manager role (admin + db_manager).
+DELETE requires admin only.
+
+Endpoints:
+    POST   /api/v1/connections            — create connection
+    GET    /api/v1/connections            — list all connections
+    GET    /api/v1/connections/{id}       — get single connection
+    PATCH  /api/v1/connections/{id}       — update connection
+    DELETE /api/v1/connections/{id}       — hard delete (admin only)
+    PATCH  /api/v1/connections/{id}/activate    — enable connection
+    PATCH  /api/v1/connections/{id}/deactivate  — disable connection
+"""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from auth.routes.dependencies import require_db_manager, require_admin
+from connections.routes.schemas import (
+    CreateConnectionRequest,
+    UpdateConnectionRequest,
+    ConnectionOut,
+    ConnectionListResponse,
+    MessageResponse,
+)
+from connections.services.connection_service import (
+    create_connection,
+    get_connection_by_id,
+    list_connections,
+    update_connection,
+    delete_connection,
+    set_connection_active,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/api/v1/connections",
+    tags=["Database Connections"],
+)
+
+
+# ── POST /api/v1/connections ──────────────────────────────────────────────────
+
+@router.post(
+    "",
+    response_model=ConnectionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new database connection",
+    description=(
+        "Register a new database connection. "
+        "The password is encrypted with AES-256-GCM before storage. "
+        "Requires db_manager or admin role."
+    ),
+)
+async def create_connection_route(
+    body: CreateConnectionRequest,
+    current_user: dict = Depends(require_db_manager),
+):
+    logger.info(
+        f"[POST /connections] name={body.name} db_type={body.db_type} "
+        f"by={current_user['firebase_uid']}"
+    )
+    connection = await create_connection(body, created_by_uid=current_user["firebase_uid"])
+    return connection
+
+
+# ── GET /api/v1/connections ───────────────────────────────────────────────────
+
+@router.get(
+    "",
+    response_model=ConnectionListResponse,
+    summary="List all database connections",
+    description=(
+        "Returns all connections (active + inactive). "
+        "Password is never included in any response. "
+        "Requires db_manager or admin role."
+    ),
+)
+async def list_connections_route(
+    active_only: bool = False,
+    current_user: dict = Depends(require_db_manager),
+):
+    connections = await list_connections(active_only=active_only)
+    return ConnectionListResponse(connections=connections, total=len(connections))
+
+
+# ── GET /api/v1/connections/{id} ──────────────────────────────────────────────
+
+@router.get(
+    "/{connection_id}",
+    response_model=ConnectionOut,
+    summary="Get a single database connection",
+)
+async def get_connection_route(
+    connection_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    connection = await get_connection_by_id(connection_id)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection '{connection_id}' not found.",
+        )
+    return connection
+
+
+# ── PATCH /api/v1/connections/{id} ────────────────────────────────────────────
+
+@router.patch(
+    "/{connection_id}",
+    response_model=ConnectionOut,
+    summary="Update a database connection",
+    description=(
+        "Partial update — only provided fields are changed. "
+        "If password is provided it is re-encrypted automatically."
+    ),
+)
+async def update_connection_route(
+    connection_id: str,
+    body: UpdateConnectionRequest,
+    current_user: dict = Depends(require_db_manager),
+):
+    logger.info(f"[PATCH /connections/{connection_id}] by={current_user['firebase_uid']}")
+    connection = await update_connection(connection_id, body)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection '{connection_id}' not found.",
+        )
+    return connection
+
+
+# ── DELETE /api/v1/connections/{id} ───────────────────────────────────────────
+
+@router.delete(
+    "/{connection_id}",
+    response_model=MessageResponse,
+    summary="Hard-delete a connection (admin only)",
+    description=(
+        "Permanently deletes the connection document. "
+        "Consider using /deactivate instead to preserve audit history. "
+        "Admin only."
+    ),
+)
+async def delete_connection_route(
+    connection_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    logger.info(f"[DELETE /connections/{connection_id}] by={current_user['firebase_uid']}")
+    deleted = await delete_connection(connection_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection '{connection_id}' not found.",
+        )
+    return MessageResponse(message=f"Connection '{connection_id}' permanently deleted.")
+
+
+# ── PATCH /api/v1/connections/{id}/activate ───────────────────────────────────
+
+@router.patch(
+    "/{connection_id}/activate",
+    response_model=ConnectionOut,
+    summary="Enable a disabled connection",
+)
+async def activate_connection_route(
+    connection_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    connection = await set_connection_active(connection_id, is_active=True)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection '{connection_id}' not found.",
+        )
+    return connection
+
+
+# ── PATCH /api/v1/connections/{id}/deactivate ─────────────────────────────────
+
+@router.patch(
+    "/{connection_id}/deactivate",
+    response_model=ConnectionOut,
+    summary="Disable a connection without deleting it",
+    description="Users with access to this DB will get 403 until it is re-activated.",
+)
+async def deactivate_connection_route(
+    connection_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    connection = await set_connection_active(connection_id, is_active=False)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Connection '{connection_id}' not found.",
+        )
+    return connection

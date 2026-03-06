@@ -25,6 +25,7 @@ load_dotenv()
 from auth import auth_router
 from auth.core.config import settings
 from auth.core.firebase import get_firebase_app, get_firestore_client
+from connections import connections_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -92,15 +93,15 @@ app = FastAPI(
     lifespan = lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# ──     ──────────────────────────────────────────────────────────────────────
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins     = _cors_origins,
     allow_credentials = True,
-    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers     = ["Authorization", "Content-Type", "X-Request-ID"],
+    allow_methods     = ["*"],
+    allow_headers     = ["*"],
 )
 
 # ── Timing middleware ──────────────────────────────────────────────────────────
@@ -128,7 +129,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-app.include_router(auth_router)   # /api/v1/auth/*
+app.include_router(auth_router)         # /api/v1/auth/*
+app.include_router(connections_router)  # /api/v1/connections/*
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
