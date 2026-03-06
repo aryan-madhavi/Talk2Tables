@@ -26,6 +26,8 @@ from auth import auth_router
 from auth.core.config import settings
 from auth.core.firebase import get_firebase_app, get_firestore_client
 from connections import connections_router
+from users import users_router
+from access import access_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -131,6 +133,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.include_router(auth_router)         # /api/v1/auth/*
 app.include_router(connections_router)  # /api/v1/connections/*
+app.include_router(users_router)        # /api/v1/users/*
+app.include_router(access_router)       # /api/v1/access-grants/*
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
