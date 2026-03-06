@@ -8,8 +8,7 @@ export interface User {
   email:          string;
   display_name:   string | null;
   photo_url:      string | null;
-  /** RBAC role — set by admin, never overwritten on login */
-  role:           'admin' | 'power_user' | 'viewer';
+  role:           'admin' | 'db_manager' | 'power_user' | 'analyst';   /** RBAC role — set by admin, never overwritten on login */
   is_active:      boolean;
   email_verified: boolean;
   created_at?:    string;

@@ -50,7 +50,7 @@ export const router = createBrowserRouter([
       {
         path: 'admin',
         element: (
-          <ProtectedRoute requiredRole="admin">
+          <ProtectedRoute requiredRole="db_manager">
             <AdminPanel />
           </ProtectedRoute>
         ),

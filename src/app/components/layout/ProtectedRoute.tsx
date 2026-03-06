@@ -17,14 +17,15 @@ import { MessageSquare } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 
 const ROLE_LEVEL: Record<string, number> = {
-  viewer:     0,
+  analyst:    0,
   power_user: 1,
-  admin:      2,
+  db_manager: 2,
+  admin:      3,
 };
 
 interface ProtectedRouteProps {
   children:      React.ReactNode;
-  requiredRole?: 'admin' | 'power_user' | 'viewer';
+  requiredRole?: 'admin' | 'db_manager' | 'power_user' | 'analyst';
 }
 
 export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {

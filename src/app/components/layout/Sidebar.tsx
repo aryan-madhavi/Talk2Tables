@@ -17,7 +17,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
   const location          = useLocation();
   const navigate          = useNavigate();
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isDbManager } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
 
   // Build nav — Admin tab only visible to admins
@@ -26,17 +26,17 @@ export function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     { icon: MessageSquare,label: 'Query',    path: '/query'   },
     { icon: History,      label: 'History',  path: '/history' },
     { icon: Database,     label: 'Schema',   path: '/schema'  },
-    ...(isAdmin ? [{ icon: Shield, label: 'Admin', path: '/admin' }] : []),
+    ...(isDbManager ? [{ icon: Shield, label: 'Admin', path: '/admin' }] : []),
     { icon: Settings,     label: 'Settings', path: '/settings'},
   ];
 
   // Derive display values from real user
   const displayName  = user?.display_name || user?.email?.split('@')[0] || 'User';
-  const displayRole  = user?.role === 'admin'
-    ? 'Administrator'
-    : user?.role === 'power_user'
-    ? 'Power User'
-    : 'Viewer';
+  const displayRole  =
+    user?.role === 'admin'      ? 'Administrator' :
+    user?.role === 'db_manager' ? 'DB Manager'    :
+    user?.role === 'power_user' ? 'Power User'    :
+                                  'Analyst';
   const avatarLetter = displayName.charAt(0).toUpperCase();
   const photoUrl     = user?.photo_url || null;
 

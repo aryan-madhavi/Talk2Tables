@@ -47,8 +47,10 @@ interface AuthContextValue {
   login:       (email: string, password: string) => Promise<void>;
   logout:      () => Promise<void>;
   clearError:  () => void;
-  isAdmin:     boolean;
-  isPowerUser: boolean;
+  isAdmin:     boolean;   // role === 'admin'
+  isDbManager: boolean;   // role === 'admin' | 'db_manager'
+  isPowerUser: boolean;   // role === 'admin' | 'db_manager' | 'power_user'
+  isAnalyst:   boolean;   // any authenticated user
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -136,7 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       clearError,
       isAdmin:     user?.role === 'admin',
-      isPowerUser: user?.role === 'admin' || user?.role === 'power_user',
+      isDbManager: user?.role === 'admin' || user?.role === 'db_manager',
+      isPowerUser: user?.role === 'admin' || user?.role === 'db_manager' || user?.role === 'power_user',
+      isAnalyst:   !!user,
     }}>
       {children}
     </AuthContext.Provider>

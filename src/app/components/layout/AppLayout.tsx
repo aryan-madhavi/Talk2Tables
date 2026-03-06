@@ -1,26 +1,35 @@
 // src/app/components/layout/AppLayout.tsx
 
 import React, { useState } from 'react';
-import { Outlet, useLocation } from 'react-router';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { Sidebar }   from './Sidebar';
 import { MobileNav } from './MobileNav';
 import { cn }        from '../../../lib/utils';
 import { useAuth }   from '../../../context/AuthContext';
+import { LogOut, MessageSquare } from 'lucide-react';
 
 export function AppLayout() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed]   = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const location = useLocation();
-  const { user }  = useAuth();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
-  // Login page renders without layout
-  if (location.pathname === '/login') {
-    return <Outlet />;
-  }
+  if (location.pathname === '/login') return <Outlet />;
 
-  // Derive avatar for mobile header
   const displayName  = user?.display_name || user?.email?.split('@')[0] || 'User';
   const avatarLetter = displayName.charAt(0).toUpperCase();
   const photoUrl     = user?.photo_url || null;
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans overflow-hidden">
@@ -35,25 +44,44 @@ export function AppLayout() {
 
       {/* ── Mobile Header ───────────────────────────────────────────────── */}
       <header className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-30 h-14 flex items-center px-4 justify-between">
+
+        {/* Logo */}
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-blue-700 rounded-lg flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-lg">T2</span>
+            <MessageSquare className="w-4 h-4 text-white" />
           </div>
-          <span className="font-bold text-lg text-gray-900">Talk2Tables</span>
+          <span className="font-bold text-base text-gray-900">Talk2Tables</span>
         </div>
 
-        {/* Real user avatar */}
-        {photoUrl ? (
-          <img
-            src={photoUrl}
-            alt={displayName}
-            className="w-8 h-8 rounded-full object-cover shrink-0"
-          />
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center shrink-0">
-            <span className="text-white text-xs font-bold">{avatarLetter}</span>
-          </div>
-        )}
+        {/* Right: avatar + logout */}
+        <div className="flex items-center gap-2">
+
+          {/* Avatar */}
+          {photoUrl ? (
+            <img
+              src={photoUrl}
+              alt={displayName}
+              className="w-8 h-8 rounded-full object-cover border-2 border-gray-100"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center shrink-0">
+              <span className="text-white text-xs font-bold">{avatarLetter}</span>
+            </div>
+          )}
+
+          {/* Logout icon button */}
+          <button
+            onClick={handleLogout}
+            disabled={loggingOut}
+            title="Sign out"
+            className="flex items-center justify-center w-8 h-8 rounded-lg
+                       text-gray-500 hover:text-red-600 hover:bg-red-50
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <LogOut className={cn('w-4 h-4', loggingOut && 'animate-spin')} />
+          </button>
+
+        </div>
       </header>
 
       {/* ── Main Content ────────────────────────────────────────────────── */}
@@ -68,7 +96,7 @@ export function AppLayout() {
         </div>
       </main>
 
-      {/* ── Mobile Navigation ────────────────────────────────────────────── */}
+      {/* ── Mobile Bottom Nav ────────────────────────────────────────────── */}
       <MobileNav />
 
     </div>
