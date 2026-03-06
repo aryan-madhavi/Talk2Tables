@@ -9,13 +9,24 @@ import { ResultActionBar } from './ResultActionBar';
 
 interface ResultPanelProps {
   result: QueryResult | null;
+  chartType: 'bar' | 'pie';                      // New
+  setChartType: (type: 'bar' | 'pie') => void;   // New
+  onCopy: (text: string) => void;                // New
+  onDownload: () => void;
 }
 
-export function ResultPanel({ result }: ResultPanelProps) {
+// ResultPanel.tsx
+
+export function ResultPanel({ 
+  result, 
+  chartType, 
+  setChartType, 
+  onCopy, 
+  onDownload,
+}: ResultPanelProps) { // <--- Added destructuring here
   const [activeTab, setActiveTab] = useState<ResultTab>('table');
 
   // ── Empty state ───────────────────────────────────────────────────────────────
-
   if (!result) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
@@ -31,18 +42,28 @@ export function ResultPanel({ result }: ResultPanelProps) {
   }
 
   // ── Result state ──────────────────────────────────────────────────────────────
-
   return (
     <>
       <ResultTabs active={activeTab} onChange={setActiveTab} />
 
       <div className="flex-1 overflow-auto p-4 bg-white relative">
         {activeTab === 'table' && <ResultTable result={result} />}
-        {activeTab === 'sql'   && <ResultSQL   result={result} />}
-        {activeTab === 'chart' && <ResultChart result={result} />}
+        
+        {/* SQL view now behaves like a Terminal */}
+        {activeTab === 'sql'   && <ResultSQL result={result} onCopy={onCopy} />}
+        
+        {/* Chart view now has the Bar/Pie toggle */}
+        {activeTab === 'chart' && (
+          <ResultChart 
+            result={result} 
+            chartType={chartType} 
+            setChartType={setChartType} 
+          />
+        )}
       </div>
 
-      <ResultActionBar />
+      {/* Action bar handles the CSV and JSON downloads */}
+      <ResultActionBar onDownload={onDownload} result={result} onCopy={onCopy} />
     </>
   );
 }

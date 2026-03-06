@@ -18,7 +18,11 @@ export default function QueryInterface() {
     messagesEndRef,
     handleSend,
     handleKeyDown,
-  } = useQueryExecution();
+    chartType,
+    setChartType,
+    copyToClipboard,
+    downloadCSV
+  } = useQueryExecution(selectedDb);
 
   return (
     <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row">
@@ -45,7 +49,12 @@ export default function QueryInterface() {
 
       {/* ── Right: Result Panel ── */}
       <div className="flex flex-col h-full w-full md:w-[40%] bg-white border-l border-gray-100">
-        <ResultPanel result={currentResult} />
+        <ResultPanel 
+          result={currentResult} 
+          chartType={chartType}
+          setChartType={setChartType}
+          onCopy={copyToClipboard}
+          onDownload={downloadCSV} />
       </div>
 
     </div>

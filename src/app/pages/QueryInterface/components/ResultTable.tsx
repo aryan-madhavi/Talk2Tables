@@ -1,40 +1,33 @@
 import React from 'react';
 import { QueryResult } from '../types';
 
-interface ResultTableProps {
-  result: QueryResult;
-}
+export function ResultTable({ result }: { result: QueryResult }) {
+  if (!result.data || result.data.length === 0) return <div>No data found.</div>;
 
-export function ResultTable({ result }: ResultTableProps) {
   return (
-    <div className="animate-in fade-in duration-300">
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table className="w-full text-sm text-left text-gray-500">
-          <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-            <tr>
-              {result.columns.map(col => (
-                <th key={col} className="px-6 py-3 font-medium whitespace-nowrap">
-                  {col}
-                </th>
+    <div className="overflow-x-auto border rounded-lg">
+      <table className="min-w-full divide-y divide-gray-200 text-sm text-left">
+        <thead className="bg-gray-50">
+          <tr>
+            {result.columns.map((col) => (
+              <th key={col} className="px-4 py-3 font-semibold text-gray-900 uppercase tracking-wider">
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200 bg-white">
+          {result.data.map((row, i) => (
+            <tr key={i} className="hover:bg-gray-50 transition-colors">
+              {result.columns.map((col) => (
+                <td key={col} className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                  {String(row[col])}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {result.data.map((row, i) => (
-              <tr key={i} className="bg-white border-b hover:bg-gray-50">
-                {result.columns.map(col => (
-                  <td key={`${i}-${col}`} className="px-6 py-4 whitespace-nowrap text-gray-900">
-                    {String(row[col] ?? '')}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-4 text-xs text-gray-500 text-right">
-        Showing 1–{result.rowCount} of {result.rowCount} results
-      </div>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
