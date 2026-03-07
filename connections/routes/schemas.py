@@ -136,3 +136,8 @@ class ConnectionListResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class TestConnectionResponse(BaseModel):
+    ok:      bool
+    message: str

@@ -245,6 +245,81 @@ async def delete_connection(connection_id: str) -> bool:
     return True
 
 
+# ── Test Connection ───────────────────────────────────────────────────────────
+
+def _build_connection_url(conn: dict) -> str:
+    """Build a SQLAlchemy URL from a connection doc (with decrypted password)."""
+    db_type  = conn["db_type"].lower()
+    host     = conn["host"]
+    port     = conn["port"]
+    database = conn["database_name"]
+    user     = conn["username"]
+    password = conn["password"]
+
+    _DRIVER_MAP = {
+        "mysql":      f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
+        "mariadb":    f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
+        "postgresql": f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        "postgres":   f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        "sqlite":     f"sqlite:///{database}",
+        "mssql":      f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server",
+        "oracle":     f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}",
+    }
+    url = _DRIVER_MAP.get(db_type)
+    if not url:
+        raise ValueError(f"Unsupported db_type '{db_type}'.")
+    return url
+
+
+async def test_connection(connection_id: str) -> dict:
+    """
+    Try to open a live connection to the target database.
+    Updates last_tested_at and last_tested_ok in Firestore regardless of outcome.
+    Returns { ok: bool, message: str }.
+    NOT cached — always live test.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, text
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn = await get_connection_with_password(connection_id)
+    if not conn:
+        return {"ok": False, "message": f"Connection '{connection_id}' not found."}
+
+    try:
+        url = _build_connection_url(conn)
+    except ValueError as exc:
+        return {"ok": False, "message": str(exc)}
+
+    ok      = False
+    message = ""
+    try:
+        # Run blocking SQLAlchemy call in a thread so we don't block the event loop
+        def _ping():
+            engine = create_engine(url, connect_args={"connect_timeout": 10}, pool_pre_ping=True)
+            with engine.connect() as cx:
+                cx.execute(text("SELECT 1"))
+            engine.dispose()
+
+        await asyncio.get_event_loop().run_in_executor(None, _ping)
+        ok      = True
+        message = "Connection successful."
+        logger.info(f"[Connections] Test OK | id={connection_id}")
+    except Exception as exc:
+        message = str(exc).split("\n")[0]  # first line only — avoid giant stacktraces
+        logger.warning(f"[Connections] Test FAILED | id={connection_id} | {message}")
+
+    # Persist result
+    db  = get_firestore_client()
+    ref = db.collection(COLLECTION).document(connection_id)
+    ref.update({"last_tested_at": now, "last_tested_ok": ok, "updated_at": now})
+    await _invalidate_connection_cache(connection_id)
+
+    return {"ok": ok, "message": message}
+
+
 # ── Activate / Deactivate ─────────────────────────────────────────────────────
 
 async def set_connection_active(connection_id: str, is_active: bool) -> Optional[dict]:

@@ -16,12 +16,42 @@ Expected agent output format (from prompts.py):
 """
 from __future__ import annotations
 
+import asyncio
+import datetime
+import decimal
 import json
 import logging
 import re
+from typing import Any
 
 from ai_agent.config import agent_config
 from ai_agent.state import AgentState
+
+_MAX_ROWS = 10_000
+
+
+def _serialize(value: Any) -> Any:
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
+    """Re-execute SQL synchronously; called via run_in_executor."""
+    from sqlalchemy import create_engine, text as sa_text
+    engine = create_engine(connection_string, pool_pre_ping=True, echo=False)
+    try:
+        with engine.connect() as cx:
+            result  = cx.execute(sa_text(sql))
+            columns = list(result.keys())
+            rows    = result.fetchmany(_MAX_ROWS)
+        return [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
+    finally:
+        engine.dispose()
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +107,29 @@ async def node_output_parser(state: AgentState) -> AgentState:
         if missing:
             raise ValueError(f"Missing required fields: {missing}")
 
-        # Ensure numerical_insights has at least total_records
+        # Re-execute SQL for full data — the tool only sent a 5-row preview to
+        # the LLM to avoid token limit errors. We now fetch the complete result set.
+        sql      = (parsed.get("sql_query") or "").strip()
+        conn_str = state.get("db_connection_string")
+        if sql and conn_str and sql.upper().split()[0] in {"SELECT", "WITH"}:
+            try:
+                full_data = await asyncio.get_event_loop().run_in_executor(
+                    None, _fetch_full_data, conn_str, sql
+                )
+                parsed["data"] = full_data
+                logger.info(f"[node_output_parser] Full data fetched | rows={len(full_data)}")
+            except Exception as exc:
+                logger.warning(f"[node_output_parser] Full data re-fetch failed: {exc}")
+                # Fall back to whatever preview the LLM put in data
+
+        # Always derive total_records from the actual data array length.
+        actual_count = len(parsed.get("data", []))
         ni = parsed.get("numerical_insights", {})
         if not isinstance(ni, dict):
-            ni = {"total_records": len(parsed.get("data", [])), "aggregations": {}}
-        if "total_records" not in ni:
-            ni["total_records"] = len(parsed.get("data", []))
+            ni = {"aggregations": {}}
+        ni["total_records"] = actual_count
         parsed["numerical_insights"] = ni
-
-        # Ensure total_records is also at the top level (frontend expects both)
-        parsed["total_records"] = ni["total_records"]
+        parsed["total_records"] = actual_count
 
         logger.info(
             f"[node_output_parser] Parse OK | "

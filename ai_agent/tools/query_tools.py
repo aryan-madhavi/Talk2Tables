@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # ── Safety constants (from original sql_validator.py) ─────────────────────────
 
 _MAX_ROWS = 10_000
+_PREVIEW_ROWS = 5  # rows sent back to LLM to keep context small
 
 _INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r";\s*\S",              re.IGNORECASE),
@@ -172,12 +173,17 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
                     for row in rows
                 ]
 
-                logger.info(f"[execute_sql] Query OK | {len(serialized)} rows | {elapsed_ms:.0f}ms")
+                total = len(serialized)
+                preview = serialized[:_PREVIEW_ROWS]
+                logger.info(f"[execute_sql] Query OK | {total} rows | {elapsed_ms:.0f}ms")
+                # Only send a small preview to the LLM to avoid token limit errors.
+                # The output_parser will re-execute for the full dataset.
                 return json.dumps({
-                    "rows":              serialized,
-                    "row_count":         len(serialized),
+                    "rows":              preview,
+                    "row_count":         total,
                     "execution_time_ms": round(elapsed_ms, 1),
-                    "is_truncated":      len(serialized) >= _MAX_ROWS,
+                    "is_truncated":      total >= _MAX_ROWS,
+                    "preview_note":      f"Preview: {len(preview)} of {total} rows shown. Full data included in final response.",
                 })
 
         except Exception as exc:

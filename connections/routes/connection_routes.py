@@ -13,6 +13,7 @@ Endpoints:
     DELETE /api/v1/connections/{id}       — hard delete (admin only)
     PATCH  /api/v1/connections/{id}/activate    — enable connection
     PATCH  /api/v1/connections/{id}/deactivate  — disable connection
+    POST   /api/v1/connections/{id}/test        — live connectivity test
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from connections.routes.schemas import (
     ConnectionOut,
     ConnectionListResponse,
     MessageResponse,
+    TestConnectionResponse,
 )
 from connections.services.connection_service import (
     create_connection,
@@ -35,6 +37,7 @@ from connections.services.connection_service import (
     update_connection,
     delete_connection,
     set_connection_active,
+    test_connection,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,6 +163,33 @@ async def delete_connection_route(
             detail=f"Connection '{connection_id}' not found.",
         )
     return MessageResponse(message=f"Connection '{connection_id}' permanently deleted.")
+
+
+# ── POST /api/v1/connections/{id}/test ───────────────────────────────────────
+
+@router.post(
+    "/{connection_id}/test",
+    response_model=TestConnectionResponse,
+    summary="Test a live database connection",
+    description=(
+        "Attempts to open a real connection to the target database. "
+        "Updates last_tested_at and last_tested_ok on the connection document. "
+        "Returns ok=true/false regardless — does NOT raise HTTP 4xx on DB failure. "
+        "Requires db_manager or admin role."
+    ),
+)
+async def test_connection_route(
+    connection_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    logger.info(f"[POST /connections/{connection_id}/test] by={current_user['firebase_uid']}")
+    result = await test_connection(connection_id)
+    if result["message"] == f"Connection '{connection_id}' not found.":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result["message"],
+        )
+    return result
 
 
 # ── PATCH /api/v1/connections/{id}/activate ───────────────────────────────────
