@@ -60,3 +60,9 @@ firebase-admin==6.5.0
 # firebase-admin includes:
 #   google-cloud-firestore  — Firestore client
 #   firebase-admin auth     — verify_id_token, create_custom_token, revoke_refresh_tokens
+
+# ── Redis Cache (optional) ────────────────────────────────────────────────────
+# Remove if you don't want Redis caching (app works fine without it).
+# hiredis is a faster C parser — drop it if you hit install issues.
+redis==5.0.1                   # async Redis client (redis.asyncio)
+hiredis==3.0.0                 # optional: faster response parser

@@ -2,17 +2,15 @@
 """
 Business logic for user_db_access collection.
 
-Handles:
-  - Creating access grants (user ↔ database)
-  - Listing grants by user or by connection
-  - Revoking grants (soft delete — is_active=False)
-  - Updating permission read ↔ write
-  - verify_access() — called by query engine before EVERY query
+Cache strategy:
+    READ  → check Redis first, fallback to Firestore on miss.
+    WRITE → write Firestore first, then invalidate relevant cache keys.
+
+Cache keys:
+    access:{uid}:{conn_id}   — verify_access() result (hottest path)  TTL: 2 min
+    access:user:{uid}        — all grants for a user                  TTL: 2 min
 
 Firestore collection: user_db_access/{access_id}
-Fields per schema doc:
-    access_id, firebase_uid, connection_id, granted_by_uid,
-    permission, is_active, granted_at, revoked_at, expires_at, note
 """
 from __future__ import annotations
 
@@ -23,6 +21,11 @@ from typing import Optional
 
 from auth.core.firebase import get_firestore_client
 from access.routes.schemas import CreateAccessGrantRequest, UpdateAccessGrantRequest
+from core.redis_client import redis_get, redis_set, redis_delete, redis_delete_pattern
+from core.cache_keys import (
+    key_access_pair, key_access_user, key_access_grant,
+    TTL_ACCESS_GRANT, TTL_ACCESS_USER_GRANTS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,6 @@ def _now_iso() -> str:
 
 
 def _is_expired(grant: dict) -> bool:
-    """Return True if the grant has a non-null expires_at that is in the past."""
     expires_at = grant.get("expires_at")
     if not expires_at:
         return False
@@ -47,21 +49,30 @@ def _is_expired(grant: dict) -> bool:
         return False
 
 
+async def _invalidate_access_cache(firebase_uid: str, connection_id: str) -> None:
+    """
+    Invalidate all cache entries for a (user, connection) pair.
+    Called after any grant mutation — revoke especially is security-critical.
+    """
+    await redis_delete(
+        key_access_pair(firebase_uid, connection_id),
+        key_access_user(firebase_uid),
+    )
+    logger.debug(f"[Cache] Invalidated access keys — uid={firebase_uid} conn={connection_id}")
+
+
 # ── Create ────────────────────────────────────────────────────────────────────
 
-async def create_access_grant(
-    body: CreateAccessGrantRequest,
-    granted_by_uid: str,
-) -> dict:
+async def create_access_grant(body: CreateAccessGrantRequest, granted_by_uid: str) -> dict:
     """
     Grant a user access to a database.
-    Raises ValueError if an active grant already exists for this (user, db) pair.
+    Raises ValueError if an active grant already exists for (user, db).
+    Invalidates the user's grant list cache after write.
     """
     db        = get_firestore_client()
     access_id = str(uuid.uuid4())
     now       = _now_iso()
 
-    # Check for duplicate active grant
     from google.cloud.firestore_v1.base_query import FieldFilter
     existing = (
         db.collection(COLLECTION)
@@ -93,32 +104,48 @@ async def create_access_grant(
     db.collection(COLLECTION).document(access_id).set(doc)
     logger.info(
         f"[Access] Granted | uid={body.firebase_uid} "
-        f"connection={body.connection_id} permission={body.permission} "
-        f"by={granted_by_uid}"
+        f"connection={body.connection_id} permission={body.permission} by={granted_by_uid}"
     )
+
+    # Invalidate list + pair caches — new grant exists
+    await _invalidate_access_cache(body.firebase_uid, body.connection_id)
+
     return doc
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
 async def get_grant_by_id(access_id: str) -> Optional[dict]:
-    """Fetch a single grant. Returns None if not found."""
+    """Fetch single grant. Cached by access_id. Flow: Redis → Firestore."""
+    cached = await redis_get(key_access_grant(access_id))
+    if cached:
+        logger.debug(f"[Cache] HIT access:grant:{access_id}")
+        return cached
+
     db  = get_firestore_client()
     doc = db.collection(COLLECTION).document(access_id).get()
     if not doc.exists:
         return None
-    return doc.to_dict()
+
+    data = doc.to_dict()
+    await redis_set(key_access_grant(access_id), data, TTL_ACCESS_GRANT)
+    return data
 
 
-async def list_grants_by_user(
-    firebase_uid: str,
-    active_only: bool = True,
-) -> list[dict]:
+async def list_grants_by_user(firebase_uid: str, active_only: bool = True) -> list[dict]:
     """
-    List all DB access grants for a specific user.
-    Used to show which databases a user can query.
+    List all DB grants for a user.
+    Flow: Redis → Firestore → populate cache.
+    Full list cached; active filter applied in Python on cache hit.
     Composite index required: firebase_uid ASC, is_active ASC
     """
+    cache_key = key_access_user(firebase_uid)
+
+    cached = await redis_get(cache_key)
+    if cached:
+        logger.debug(f"[Cache] HIT access:user:{firebase_uid}")
+        return [g for g in cached if g.get("is_active")] if active_only else cached
+
     from google.cloud.firestore_v1.base_query import FieldFilter
     db    = get_firestore_client()
     query = db.collection(COLLECTION).where(
@@ -130,16 +157,17 @@ async def list_grants_by_user(
     docs    = query.stream()
     results = [d.to_dict() for d in docs]
     results.sort(key=lambda x: x.get("granted_at", ""), reverse=True)
+
+    await redis_set(cache_key, results, TTL_ACCESS_USER_GRANTS)
+    logger.debug(f"[Cache] MISS access:user:{firebase_uid} — cached {len(results)} grants")
+
     return results
 
 
-async def list_grants_by_connection(
-    connection_id: str,
-    active_only: bool = True,
-) -> list[dict]:
+async def list_grants_by_connection(connection_id: str, active_only: bool = True) -> list[dict]:
     """
     List all users who have access to a specific database.
-    Used in Admin panel → Connections → "Who has access" view.
+    Not cached — admin-only view, low traffic.
     Composite index required: connection_id ASC, is_active ASC
     """
     from google.cloud.firestore_v1.base_query import FieldFilter
@@ -158,18 +186,16 @@ async def list_grants_by_connection(
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-async def update_access_grant(
-    access_id: str,
-    body: UpdateAccessGrantRequest,
-) -> Optional[dict]:
+async def update_access_grant(access_id: str, body: UpdateAccessGrantRequest) -> Optional[dict]:
     """
-    Update permission (read ↔ write), expiry, or note.
-    Returns updated grant dict or None if not found.
+    Update permission, expiry, or note.
+    Invalidates pair + user list caches after write.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(access_id)
 
-    if not ref.get().exists:
+    existing = ref.get()
+    if not existing.exists:
         return None
 
     updates: dict = {}
@@ -181,35 +207,49 @@ async def update_access_grant(
         ref.update(updates)
         logger.info(f"[Access] Updated | id={access_id} fields={list(updates.keys())}")
 
-    return ref.get().to_dict()
+    data = ref.get().to_dict()
+
+    # Invalidate — permission or expiry changed
+    await _invalidate_access_cache(data["firebase_uid"], data["connection_id"])
+    await redis_delete(key_access_grant(access_id))
+
+    return data
 
 
 # ── Revoke ────────────────────────────────────────────────────────────────────
 
-async def revoke_access_grant(
-    access_id: str,
-    revoked_by_uid: str,
-) -> Optional[dict]:
+async def revoke_access_grant(access_id: str, revoked_by_uid: str) -> Optional[dict]:
     """
-    Soft-delete — sets is_active=False and records revoked_at timestamp.
-    Keeps the document for audit trail.
-    Returns updated grant dict or None if not found.
+    Soft-delete — sets is_active=False, records revoked_at.
+    SECURITY: cache is invalidated immediately so the user is blocked
+    on their very next query attempt — no TTL delay.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(access_id)
 
-    if not ref.get().exists:
+    existing = ref.get()
+    if not existing.exists:
         return None
+
+    # Read uid + conn_id BEFORE updating (needed for cache invalidation)
+    old_data = existing.to_dict()
 
     ref.update({
         "is_active":  False,
         "revoked_at": _now_iso(),
     })
     logger.info(f"[Access] Revoked | id={access_id} by={revoked_by_uid}")
-    return ref.get().to_dict()
+
+    data = ref.get().to_dict()
+
+    # CRITICAL: invalidate immediately — revoked user must be blocked NOW
+    await _invalidate_access_cache(old_data["firebase_uid"], old_data["connection_id"])
+    await redis_delete(key_access_grant(access_id))
+
+    return data
 
 
-# ── Verify access (called by query engine) ────────────────────────────────────
+# ── Verify access — called by query engine before EVERY query ─────────────────
 
 async def verify_access(
     firebase_uid:  str,
@@ -218,15 +258,37 @@ async def verify_access(
 ) -> tuple[bool, str]:
     """
     Check if a user has an active, non-expired grant for a database.
-    Called by the query execution engine before EVERY query.
+    This is the HOTTEST code path — called before every single query.
+
+    Cache: result cached under access:{uid}:{conn_id} for 2 min.
+    Revoke invalidates this key immediately (see revoke_access_grant).
 
     Returns:
-        (True, "ok")                        — access allowed
-        (False, "no_grant")                 — no grant exists
-        (False, "revoked")                  — grant revoked
-        (False, "expired")                  — grant expired
-        (False, "write_not_permitted")      — write requested but only read granted
+        (True,  "ok")                   — access allowed
+        (False, "no_grant")             — no grant exists
+        (False, "revoked")              — grant is inactive
+        (False, "expired")              — grant has passed expiry date
+        (False, "write_not_permitted")  — write needed but only read granted
     """
+    cache_key = key_access_pair(firebase_uid, connection_id)
+
+    # ── Cache check ───────────────────────────────────────────────────────
+    cached = await redis_get(cache_key)
+    if cached:
+        logger.debug(f"[Cache] HIT verify_access uid={firebase_uid} conn={connection_id}")
+        grant = cached
+
+        if not grant.get("is_active", False):
+            return False, "revoked"
+        if _is_expired(grant):
+            return False, "expired"
+        if require_write and grant.get("permission") != "write":
+            return False, "write_not_permitted"
+        return True, "ok"
+
+    # ── Firestore fallback ────────────────────────────────────────────────
+    logger.debug(f"[Cache] MISS verify_access uid={firebase_uid} conn={connection_id}")
+
     from google.cloud.firestore_v1.base_query import FieldFilter
     db = get_firestore_client()
 
@@ -245,12 +307,13 @@ async def verify_access(
 
     grant = grant_doc.to_dict()
 
+    # Cache the grant (even if revoked/expired — so repeat calls are fast)
+    await redis_set(cache_key, grant, TTL_ACCESS_GRANT)
+
     if not grant.get("is_active", False):
         return False, "revoked"
-
     if _is_expired(grant):
         return False, "expired"
-
     if require_write and grant.get("permission") != "write":
         return False, "write_not_permitted"
 

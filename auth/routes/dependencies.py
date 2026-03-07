@@ -8,9 +8,16 @@ Role hierarchy (lowest → highest):
     db_manager (2) — manages connections + grants; cannot manage users/roles
     admin      (3) — full control: users, connections, grants, audit logs
 
-get_current_user()      — verifies Firebase token, checks Firestore user + session
-require_role(*roles)    — exact whitelist match
-require_min_role(role)  — role >= minimum in hierarchy (inclusive upward)
+Flow per request:
+    1. Extract Bearer token from Authorization header
+    2. asyncio.to_thread → verify_request_token() in security.py
+         └── Step 1: Firebase token signature verify (always)
+         └── Step 2: Redis cache check  → return immediately on HIT
+         └── Step 3: Firestore user check (cache miss only)
+         └── Step 4: Firestore session check (cache miss only)
+    3. Return user dict to route handler
+
+Cache is handled entirely inside security.py — this file stays clean.
 
 Shortcut aliases (import these directly in routes):
     require_admin       — admin only
@@ -47,7 +54,7 @@ async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> dict:
     """
-    Verify Firebase ID token + Firestore user/session check.
+    Verify Firebase ID token + RBAC user check.
 
     Runs verify_request_token() in a thread pool via asyncio.to_thread
     because the firebase-admin SDK is synchronous — keeps the event loop free.
@@ -74,7 +81,7 @@ async def get_current_user(
         user = await asyncio.to_thread(
             verify_request_token,
             credentials.credentials,
-            True,  # check_revoked=True
+            True,   # check_revoked=True
         )
     except SecurityError as exc:
         raise HTTPException(
@@ -96,8 +103,6 @@ def require_role(*allowed_roles: str):
 
         Depends(require_role("admin"))
         Depends(require_role("admin", "db_manager"))
-
-    Use when a route is for a specific set of roles only.
     """
     async def _check(user: dict = Depends(get_current_user)) -> dict:
         if user["role"] not in allowed_roles:
@@ -118,9 +123,7 @@ def require_min_role(minimum_role: str):
 
         require_min_role("db_manager")  → allows db_manager (2) + admin (3)
         require_min_role("power_user")  → allows power_user (1) + db_manager + admin
-        require_min_role("analyst")     → allows everyone  (all 4 roles)
-
-    Use when a route is open to everyone at or above a certain level.
+        require_min_role("analyst")     → allows everyone (all 4 roles)
     """
     min_level = ROLE_LEVEL.get(minimum_role, 0)
 

@@ -3,9 +3,18 @@
 Application-level security layer — sits on top of firebase.py.
 
 Layer map:
-  firebase.py   → SDK init, token verify/create, Firestore CRUD (fs_* helpers)
-  security.py   → request verification, RBAC helpers, account management (THIS FILE)
+  firebase.py     → SDK init, token verify/create, Firestore CRUD (fs_* helpers)
+  security.py     → request verification, RBAC helpers, account management (THIS FILE)
   dependencies.py → FastAPI Depends() wrappers for routes
+
+Cache layer (Redis):
+  verify_request_token() caches the full user dict under token:{uid} for 55 min.
+  On cache hit, Steps 2 + 3 (Firestore user + session checks) are skipped entirely.
+  Cache is invalidated by:
+    • set_user_active(False)   — deactivated user blocked immediately
+    • update_user_role()       — new role enforced on next request
+    • delete_user()            — user wiped from cache
+  Redis is optional — if REDIS_URL is not set, every request hits Firestore (original behaviour).
 
 Role hierarchy (lowest → highest):
   ┌─────────────────────────────────────────────────────────────────────────┐
@@ -14,10 +23,6 @@ Role hierarchy (lowest → highest):
   │  db_manager (2) — manage connections + grants, no user management       │
   │  admin      (3) — full control: users, connections, grants, audit logs  │
   └─────────────────────────────────────────────────────────────────────────┘
-
-Default role on first login: "analyst"
-Role changes take effect on the user's NEXT request — no re-login needed.
-All user/session state lives in Firestore — no PostgreSQL here.
 """
 from __future__ import annotations
 
@@ -104,6 +109,51 @@ class SecurityError(Exception):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Redis cache helpers (lazy import — Redis is optional)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cache_get_sync(key: str):
+    """
+    Synchronous Redis GET via asyncio.
+    Called from verify_request_token() which runs in a thread pool.
+    Returns parsed value or None on miss/error.
+    """
+    try:
+        import asyncio as _asyncio
+        from core.redis_client import redis_get
+        loop = _asyncio.new_event_loop()
+        result = loop.run_until_complete(redis_get(key))
+        loop.close()
+        return result
+    except Exception:
+        return None
+
+
+def _cache_set_sync(key: str, value: dict, ttl: int) -> None:
+    """Synchronous Redis SET via asyncio."""
+    try:
+        import asyncio as _asyncio
+        from core.redis_client import redis_set
+        loop = _asyncio.new_event_loop()
+        loop.run_until_complete(redis_set(key, value, ttl))
+        loop.close()
+    except Exception:
+        pass  # Redis failure must never block auth
+
+
+def _cache_invalidate_sync(*keys: str) -> None:
+    """Synchronous Redis DELETE via asyncio."""
+    try:
+        import asyncio as _asyncio
+        from core.redis_client import redis_delete
+        loop = _asyncio.new_event_loop()
+        loop.run_until_complete(redis_delete(*keys))
+        loop.close()
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Bearer token extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -111,9 +161,6 @@ def extract_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
     """
     Parse "Authorization: Bearer <token>" → return raw token string.
     Returns None if header is missing or malformed.
-
-    Useful for WebSocket handshakes or any code outside FastAPI's
-    HTTPBearer dependency injection.
     """
     if not authorization_header:
         return None
@@ -132,44 +179,41 @@ def verify_request_token(
     """
     Three-step security check for every incoming protected request.
 
-    Step 1  Firebase Admin SDK
-        Verifies token RS256 signature, expiry, and project audience.
+    Step 1  Firebase Admin SDK  (always runs — verifies RS256 signature)
         Firebase's public keys are cached after the first call — ~0ms overhead.
 
-    Step 2  Firestore user check
+    Step 2  Redis cache check  (NEW)
+        If token:{uid} is cached, skip Steps 2+3 Firestore calls entirely.
+        Returns the cached user dict immediately.
+        Cache TTL: 55 min. Invalidated on role change / deactivate / delete.
+
+    Step 3  Firestore user check  (on cache miss only)
         Confirms the user doc exists and is_active == True.
-        Role is always read from Firestore here — authoritative over token claims.
-        This means a role change takes effect on the user's very next request
-        without requiring re-login.
+        Role is always read from Firestore — authoritative over token claims.
 
-    Step 3  Firestore session check
-        Confirms at least one non-revoked session doc exists for this UID.
-        logout() sets is_revoked = True in Firestore, caught here immediately.
+    Step 4  Firestore session check  (on cache miss only)
+        Confirms at least one non-revoked session exists.
 
-    Note: This function is synchronous because the firebase-admin Firestore SDK
-    is sync. Call it via  asyncio.to_thread(verify_request_token, token)  from
-    async FastAPI routes. dependencies.py handles this automatically.
-
-    Args:
-        id_token:      Raw Firebase ID token from Authorization: Bearer header.
-        check_revoked: Pass False only for /token-active polling so you can
-                       separate "our session revoked" from "Firebase revoked".
+    Note: This function is synchronous (firebase-admin SDK is sync).
+    dependencies.py calls it via asyncio.to_thread() to keep the event loop free.
 
     Returns:
         {
             "firebase_uid": str,
             "email":        str,
-            "role":         str,   # "analyst" | "power_user" | "db_manager" | "admin"
+            "role":         str,
             "display_name": str,
             "photo_url":    str,
             "is_active":    bool,
-            "claims":       dict,  # raw decoded Firebase claims (for audit/debug)
+            "claims":       dict,
         }
 
     Raises:
         SecurityError — caught by dependencies.py → HTTP 401/403.
     """
-    # ── Step 1: Firebase token verification ───────────────────────────────
+    from core.cache_keys import key_token, TTL_TOKEN
+
+    # ── Step 1: Firebase token verification (always) ──────────────────────
     try:
         claims = verify_id_token(id_token, check_revoked=check_revoked)
     except ValueError as exc:
@@ -177,7 +221,17 @@ def verify_request_token(
 
     firebase_uid = claims["uid"]
 
-    # ── Step 2: Firestore user check ──────────────────────────────────────
+    # ── Step 2: Redis cache check ─────────────────────────────────────────
+    cached = _cache_get_sync(key_token(firebase_uid))
+    if cached:
+        logger.debug(f"[Security] Cache HIT — uid={firebase_uid} role={cached.get('role')}")
+        # Re-attach live claims (not stored in cache to keep it small)
+        cached["claims"] = claims
+        return cached
+
+    # ── Step 3: Firestore user check (cache miss) ─────────────────────────
+    logger.debug(f"[Security] Cache MISS — uid={firebase_uid}, checking Firestore")
+
     user = fs_get_user(firebase_uid)
 
     if user is None:
@@ -191,7 +245,7 @@ def verify_request_token(
             code="ACCOUNT_DISABLED",
         )
 
-    # ── Step 3: Active session check ──────────────────────────────────────
+    # ── Step 4: Active session check ──────────────────────────────────────
     session = fs_get_latest_active_session(firebase_uid)
     if session is None:
         raise SecurityError(
@@ -199,69 +253,43 @@ def verify_request_token(
             code="SESSION_REVOKED",
         )
 
-    logger.debug(f"[Security] Request verified | uid={firebase_uid} role={user.get('role')}")
-
-    return {
+    user_dict = {
         "firebase_uid": firebase_uid,
         "email":        user.get("email", claims.get("email", "")),
         "role":         user.get("role", "analyst"),   # Firestore is authoritative
         "display_name": user.get("display_name", ""),
         "photo_url":    user.get("photo_url", ""),
         "is_active":    user.get("is_active", True),
-        "claims":       claims,
     }
+
+    # ── Step 5: Populate cache (without claims — they change per-request) ─
+    _cache_set_sync(key_token(firebase_uid), user_dict, TTL_TOKEN)
+    logger.debug(f"[Security] Cached token — uid={firebase_uid} ttl={TTL_TOKEN}s")
+
+    # Attach claims to return value (not stored in cache)
+    user_dict["claims"] = claims
+
+    logger.debug(f"[Security] Request verified | uid={firebase_uid} role={user_dict['role']}")
+    return user_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RBAC helpers
+# RBAC helpers — unchanged
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_role_level(role: str) -> int:
-    """
-    Numeric permission level for a role. Unknown roles return -1.
-
-        get_role_level("analyst")    → 0
-        get_role_level("power_user") → 1
-        get_role_level("db_manager") → 2
-        get_role_level("admin")      → 3
-        get_role_level("??")         → -1
-    """
     return ROLE_LEVEL.get(role, -1)
 
 
 def is_allowed(user_role: str, *required_roles: str) -> bool:
-    """
-    True if user_role is exactly in the required_roles set (whitelist check).
-    Use inside service functions for conditional logic without raising.
-
-        is_allowed("admin", "admin", "db_manager")  → True
-        is_allowed("analyst", "admin", "db_manager")  → False
-    """
     return user_role in required_roles
 
 
 def has_minimum_role(user_role: str, minimum_role: str) -> bool:
-    """
-    True if user_role meets or exceeds minimum_role in the hierarchy.
-
-        has_minimum_role("admin",      "db_manager") → True   (3 >= 2)
-        has_minimum_role("db_manager", "db_manager") → True   (2 >= 2)
-        has_minimum_role("power_user", "db_manager") → False  (1 < 2)
-        has_minimum_role("analyst",    "analyst")    → True   (0 >= 0)
-    """
     return get_role_level(user_role) >= get_role_level(minimum_role)
 
 
 def assert_role(user: dict, *allowed_roles: str) -> None:
-    """
-    Raise SecurityError(FORBIDDEN) if user's role is not in allowed_roles.
-
-    Use inside service functions for programmatic RBAC — not in routes
-    (use require_role / require_min_role dependencies there instead).
-
-        assert_role(user, "admin")
-        assert_role(user, "admin", "db_manager")
-    """
     if user.get("role") not in allowed_roles:
         raise SecurityError(
             f"Requires role: {' or '.join(allowed_roles)}. "
@@ -271,14 +299,6 @@ def assert_role(user: dict, *allowed_roles: str) -> None:
 
 
 def assert_min_role(user: dict, minimum_role: str) -> None:
-    """
-    Raise SecurityError(FORBIDDEN) if user's role is below minimum_role.
-
-    Use inside service functions.
-
-        assert_min_role(user, "db_manager")  # allows db_manager + admin
-        assert_min_role(user, "power_user")  # allows power_user + db_manager + admin
-    """
     if not has_minimum_role(user.get("role", ""), minimum_role):
         raise SecurityError(
             f"Requires '{minimum_role}' or higher. "
@@ -288,23 +308,20 @@ def assert_min_role(user: dict, minimum_role: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Account management  (Firestore + Firebase token revocation)
+# Account management — cache invalidation added to each mutating function
 # ─────────────────────────────────────────────────────────────────────────────
 
 def deactivate_account(firebase_uid: str) -> None:
     """
     Deactivate a user account:
-      1. Set is_active = False in Firestore users/{uid}
-      2. Revoke all active Firestore session docs
-      3. Revoke Firebase refresh tokens (signs them out of the Firebase SDK too)
-
-    After this, every request from this user hits ACCOUNT_DISABLED in
-    verify_request_token() — even with a technically valid Firebase token.
-
-    Admin-only. Call from admin routes only.
+      1. Set is_active = False in Firestore
+      2. Revoke all active session docs
+      3. Revoke Firebase refresh tokens
+      4. Invalidate Redis cache — blocked on very next request
     """
     from auth.core.firebase import get_firestore_client
     from auth.core.config import settings
+    from core.cache_keys import key_token, key_user, key_users_list
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
@@ -316,14 +333,18 @@ def deactivate_account(firebase_uid: str) -> None:
     revoke_refresh_tokens(firebase_uid)
     logger.info(f"[Security] {count} session(s) revoked on deactivation | uid={firebase_uid}")
 
+    # CRITICAL: wipe cache so the deactivated user is blocked immediately
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+
 
 def reactivate_account(firebase_uid: str) -> None:
     """
     Re-enable a deactivated account.
-    User must sign in again to get a fresh session after reactivation.
+    Invalidates cache so stale is_active=False is not served.
     """
     from auth.core.firebase import get_firestore_client
     from auth.core.config import settings
+    from core.cache_keys import key_token, key_user, key_users_list
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
@@ -331,18 +352,16 @@ def reactivate_account(firebase_uid: str) -> None:
         ref.update({"is_active": True})
         logger.info(f"[Security] Account reactivated | uid={firebase_uid}")
 
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+
 
 def force_sign_out(firebase_uid: str, session_id: Optional[str] = None) -> None:
     """
-    Immediately sign out a user WITHOUT deactivating their account.
-    They can sign in again normally to get a new session.
-
-    Args:
-        firebase_uid: UID of the target user.
-        session_id:   Specific session to revoke. Pass None to revoke all.
-
-    Use cases: admin action, suspected credential compromise, device lost.
+    Sign out a user WITHOUT deactivating their account.
+    Invalidates token cache — they must sign in again.
     """
+    from core.cache_keys import key_token
+
     if session_id:
         fs_revoke_session(firebase_uid, session_id)
         logger.info(f"[Security] Force sign-out | uid={firebase_uid} session={session_id}")
@@ -351,20 +370,13 @@ def force_sign_out(firebase_uid: str, session_id: Optional[str] = None) -> None:
         logger.info(f"[Security] Force sign-out all | uid={firebase_uid} count={count}")
 
     revoke_refresh_tokens(firebase_uid)
+    _cache_invalidate_sync(key_token(firebase_uid))
 
 
 def update_user_role(firebase_uid: str, new_role: str) -> None:
     """
-    Update a user's RBAC role in Firestore. Admin-only operation.
-
-    Valid roles: "analyst" | "power_user" | "db_manager" | "admin"
-
-    The change takes effect on the user's NEXT API request — no re-login needed
-    because we always read role from Firestore, not from the token claim.
-
-    Raises:
-        ValueError if new_role is not a valid role string.
-        ValueError if the user doesn't exist in Firestore.
+    Update RBAC role in Firestore.
+    Invalidates token + user cache — new role enforced on next request.
     """
     if new_role not in VALID_ROLES:
         raise ValueError(
@@ -374,6 +386,7 @@ def update_user_role(firebase_uid: str, new_role: str) -> None:
 
     from auth.core.firebase import get_firestore_client
     from auth.core.config import settings
+    from core.cache_keys import key_token, key_user, key_users_list
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
@@ -383,30 +396,23 @@ def update_user_role(firebase_uid: str, new_role: str) -> None:
     ref.update({"role": new_role})
     logger.info(f"[Security] Role updated | uid={firebase_uid} → {new_role}")
 
+    # Invalidate — stale role in cache = wrong permissions
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Password utilities  (bcrypt — for any local accounts not going through Firebase)
+# Password utilities — unchanged
 # ─────────────────────────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    """Hash a plaintext password with bcrypt."""
     return _pwd_context.hash(plain)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a plaintext password against a stored bcrypt hash."""
     return _pwd_context.verify(plain, hashed)
 
 
 def is_strong_password(password: str) -> tuple[bool, str]:
-    """
-    Basic strength check for local account creation.
-    Rules: ≥8 chars, uppercase, lowercase, digit, special character.
-
-    Returns:
-        (True,  "")           — acceptable
-        (False, reason_str)   — too weak, reason explains which rule failed
-    """
     checks = [
         (len(password) >= 8,
          "Must be at least 8 characters."),

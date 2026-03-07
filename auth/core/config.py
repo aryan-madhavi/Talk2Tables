@@ -12,11 +12,17 @@ FIREBASE_CREDENTIALS_PATH=firebase-credentials.json
 # FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
 
 FIREBASE_PROJECT_ID=your-firebase-project-id
+
+# Redis cache (optional — leave blank to disable, app falls back to Firestore)
+# Local dev:          REDIS_URL=redis://localhost:6379/0
+# Cloud Memorystore:  REDIS_URL=redis://10.x.x.x:6379/0
+REDIS_URL=
 ────────────────────────────────────────────────────────────────────
 
 Storage architecture:
   • Firebase Auth    — identity, password hashing, token signing/verification
   • Firestore        — users collection, sessions sub-collection
+  • Redis            — optional cache layer (tokens, users, connections, grants)
   • NO PostgreSQL    — no SQLAlchemy, no asyncpg, no migrations needed
 """
 from __future__ import annotations
@@ -48,6 +54,11 @@ class Settings(BaseSettings):
 
     # ── Session TTL — matches Firebase ID token lifetime ──────────────────
     session_expiry_seconds: int = 3600   # 1 hour
+
+    # ── Redis cache (optional) ────────────────────────────────────────────
+    # Leave blank/unset to disable — app works without Redis.
+    # Format: redis://[:password@]host[:port][/db]
+    redis_url: Optional[str] = None
 
     # ── CORS ──────────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"

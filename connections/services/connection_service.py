@@ -2,8 +2,14 @@
 """
 Business logic for database connection management.
 
-All Firestore operations for the 'database_connections' collection live here.
-The route layer calls these functions — it never touches Firestore directly.
+Cache strategy:
+    READ  → check Redis first, fallback to Firestore on miss, then populate cache.
+    WRITE → write to Firestore first, then invalidate relevant cache keys.
+
+Cache keys used:
+    connection:{id}          — single connection dict   TTL: 2 min
+    connections:list         — all connections list      TTL: 2 min
+    connections:list:active  — active-only list          TTL: 2 min
 """
 from __future__ import annotations
 
@@ -15,6 +21,11 @@ from typing import Optional
 from auth.core.firebase import get_firestore_client
 from connections.core.encryption import encrypt_password, decrypt_password
 from connections.routes.schemas import CreateConnectionRequest, UpdateConnectionRequest
+from core.redis_client import redis_get, redis_set, redis_delete
+from core.cache_keys import (
+    key_connection, key_connections_list,
+    TTL_CONNECTION, TTL_CONNECTIONS_LIST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +43,19 @@ def _safe_connection(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "password_enc"}
 
 
+async def _invalidate_connection_cache(connection_id: str) -> None:
+    """
+    Invalidate all cache entries related to a connection.
+    Called after any write (create, update, delete, activate, deactivate).
+    """
+    await redis_delete(
+        key_connection(connection_id),
+        key_connections_list(active_only=False),
+        key_connections_list(active_only=True),
+    )
+    logger.debug(f"[Cache] Invalidated connection keys — id={connection_id}")
+
+
 # ── Create ────────────────────────────────────────────────────────────────────
 
 async def create_connection(
@@ -39,8 +63,9 @@ async def create_connection(
     created_by_uid: str,
 ) -> dict:
     """
-    Encrypt the password and write a new connection document to Firestore.
-    Returns the safe connection dict (no password_enc).
+    Encrypt password and write a new connection to Firestore.
+    Invalidates the connections list cache.
+    Returns safe connection dict (no password_enc).
     """
     db            = get_firestore_client()
     connection_id = str(uuid.uuid4())
@@ -54,7 +79,7 @@ async def create_connection(
         "port":           body.port,
         "database_name":  body.database_name,
         "username":       body.username,
-        "password_enc":   encrypt_password(body.password),  # never stored raw
+        "password_enc":   encrypt_password(body.password),
         "ssl_enabled":    body.ssl_enabled,
         "is_active":      True,
         "description":    body.description,
@@ -68,27 +93,53 @@ async def create_connection(
     db.collection(COLLECTION).document(connection_id).set(doc)
     logger.info(f"[Connections] Created | id={connection_id} name={body.name} by={created_by_uid}")
 
-    return _safe_connection(doc)
+    safe = _safe_connection(doc)
+
+    # Cache the new connection, invalidate list caches
+    await redis_set(key_connection(connection_id), safe, TTL_CONNECTION)
+    await redis_delete(
+        key_connections_list(active_only=False),
+        key_connections_list(active_only=True),
+    )
+
+    return safe
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
 async def get_connection_by_id(connection_id: str) -> Optional[dict]:
     """
-    Fetch a single connection. Returns safe dict (no password_enc) or None.
+    Fetch a single connection (safe — no password_enc).
+
+    Flow: Redis → Firestore → cache result
     """
+    # 1. Cache check
+    cached = await redis_get(key_connection(connection_id))
+    if cached:
+        logger.debug(f"[Cache] HIT connection:{connection_id}")
+        return cached
+
+    # 2. Firestore fallback
     db  = get_firestore_client()
     doc = db.collection(COLLECTION).document(connection_id).get()
     if not doc.exists:
         return None
-    return _safe_connection(doc.to_dict())
+
+    safe = _safe_connection(doc.to_dict())
+
+    # 3. Populate cache
+    await redis_set(key_connection(connection_id), safe, TTL_CONNECTION)
+    logger.debug(f"[Cache] MISS connection:{connection_id} — cached for {TTL_CONNECTION}s")
+
+    return safe
 
 
 async def get_connection_with_password(connection_id: str) -> Optional[dict]:
     """
-    Fetch connection including decrypted password.
-    ONLY for internal use (test connection, query execution).
-    NEVER return this to any API response.
+    Fetch connection INCLUDING decrypted password.
+    ONLY for internal use (query execution engine).
+    NEVER returned in any API response.
+    NOT cached — passwords must never go into Redis.
     """
     db  = get_firestore_client()
     doc = db.collection(COLLECTION).document(connection_id).get()
@@ -102,8 +153,18 @@ async def get_connection_with_password(connection_id: str) -> Optional[dict]:
 async def list_connections(active_only: bool = False) -> list[dict]:
     """
     List all connections. Optionally filter to active only.
-    Always returns safe dicts (no password_enc).
+
+    Flow: Redis → Firestore → cache result
     """
+    cache_key = key_connections_list(active_only)
+
+    # 1. Cache check
+    cached = await redis_get(cache_key)
+    if cached:
+        logger.debug(f"[Cache] HIT {cache_key}")
+        return cached
+
+    # 2. Firestore fallback
     db    = get_firestore_client()
     query = db.collection(COLLECTION)
 
@@ -111,11 +172,14 @@ async def list_connections(active_only: bool = False) -> list[dict]:
         from google.cloud.firestore_v1.base_query import FieldFilter
         query = query.where(filter=FieldFilter("is_active", "==", True))
 
-    docs = query.stream()
+    docs    = query.stream()
     results = [_safe_connection(d.to_dict()) for d in docs]
-
-    # Sort by created_at descending in Python (no composite index needed)
     results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+    # 3. Populate cache
+    await redis_set(cache_key, results, TTL_CONNECTIONS_LIST)
+    logger.debug(f"[Cache] MISS {cache_key} — cached {len(results)} connections")
+
     return results
 
 
@@ -126,9 +190,7 @@ async def update_connection(
     body: UpdateConnectionRequest,
 ) -> Optional[dict]:
     """
-    Partial update — only fields provided in body are changed.
-    Re-encrypts password if a new one is provided.
-    Returns updated safe dict or None if not found.
+    Partial update. Invalidates single + list caches after write.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
@@ -153,17 +215,21 @@ async def update_connection(
     ref.update(updates)
     logger.info(f"[Connections] Updated | id={connection_id} fields={list(updates.keys())}")
 
-    updated = ref.get().to_dict()
-    return _safe_connection(updated)
+    updated = _safe_connection(ref.get().to_dict())
+
+    # Invalidate — data changed
+    await _invalidate_connection_cache(connection_id)
+    # Re-populate single key with fresh data
+    await redis_set(key_connection(connection_id), updated, TTL_CONNECTION)
+
+    return updated
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 async def delete_connection(connection_id: str) -> bool:
     """
-    Hard-delete a connection document.
-    Admin only — also consider deactivating (is_active=False) instead.
-    Returns True if deleted, False if not found.
+    Hard-delete. Invalidates all related cache keys.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
@@ -173,6 +239,9 @@ async def delete_connection(connection_id: str) -> bool:
 
     ref.delete()
     logger.info(f"[Connections] Deleted | id={connection_id}")
+
+    await _invalidate_connection_cache(connection_id)
+
     return True
 
 
@@ -180,8 +249,7 @@ async def delete_connection(connection_id: str) -> bool:
 
 async def set_connection_active(connection_id: str, is_active: bool) -> Optional[dict]:
     """
-    Enable or disable a connection without deleting it.
-    Preferred over hard-delete in most cases.
+    Enable or disable a connection. Invalidates all related cache keys.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
@@ -193,4 +261,10 @@ async def set_connection_active(connection_id: str, is_active: bool) -> Optional
     action = "Activated" if is_active else "Deactivated"
     logger.info(f"[Connections] {action} | id={connection_id}")
 
-    return _safe_connection(ref.get().to_dict())
+    updated = _safe_connection(ref.get().to_dict())
+
+    # Invalidate — is_active changed so both list variants are stale
+    await _invalidate_connection_cache(connection_id)
+    await redis_set(key_connection(connection_id), updated, TTL_CONNECTION)
+
+    return updated

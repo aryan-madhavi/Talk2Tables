@@ -3,6 +3,7 @@ Talk2Tables — FastAPI Application Entry Point
 =============================================
 Storage: Firebase Auth + Firestore (NO PostgreSQL, no SQLAlchemy)
 Auth:    Firebase Service Account (verify_id_token + create_custom_token)
+Cache:   Redis (optional — set REDIS_URL in .env to enable)
 
 Run (dev):        uvicorn main:app --reload --port 8000
 Run (production): uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
@@ -28,6 +29,7 @@ from auth.core.firebase import get_firebase_app, get_firestore_client
 from connections import connections_router
 from users import users_router
 from access import access_router
+from core.redis_client import init_redis, close_redis
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -62,7 +64,17 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌  Firestore client failed: {exc}")
         raise   # Fatal — all user/session data is in Firestore
 
-    # 3. Optional: pre-compile the LangGraph agent
+    # 3. Redis cache (optional — non-fatal if unavailable)
+    try:
+        await init_redis()
+        if settings.redis_url:
+            logger.info("✅  Redis cache connected")
+        else:
+            logger.info("ℹ️   Redis not configured (REDIS_URL not set) — all reads hit Firestore")
+    except Exception as exc:
+        logger.warning(f"⚠️   Redis init failed (non-fatal): {exc}")
+
+    # 4. Optional: pre-compile the LangGraph agent
     try:
         from ai_agent import get_agent  # type: ignore
         get_agent()
@@ -77,6 +89,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    await close_redis()
     logger.info("Talk2Tables — Shutting down gracefully.")
 
 
@@ -95,7 +109,7 @@ app = FastAPI(
     lifespan = lifespan,
 )
 
-# ──     ──────────────────────────────────────────────────────────────────────
+# ── CORS ──────────────────────────────────────────────────────────────────────
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",")]
 app.add_middleware(
@@ -106,7 +120,7 @@ app.add_middleware(
     allow_headers     = ["*"],
 )
 
-# ── Timing middleware ──────────────────────────────────────────────────────────
+# ── Timing middleware ─────────────────────────────────────────────────────────
 
 @app.middleware("http")
 async def add_response_time(request: Request, call_next):
