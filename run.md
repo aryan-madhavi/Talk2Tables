@@ -133,7 +133,7 @@ redis-server
 ## Access Redis CLI
 
 ```bash
-docker exec -it redis-server redis-cli
+docker exec -it redis-server redis-cli MONITOR
 ```
 
 Test Redis:

@@ -29,6 +29,7 @@ from auth.core.firebase import get_firebase_app, get_firestore_client
 from connections import connections_router
 from users import users_router
 from access import access_router
+from query import query_router
 from core.redis_client import init_redis, close_redis
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -149,6 +150,7 @@ app.include_router(auth_router)         # /api/v1/auth/*
 app.include_router(connections_router)  # /api/v1/connections/*
 app.include_router(users_router)        # /api/v1/users/*
 app.include_router(access_router)       # /api/v1/access-grants/*
+app.include_router(query_router)        # /api/v1/query, /api/v1/schema/*
 
 # ── Health ────────────────────────────────────────────────────────────────────
 

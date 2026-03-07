@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ── Load key ──────────────────────────────────────────────────────────────────
 
 def _load_key() -> bytes:
-    raw = os.environ.get("DB_ENCRYPTION_KEY", "")
+    raw = "5df9bdd6a1738e056d6b225f4cb15e04ea66e94ed6dbd55b59f8ac2a165fb0f5" #os.environ.get("DB_ENCRYPTION_KEY", "")
     if not raw:
         raise RuntimeError(
             "DB_ENCRYPTION_KEY is not set. "
