@@ -12,6 +12,7 @@ import {
   updateConnection,
   activateConnection,
   deactivateConnection,
+  testConnection,
   ConnectionOut,
 } from '../../../../lib/connectionService';
 
@@ -32,6 +33,7 @@ const FORM_TYPE_TO_BACKEND: Record<string, string> = {
   MySQL:      'mysql',
   Oracle:     'oracle',
   SQLite:     'sqlite',
+  MSSQL:      'mssql',
 };
 
 /** Convert backend ConnectionOut → UI DatabaseConnection */
@@ -146,7 +148,20 @@ export function DatabasesTab() {
 
         // Prepend to local state (newest first)
         setConnections(prev => [newUi, ...prev]);
-        toast.success(`"${created.name}" added successfully.`);
+        toast.success(`"${created.name}" saved. Testing connection…`);
+
+        // Auto-test after creation
+        testConnection(created.connection_id)
+          .then(res => {
+            if (res.ok) {
+              toast.success(`"${created.name}" — ${res.message}`);
+            } else {
+              toast.warning(`"${created.name}" saved but test failed: ${res.message}`);
+            }
+          })
+          .catch(() => {
+            toast.warning(`"${created.name}" saved but connection test could not be reached.`);
+          });
       }
 
       handleClose();
@@ -364,6 +379,10 @@ export function DatabasesTab() {
         onSave={handleSave}
         initialData={initialData}
         saving={saving}
+        onTest={configureDb
+          ? () => testConnection(configureDb.connection_id)
+          : undefined
+        }
       />
     </div>
   );

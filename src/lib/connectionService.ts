@@ -147,3 +147,15 @@ export async function deactivateConnection(id: string): Promise<ConnectionOut> {
     method: 'PATCH',
   });
 }
+
+export interface TestConnectionResponse {
+  ok:      boolean;
+  message: string;
+}
+
+/** POST /api/v1/connections/:id/test — attempt a live connection */
+export async function testConnection(id: string): Promise<TestConnectionResponse> {
+  return apiFetch<TestConnectionResponse>(`/connections/${id}/test`, {
+    method: 'POST',
+  });
+}

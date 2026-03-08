@@ -1,6 +1,6 @@
 // src/app/pages/AdminPanel/components/UserAccessPanel.tsx
 import React, { useState, useEffect } from 'react';
-import { Database, Plus, Loader2, ShieldOff, Calendar, FileText, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Database, Plus, Loader2, ShieldOff, ShieldCheck, Calendar, FileText, ToggleLeft, ToggleRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../../lib/utils';
 import { UserOut } from '../../../../lib/userService';
@@ -142,9 +142,33 @@ export function UserAccessPanel({ user, allConnections, currentUid }: Props) {
     }
   };
 
-  const isSelf = user.firebase_uid === currentUid;
+  const isSelf  = user.firebase_uid === currentUid;
+  const isAdmin = user.role === 'admin';
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Admins bypass per-connection grants — show informational message instead
+  if (isAdmin) {
+    return (
+      <tr className="bg-blue-50/20">
+        <td colSpan={6} className="px-6 pb-4 pt-0">
+          <div className="rounded-xl border border-blue-100 bg-white px-5 py-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-blue-800">Full Database Access</p>
+                <p className="text-xs text-blue-500 mt-0.5">
+                  Admins have unrestricted access to all active database connections. No per-database grants are needed.
+                </p>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <tr className="bg-blue-50/20">
