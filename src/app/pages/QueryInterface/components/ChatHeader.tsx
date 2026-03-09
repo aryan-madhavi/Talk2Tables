@@ -1,10 +1,10 @@
 import React from 'react';
 import { Database } from 'lucide-react';
-import { ConnectionOut } from '../../../../lib/connectionService';
+import { ConnectionOption } from '../index';
 import { QueryResult } from '../types';
 
 interface ChatHeaderProps {
-  connections:   ConnectionOut[];
+  connections:   ConnectionOption[];
   selectedDb:    string;
   onSelectDb:    (id: string) => void;
   currentResult: QueryResult | null;

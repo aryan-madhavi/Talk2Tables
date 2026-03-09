@@ -549,6 +549,112 @@
         }
       }
     },
+    "/api/v1/connections/{connection_id}/audits": {
+      "get": {
+        "tags": [
+          "Database Connections"
+        ],
+        "summary": "List query audit logs for a connection",
+        "description": "Returns all audit records stored under this connection (newest first). Shows who ran what query, when, how many rows, and whether it succeeded. Requires db_manager or admin role.",
+        "operationId": "list_audits_route_api_v1_connections__connection_id__audits_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/{connection_id}/schema/refresh": {
+      "post": {
+        "tags": [
+          "Database Connections"
+        ],
+        "summary": "Force-invalidate the schema cache for a connection",
+        "description": "Deletes all cached schema documents under this connection. The next query will re-fetch the schema from the live database and re-cache it. Use this after DDL changes (new tables, renamed columns, etc). Requires db_manager or admin role.",
+        "operationId": "refresh_schema_cache_route_api_v1_connections__connection_id__schema_refresh_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/connections/{connection_id}/activate": {
       "patch": {
         "tags": [
@@ -1040,6 +1146,33 @@
         }
       }
     },
+    "/api/v1/access-grants/my/connections": {
+      "get": {
+        "tags": [
+          "DB Access Grants"
+        ],
+        "summary": "List databases I have access to",
+        "description": "Returns all active access grants for the current user, enriched with connection details (name, host, db_type, etc.). Password is never included. Available to any authenticated user.",
+        "operationId": "my_connections_route_api_v1_access_grants_my_connections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/access-grants": {
       "post": {
         "tags": [
@@ -1416,6 +1549,296 @@
         }
       }
     },
+    "/api/v1/schema/{connection_id}/{schema_name}/{table_name}": {
+      "get": {
+        "tags": [
+          "Query"
+        ],
+        "summary": "Get column definitions for a specific table",
+        "description": "Returns columns, data types, nullable, defaults, and FK relationships for the given table. Uses Firestore schema cache (1h TTL). Requires an active access grant (or admin/db_manager role).",
+        "operationId": "get_table_schema_api_v1_schema__connection_id___schema_name___table_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "schema_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Name"
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Table Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/recent": {
+      "get": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "Get last 5 recent chats across all workspaces",
+        "description": "Returns the 5 most recently updated chats for the current user, regardless of which DB they belong to. Requires a Firestore composite index on the 'chats' collection group: firebase_uid ASC + updated_at DESC.",
+        "operationId": "get_recent_chats_api_v1_chat_recent_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/workspaces": {
+      "get": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "List all workspaces for the current user",
+        "description": "Each workspace corresponds to one database connection the user has queried.",
+        "operationId": "list_workspaces_api_v1_chat_workspaces_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/workspaces/{connection_id}/chats": {
+      "get": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "List all chats in a workspace",
+        "operationId": "list_chats_api_v1_chat_workspaces__connection_id__chats_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages": {
+      "get": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "Get all messages in a chat",
+        "description": "Returns messages ordered by seq (ascending). Each message includes all stored fields.",
+        "operationId": "get_messages_api_v1_chat_workspaces__connection_id__chats__chat_id__messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chat Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}": {
+      "get": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "Get a single message with all fields",
+        "description": "Returns the full message document including sql_query, data, numerical_insights, total_records, summary, and error_message. msg_id is the hex sequence ID: 0001, 0002, etc.",
+        "operationId": "get_message_api_v1_chat_workspaces__connection_id__chats__chat_id__messages__msg_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chat Id"
+            }
+          },
+          {
+            "name": "msg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Msg Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -1558,6 +1981,70 @@
         ],
         "title": "AccessGrantOut",
         "description": "Full access grant record returned to frontend."
+      },
+      "ChatListResponse": {
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "chats": {
+            "items": {
+              "$ref": "#/components/schemas/ChatOut"
+            },
+            "type": "array",
+            "title": "Chats"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection_id",
+          "chats",
+          "total"
+        ],
+        "title": "ChatListResponse"
+      },
+      "ChatOut": {
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "title": "Chat Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id",
+            "default": ""
+          },
+          "msg_count": {
+            "type": "integer",
+            "title": "Msg Count",
+            "default": 0
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chat_id",
+          "title",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChatOut"
       },
       "ConnectionListResponse": {
         "properties": {
@@ -2032,6 +2519,108 @@
         ],
         "title": "MeResponse"
       },
+      "MessageOut": {
+        "properties": {
+          "msg_id": {
+            "type": "string",
+            "title": "Msg Id"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "sql_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Query"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "total_records": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Records"
+          },
+          "numerical_insights": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numerical Insights"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "msg_id",
+          "seq",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "MessageOut"
+      },
       "MessageResponse": {
         "properties": {
           "message": {
@@ -2044,6 +2633,37 @@
           "message"
         ],
         "title": "MessageResponse"
+      },
+      "MessagesResponse": {
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "title": "Chat Id"
+          },
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageOut"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chat_id",
+          "connection_id",
+          "messages",
+          "total"
+        ],
+        "title": "MessagesResponse"
       },
       "QueryRequest": {
         "properties": {
@@ -2629,6 +3249,50 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceListResponse": {
+        "properties": {
+          "workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceOut"
+            },
+            "type": "array",
+            "title": "Workspaces"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspaces",
+          "total"
+        ],
+        "title": "WorkspaceListResponse"
+      },
+      "WorkspaceOut": {
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "connection_name": {
+            "type": "string",
+            "title": "Connection Name",
+            "default": ""
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection_id",
+          "created_at"
+        ],
+        "title": "WorkspaceOut"
       },
       "auth__routes__schemas__UserOut": {
         "properties": {

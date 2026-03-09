@@ -1,11 +1,11 @@
 // ─── Message ──────────────────────────────────────────────────────────────────
 
 export interface Message {
-  id:              string;
-  role:            'user' | 'assistant';
-  content:         string;
-  timestamp:       Date;
-  relatedQueryId?: string;
+  id:           string;
+  role:         'user' | 'assistant';
+  content:      string;
+  timestamp:    Date;
+  queryResult?: QueryResult;
 }
 
 // ─── Query Result ─────────────────────────────────────────────────────────────

@@ -63,6 +63,17 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>;
 }
 
+export interface MyConnectionItem {
+  grant:      { access_id: string; permission: PermissionType; granted_at: string; expires_at: string | null };
+  connection: { connection_id: string; name: string; db_type: string; host: string; port: number; database_name: string; is_active: boolean; description: string | null };
+}
+
+/** GET /api/v1/access-grants/my/connections — connections the current user has been granted access to */
+export async function getMyConnections(): Promise<MyConnectionItem['connection'][]> {
+  const raw = await apiFetch<{ connections: MyConnectionItem[]; total: number }>('/access-grants/my/connections');
+  return raw.connections.map(item => item.connection);
+}
+
 export async function listGrantsByUser(uid: string, activeOnly = false): Promise<AccessGrantListResponse> {
   return apiFetch<AccessGrantListResponse>(`/access-grants?uid=${uid}&active_only=${activeOnly}`);
 }
