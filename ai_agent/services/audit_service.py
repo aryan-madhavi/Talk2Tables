@@ -1,16 +1,17 @@
 # ai_agent/services/audit_service.py
 """
-Query Audit Service — append-only writes to Firestore query_audit collection.
+Query Audit Service — append-only writes to Firestore.
 
-Firestore path: query_audit/{audit_id}
+Firestore path: database_connections/{connection_id}/audits/{audit_id}
 
-Fields written per query:
+Queries are scoped under their connection so admins can review per-DB activity.
+
+Fields per audit doc:
     audit_id, firebase_uid, connection_id, chat_id,
     sql_query, summary, row_count, execution_time_ms,
-    status ("success" | "error"), error_message, created_at
+    status ("results" | "error"), error_message, created_at
 
-IMPORTANT: This collection is append-only — never call .update() or .delete()
-on audit documents (per Firestore schema spec).
+IMPORTANT: Append-only — never call .update() or .delete() on audit documents.
 """
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_CONNECTIONS_COL = "database_connections"
 
 
 def _now_iso() -> str:
@@ -34,14 +37,13 @@ async def log_query(
     summary:           Optional[str],
     row_count:         int,
     execution_time_ms: float,
-    status:            str = "success",
+    status:            str = "results",
     error_message:     Optional[str] = None,
 ) -> str:
     """
-    Append a query record to Firestore query_audit collection.
+    Append a query record under database_connections/{connection_id}/audits/{audit_id}.
 
-    This is non-fatal — any Firestore error is logged but NOT raised,
-    so a failed audit write never breaks the user's query response.
+    Non-fatal — any Firestore error is logged but NOT raised.
 
     Returns:
         The generated audit_id string, or empty string on failure.
@@ -64,7 +66,13 @@ async def log_query(
     try:
         from auth.core.firebase import get_firestore_client
         db = get_firestore_client()
-        db.collection("query_audit").document(audit_id).set(doc)
+        (
+            db.collection(_CONNECTIONS_COL)
+              .document(connection_id)
+              .collection("audits")
+              .document(audit_id)
+              .set(doc)
+        )
         logger.info(
             f"[AuditService] Logged | audit_id={audit_id} "
             f"status={status} rows={row_count} uid={firebase_uid}"

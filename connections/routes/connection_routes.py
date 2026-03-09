@@ -13,7 +13,9 @@ Endpoints:
     DELETE /api/v1/connections/{id}       — hard delete (admin only)
     PATCH  /api/v1/connections/{id}/activate    — enable connection
     PATCH  /api/v1/connections/{id}/deactivate  — disable connection
-    POST   /api/v1/connections/{id}/test        — live connectivity test
+    POST   /api/v1/connections/{id}/test           — live connectivity test
+    GET    /api/v1/connections/{id}/audits         — list query audit logs for a connection
+    POST   /api/v1/connections/{id}/schema/refresh — force-invalidate schema cache
 """
 from __future__ import annotations
 
@@ -190,6 +192,63 @@ async def test_connection_route(
             detail=result["message"],
         )
     return result
+
+
+# ── GET /api/v1/connections/{id}/audits ──────────────────────────────────────
+
+@router.get(
+    "/{connection_id}/audits",
+    summary="List query audit logs for a connection",
+    description=(
+        "Returns all audit records stored under this connection (newest first). "
+        "Shows who ran what query, when, how many rows, and whether it succeeded. "
+        "Requires db_manager or admin role."
+    ),
+)
+async def list_audits_route(
+    connection_id: str,
+    limit: int = 50,
+    current_user: dict = Depends(require_db_manager),
+):
+    try:
+        from auth.core.firebase import get_firestore_client
+        db   = get_firestore_client()
+        from google.cloud.firestore_v1 import Query
+        docs = (
+            db.collection("database_connections")
+              .document(connection_id)
+              .collection("audits")
+              .order_by("created_at", direction=Query.DESCENDING)
+              .limit(limit)
+              .stream()
+        )
+        return {"connection_id": connection_id, "audits": [d.to_dict() for d in docs]}
+    except Exception as exc:
+        logger.error(f"[GET /connections/{connection_id}/audits] Failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── POST /api/v1/connections/{id}/schema/refresh ──────────────────────────────
+
+@router.post(
+    "/{connection_id}/schema/refresh",
+    response_model=MessageResponse,
+    summary="Force-invalidate the schema cache for a connection",
+    description=(
+        "Deletes all cached schema documents under this connection. "
+        "The next query will re-fetch the schema from the live database and re-cache it. "
+        "Use this after DDL changes (new tables, renamed columns, etc). "
+        "Requires db_manager or admin role."
+    ),
+)
+async def refresh_schema_cache_route(
+    connection_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    logger.info(f"[POST /connections/{connection_id}/schema/refresh] by={current_user['firebase_uid']}")
+    from ai_agent.tools.schema_tools import invalidate_schema_cache
+    invalidate_schema_cache(connection_id)
+    return MessageResponse(message=f"Schema cache cleared for connection '{connection_id}'.")
 
 
 # ── PATCH /api/v1/connections/{id}/activate ───────────────────────────────────

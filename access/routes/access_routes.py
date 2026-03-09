@@ -9,6 +9,7 @@ Endpoints:
   GET    /api/v1/access-grants/{id}                     — single grant     (db_manager+)
   PATCH  /api/v1/access-grants/{id}                     — update permission/expiry (db_manager+)
   PATCH  /api/v1/access-grants/{id}/revoke              — revoke grant     (db_manager+)
+  GET    /api/v1/access-grants/my/connections           — DBs I can access + connection details (analyst+)
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from auth.routes.dependencies import require_db_manager
+from auth.routes.dependencies import require_analyst, require_db_manager
 from access.routes.schemas import (
     CreateAccessGrantRequest,
     UpdateAccessGrantRequest,
@@ -40,6 +41,42 @@ router = APIRouter(
     prefix="/api/v1/access-grants",
     tags=["DB Access Grants"],
 )
+
+
+# ── GET /api/v1/access-grants/my/connections ─────────────────────────────────
+
+@router.get(
+    "/my/connections",
+    summary="List databases I have access to",
+    description=(
+        "Returns all active access grants for the current user, enriched with "
+        "connection details (name, host, db_type, etc.). "
+        "Password is never included. Available to any authenticated user."
+    ),
+)
+async def my_connections_route(
+    current_user: dict = Depends(require_analyst),
+):
+    uid = current_user["firebase_uid"]
+    grants = await list_grants_by_user(uid, active_only=True)
+    if not grants:
+        return {"connections": [], "total": 0}
+
+    from connections.services.connection_service import get_connection_by_id
+    results = []
+    for grant in grants:
+        conn = await get_connection_by_id(grant["connection_id"])
+        results.append({
+            "grant": {
+                "access_id":  grant.get("access_id"),
+                "permission": grant.get("permission"),
+                "granted_at": grant.get("granted_at"),
+                "expires_at": grant.get("expires_at"),
+            },
+            "connection": conn,  # safe — no password_enc
+        })
+
+    return {"connections": results, "total": len(results)}
 
 
 # ── POST /api/v1/access-grants ────────────────────────────────────────────────

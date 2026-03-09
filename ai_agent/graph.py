@@ -57,7 +57,7 @@ async def node_react_agent(state: AgentState) -> AgentState:
 
     # ── Build tools and LLM ───────────────────────────────────────────────
     try:
-        tools          = get_tools(conn_str, user_role)
+        tools          = get_tools(conn_str, user_role, state["connection_id"])
         llm            = get_llm()
         system_prompt  = build_system_prompt(dialect)
     except Exception as exc:

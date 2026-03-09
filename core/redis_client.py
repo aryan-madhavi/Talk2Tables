@@ -22,11 +22,14 @@ Performance note:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Optional
 
 from auth.core.config import settings
+
+_REDIS_TIMEOUT = 0.5  # max seconds any Redis call may take before we give up and hit Firestore
 
 logger = logging.getLogger(__name__)
 
@@ -82,44 +85,60 @@ def _client():
 # ── Public helpers ────────────────────────────────────────────────────────────
 
 async def redis_get(key: str) -> Optional[Any]:
-    """GET a JSON-decoded value. Returns None on miss or any error."""
+    """
+    GET a JSON-decoded value.
+    Returns None on miss, Redis error, or if Redis times out (_REDIS_TIMEOUT).
+    Caller should fall back to Firestore on None.
+    """
     client = _client()
     if client is None:
         return None
     try:
         async with client as r:
-            raw = await r.get(key)
+            raw = await asyncio.wait_for(r.get(key), timeout=_REDIS_TIMEOUT)
         if raw is None:
             return None
         return json.loads(raw)
+    except asyncio.TimeoutError:
+        logger.warning(f"[Redis] GET timeout (>{_REDIS_TIMEOUT}s) key={key} — falling back to Firestore")
+        return None
     except Exception as e:
         logger.warning(f"[Redis] GET failed key={key}: {e}")
         return None
 
 
 async def redis_set(key: str, value: Any, ttl_seconds: int) -> bool:
-    """SET a JSON-encoded value with TTL. Returns True on success."""
+    """SET a JSON-encoded value with TTL. Returns True on success. Non-fatal on timeout/error."""
     client = _client()
     if client is None:
         return False
     try:
         async with client as r:
-            await r.setex(key, ttl_seconds, json.dumps(value, default=str))
+            await asyncio.wait_for(
+                r.setex(key, ttl_seconds, json.dumps(value, default=str)),
+                timeout=_REDIS_TIMEOUT,
+            )
         return True
+    except asyncio.TimeoutError:
+        logger.warning(f"[Redis] SET timeout (>{_REDIS_TIMEOUT}s) key={key} — skipping cache write")
+        return False
     except Exception as e:
         logger.warning(f"[Redis] SET failed key={key}: {e}")
         return False
 
 
 async def redis_delete(*keys: str) -> bool:
-    """DELETE one or more exact keys. Returns True on success."""
+    """DELETE one or more exact keys. Non-fatal on timeout/error."""
     client = _client()
     if client is None or not keys:
         return False
     try:
         async with client as r:
-            await r.delete(*keys)
+            await asyncio.wait_for(r.delete(*keys), timeout=_REDIS_TIMEOUT)
         return True
+    except asyncio.TimeoutError:
+        logger.warning(f"[Redis] DELETE timeout keys={keys}")
+        return False
     except Exception as e:
         logger.warning(f"[Redis] DELETE failed keys={keys}: {e}")
         return False
@@ -134,9 +153,12 @@ async def redis_delete_pattern(pattern: str) -> int:
         deleted = 0
         async with client as r:
             async for key in r.scan_iter(match=pattern, count=100):
-                await r.delete(key)
+                await asyncio.wait_for(r.delete(key), timeout=_REDIS_TIMEOUT)
                 deleted += 1
         return deleted
+    except asyncio.TimeoutError:
+        logger.warning(f"[Redis] DELETE pattern timeout pattern={pattern}")
+        return 0
     except Exception as e:
         logger.warning(f"[Redis] DELETE pattern={pattern} failed: {e}")
         return 0

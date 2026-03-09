@@ -91,17 +91,12 @@ async def query(
     final_response = result.get("final_response", {})
 
     # ── 4. Save messages to Firestore chat sub-collection ─────────────────
-    assistant_content = (
-        final_response.get("summary", "")
-        if response_type == "results"
-        else final_response.get("error_message", "An error occurred.")
-    )
     append_messages(
-        firebase_uid      = firebase_uid,
-        connection_id     = body.connection_id,
-        chat_id           = chat_id,
-        user_content      = body.chat_input,
-        assistant_content = assistant_content,
+        firebase_uid        = firebase_uid,
+        connection_id       = body.connection_id,
+        chat_id             = chat_id,
+        user_content        = body.chat_input,
+        assistant_response  = final_response,
     )
 
     # ── 5. Write audit log ────────────────────────────────────────────────
@@ -192,3 +187,71 @@ async def list_schema(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Schema listing failed: {exc}",
         )
+
+
+# ── GET /api/v1/schema/{connection_id}/{schema_name}/{table_name} ─────────────
+
+@router.get(
+    "/schema/{connection_id}/{schema_name}/{table_name}",
+    summary="Get column definitions for a specific table",
+    description=(
+        "Returns columns, data types, nullable, defaults, and FK relationships "
+        "for the given table. Uses Firestore schema cache (1h TTL). "
+        "Requires an active access grant (or admin/db_manager role)."
+    ),
+)
+async def get_table_schema(
+    connection_id: str,
+    schema_name:   str,
+    table_name:    str,
+    current_user:  dict = Depends(require_analyst),
+):
+    firebase_uid = current_user["firebase_uid"]
+
+    _BYPASS_ROLES = {"admin", "db_manager"}
+    if current_user["role"] not in _BYPASS_ROLES:
+        try:
+            from access.services.access_service import verify_access
+            allowed, reason = await verify_access(firebase_uid, connection_id)
+            if not allowed:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Access denied: {reason}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    try:
+        from connections.services.connection_service import get_connection_with_password
+        from ai_agent.nodes.entry import _build_connection_string
+        from ai_agent.tools.schema_tools import make_schema_tools
+
+        conn = await get_connection_with_password(connection_id)
+        if not conn:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found.")
+
+        conn_str = _build_connection_string(conn)
+        tools    = make_schema_tools(conn_str, connection_id)
+
+        # get_table_definition is the second tool
+        get_table_definition = tools[1]
+        result = get_table_definition.invoke({"table_name": table_name, "schema_name": schema_name})
+
+        import json
+        try:
+            columns = json.loads(result)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result)
+
+        return {
+            "connection_id": connection_id,
+            "schema":        schema_name,
+            "table":         table_name,
+            "columns":       columns,
+            "column_count":  len(columns),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[GET /schema/{connection_id}/{schema_name}/{table_name}] Failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

@@ -30,6 +30,7 @@ from connections import connections_router
 from users import users_router
 from access import access_router
 from query import query_router
+from chat import chat_router
 from core.redis_client import init_redis, close_redis
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -151,6 +152,7 @@ app.include_router(connections_router)  # /api/v1/connections/*
 app.include_router(users_router)        # /api/v1/users/*
 app.include_router(access_router)       # /api/v1/access-grants/*
 app.include_router(query_router)        # /api/v1/query, /api/v1/schema/*
+app.include_router(chat_router)         # /api/v1/chat/*
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
