@@ -555,7 +555,7 @@
           "Database Connections"
         ],
         "summary": "List query audit logs for a connection",
-        "description": "Returns all audit records stored under this connection (newest first). Shows who ran what query, when, how many rows, and whether it succeeded. Requires db_manager or admin role.",
+        "description": "Returns audit records for this connection (newest first). Optional filters: status (success|error), uid (filter by specific user). Requires db_manager or admin role.",
         "operationId": "list_audits_route_api_v1_connections__connection_id__audits_get",
         "security": [
           {
@@ -580,6 +580,106 @@
               "type": "integer",
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/{connection_id}/stats": {
+      "get": {
+        "tags": [
+          "Database Connections"
+        ],
+        "summary": "Usage statistics for a database connection",
+        "description": "Aggregates audit logs to produce query counts, success rate, row totals, execution time averages, query type breakdown, top users, and daily activity. Use ?days=7|30|90|0 to control the lookback window (0 = all time). Requires db_manager or admin role.",
+        "operationId": "connection_stats_route_api_v1_connections__connection_id__stats_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "title": "Days"
             }
           }
         ],
@@ -1507,7 +1607,7 @@
           "Query"
         ],
         "summary": "List tables for schema explorer",
-        "description": "Returns all tables and column counts for the schema explorer sidebar.",
+        "description": "Returns all tables grouped by schema name. Uses Firestore schema cache (1h TTL). Safe for users who have never run a query — triggers a live DB fetch + cache write on first call. Requires an active access grant (or admin/db_manager role).",
         "operationId": "list_schema_api_v1_schema__connection_id__get",
         "security": [
           {
@@ -1588,6 +1688,166 @@
             "schema": {
               "type": "string",
               "title": "Table Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/query/history": {
+      "get": {
+        "tags": [
+          "Query"
+        ],
+        "summary": "Get query history for the current user",
+        "description": "Returns a paginated list of AI assistant messages across all chats and workspaces. Each item shows title, sql_query, timestamp, database, query_type, status, and favourited flag. Requires Firestore composite index on 'messages' collection group: firebase_uid ASC + role ASC + created_at DESC.",
+        "operationId": "get_query_history_api_v1_query_history_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "favourites_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Favourites Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/query/audits": {
+      "get": {
+        "tags": [
+          "Query"
+        ],
+        "summary": "Get audit logs for the current user",
+        "description": "Returns raw audit records for queries run by the current user, across all connections. Each record contains sql_query, row_count, execution_time_ms, status, error_message, and timestamp. Optional filters: connection_id, status (success|error). Requires Firestore composite index on 'audits' collection group: firebase_uid ASC + created_at DESC.",
+        "operationId": "get_audit_logs_api_v1_query_audits_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
             }
           }
         ],
@@ -1781,6 +2041,136 @@
         "summary": "Get a single message with all fields",
         "description": "Returns the full message document including sql_query, data, numerical_insights, total_records, summary, and error_message. msg_id is the hex sequence ID: 0001, 0002, etc.",
         "operationId": "get_message_api_v1_chat_workspaces__connection_id__chats__chat_id__messages__msg_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chat Id"
+            }
+          },
+          {
+            "name": "msg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Msg Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite": {
+      "post": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "Favourite an AI message",
+        "description": "Mark an assistant message as favourited. Only assistant (a_XXXX) messages can be favourited.",
+        "operationId": "favourite_message_api_v1_chat_workspaces__connection_id__chats__chat_id__messages__msg_id__favourite_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chat Id"
+            }
+          },
+          {
+            "name": "msg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Msg Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Chat & Workspaces"
+        ],
+        "summary": "Remove favourite from an AI message",
+        "description": "Unmark an assistant message as favourited.",
+        "operationId": "unfavourite_message_api_v1_chat_workspaces__connection_id__chats__chat_id__messages__msg_id__favourite_delete",
         "security": [
           {
             "HTTPBearer": []
@@ -2537,6 +2927,17 @@
             "type": "string",
             "title": "Content"
           },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
           "sql_query": {
             "anyOf": [
               {
@@ -2547,6 +2948,28 @@
               }
             ],
             "title": "Sql Query"
+          },
+          "query_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Type"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           },
           "summary": {
             "anyOf": [
@@ -2605,6 +3028,11 @@
               }
             ],
             "title": "Error Message"
+          },
+          "favourited": {
+            "type": "boolean",
+            "title": "Favourited",
+            "default": false
           },
           "created_at": {
             "type": "string",
@@ -2737,6 +3165,16 @@
             "type": "string",
             "title": "Connection Id"
           },
+          "schemas": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Schemas"
+          },
           "tables": {
             "items": {
               "$ref": "#/components/schemas/SchemaTable"
@@ -2747,15 +3185,38 @@
           "table_count": {
             "type": "integer",
             "title": "Table Count"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "cached_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
           }
         },
         "type": "object",
         "required": [
           "connection_id",
+          "schemas",
           "tables",
           "table_count"
         ],
-        "title": "SchemaResponse"
+        "title": "SchemaResponse",
+        "description": "Response for GET /api/v1/schema/{connection_id}\n\nschemas: tables grouped by schema name  e.g. {\"public\": [\"users\", \"orders\"]}\ntables:  flat list kept for backwards-compat (schema explorer sidebar)\ncached:  True if result was served from Firestore cache\ncached_at: ISO timestamp of when the cache was last populated (None if live fetch)"
       },
       "SchemaTable": {
         "properties": {

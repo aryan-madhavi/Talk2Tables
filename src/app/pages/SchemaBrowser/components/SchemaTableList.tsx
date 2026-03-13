@@ -1,25 +1,23 @@
 import React from 'react';
-import { Search, Table, ArrowRight, Database } from 'lucide-react';
+import { Search, Table, ArrowRight, Database, Loader2 } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
-import { TableSchema } from '../types';
+import { SchemaTableMeta } from '../../../../lib/schemaService';
 
 interface SchemaTableListProps {
-  tables:        TableSchema[];
-  selectedTable: TableSchema;
+  tables:        SchemaTableMeta[];
+  selectedTable: SchemaTableMeta | null;
   searchTerm:    string;
+  loading:       boolean;
+  connName:      string;
   onSearch:      (value: string) => void;
-  onSelect:      (table: TableSchema) => void;
+  onSelect:      (table: SchemaTableMeta) => void;
 }
 
 export function SchemaTableList({
-  tables,
-  selectedTable,
-  searchTerm,
-  onSearch,
-  onSelect,
+  tables, selectedTable, searchTerm, loading, connName, onSearch, onSelect,
 }: SchemaTableListProps) {
   return (
-    <div className="w-full md:w-64 border-r border-gray-100 flex flex-col bg-gray-50/50">
+    <div className="w-full md:w-64 border-r border-gray-100 flex flex-col bg-gray-50/50 shrink-0">
 
       {/* Search */}
       <div className="p-4 border-b border-gray-100 bg-white">
@@ -39,12 +37,25 @@ export function SchemaTableList({
 
       {/* Table list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {tables.map(table => {
-          const isActive = selectedTable.name === table.name;
+        {loading && (
+          <div className="flex items-center justify-center py-10 text-gray-400 gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Loading tables…</span>
+          </div>
+        )}
+
+        {!loading && tables.length === 0 && (
+          <div className="text-center py-10 text-sm text-gray-400">
+            {searchTerm ? 'No tables match your search' : 'No tables found'}
+          </div>
+        )}
+
+        {!loading && tables.map(t => {
+          const isActive = selectedTable?.table === t.table && selectedTable?.schema === t.schema;
           return (
             <button
-              key={table.name}
-              onClick={() => onSelect(table)}
+              key={`${t.schema}.${t.table}`}
+              onClick={() => onSelect(t)}
               className={cn(
                 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors group',
                 isActive
@@ -53,11 +64,20 @@ export function SchemaTableList({
               )}
             >
               <Table className={cn(
-                'w-4 h-4 transition-colors',
+                'w-4 h-4 shrink-0 transition-colors',
                 isActive ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500',
               )} />
-              <span className="truncate">{table.name}</span>
-              {isActive && <ArrowRight className="ml-auto w-3 h-3 opacity-50" />}
+              <div className="flex-1 min-w-0 text-left">
+                <div className="truncate">{t.table}</div>
+                {t.schema && <div className="text-[10px] text-gray-400 font-normal truncate">{t.schema}</div>}
+              </div>
+              <span className={cn(
+                'text-[10px] shrink-0',
+                isActive ? 'text-blue-400' : 'text-gray-400',
+              )}>
+                {t.columns}c
+              </span>
+              {isActive && <ArrowRight className="w-3 h-3 opacity-50 shrink-0" />}
             </button>
           );
         })}
@@ -65,8 +85,8 @@ export function SchemaTableList({
 
       {/* Footer */}
       <div className="p-4 border-t border-gray-100 bg-white text-xs text-gray-500 flex items-center gap-2">
-        <Database className="w-3 h-3" />
-        <span>Connected to: <strong>Plant Instrumentation</strong></span>
+        <Database className="w-3 h-3 shrink-0" />
+        <span className="truncate">Connected to: <strong>{connName || '—'}</strong></span>
       </div>
 
     </div>

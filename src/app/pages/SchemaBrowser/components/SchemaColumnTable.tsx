@@ -1,47 +1,60 @@
 import React from 'react';
 import { Key, Link2 } from 'lucide-react';
-import { TableSchema } from '../types';
+import { ColumnOut } from '../../../../lib/schemaService';
 
 interface SchemaColumnTableProps {
-  table: TableSchema;
+  columns: ColumnOut[];
 }
 
-export function SchemaColumnTable({ table }: SchemaColumnTableProps) {
+export function SchemaColumnTable({ columns }: SchemaColumnTableProps) {
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
       <table className="w-full text-sm text-left">
         <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
           <tr>
-            <th className="px-6 py-3 font-medium">Column Name</th>
-            <th className="px-6 py-3 font-medium">Data Type</th>
-            <th className="px-6 py-3 font-medium">Key Type</th>
-            <th className="px-6 py-3 font-medium">Description</th>
+            <th className="px-5 py-3 font-medium">Column</th>
+            <th className="px-5 py-3 font-medium">Type</th>
+            <th className="px-5 py-3 font-medium">Nullable</th>
+            <th className="px-5 py-3 font-medium">Constraint</th>
+            <th className="px-5 py-3 font-medium">Default</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {table.columns.map(col => (
-            <tr key={col.name} className="hover:bg-gray-50 transition-colors">
-              <td className="px-6 py-4 font-medium text-gray-900">{col.name}</td>
-              <td className="px-6 py-4 text-gray-600 font-mono text-xs">{col.type}</td>
-              <td className="px-6 py-4">
-                {col.isKey && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full
-                                   bg-amber-50 text-amber-700 text-xs font-medium border border-amber-100">
-                    <Key className="w-3 h-3" /> PK
+          {columns.map(col => {
+            const isPK = col.constraint_type === 'PRIMARY KEY';
+            const isFK = col.constraint_type === 'FOREIGN KEY';
+            return (
+              <tr key={col.column_name} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-3 font-medium text-gray-900">{col.column_name}</td>
+                <td className="px-5 py-3 font-mono text-xs text-gray-600">{col.data_type}</td>
+                <td className="px-5 py-3 text-xs">
+                  <span className={col.is_nullable === 'YES' ? 'text-gray-400' : 'text-gray-700 font-medium'}>
+                    {col.is_nullable === 'YES' ? 'nullable' : 'NOT NULL'}
                   </span>
-                )}
-                {col.isForeignKey && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full
-                                   bg-blue-50 text-blue-700 text-xs font-medium border border-blue-100 ml-2">
-                    <Link2 className="w-3 h-3" /> FK
-                  </span>
-                )}
-              </td>
-              <td className="px-6 py-4 text-gray-400 italic text-xs">
-                No description available
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className="px-5 py-3">
+                  {isPK && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                     bg-amber-50 text-amber-700 text-xs font-medium border border-amber-100">
+                      <Key className="w-3 h-3" /> PK
+                    </span>
+                  )}
+                  {isFK && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                     bg-blue-50 text-blue-700 text-xs font-medium border border-blue-100">
+                      <Link2 className="w-3 h-3" /> FK
+                      {col.referenced_table && (
+                        <span className="text-blue-500 font-normal">→ {col.referenced_table}</span>
+                      )}
+                    </span>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-xs text-gray-400 font-mono">
+                  {col.column_default ?? <span className="italic">—</span>}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

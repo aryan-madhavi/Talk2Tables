@@ -225,6 +225,6 @@ export async function getMe(): Promise<BackendUser> {
 
 // ── Sessions list ─────────────────────────────────────────────────────────────
 
-export async function getSessions(): Promise<SessionEntry[]> {
-  return apiFetch<SessionEntry[]>('/sessions');
+export async function getSessions(): Promise<{ sessions: SessionEntry[]; total: number }> {
+  return apiFetch<{ sessions: SessionEntry[]; total: number }>('/sessions');
 }
