@@ -43,7 +43,8 @@ def _serialize(value: Any) -> Any:
 def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
     """Re-execute SQL synchronously; called via run_in_executor."""
     from sqlalchemy import create_engine, text as sa_text
-    engine = create_engine(connection_string, pool_pre_ping=True, echo=False)
+    _ct    = {} if connection_string.lower().startswith("sqlite") else {"connect_args": {"connect_timeout": 10}}
+    engine = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
     try:
         with engine.connect() as cx:
             result  = cx.execute(sa_text(sql))
@@ -130,6 +131,11 @@ async def node_output_parser(state: AgentState) -> AgentState:
         ni["total_records"] = actual_count
         parsed["numerical_insights"] = ni
         parsed["total_records"] = actual_count
+
+        # Auto-generate title if LLM omitted it
+        if not parsed.get("title"):
+            summary = parsed.get("summary", "")
+            parsed["title"] = summary.split(".")[0].strip()[:80] or "Query result"
 
         logger.info(
             f"[node_output_parser] Parse OK | "

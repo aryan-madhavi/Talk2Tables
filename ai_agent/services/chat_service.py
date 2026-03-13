@@ -5,13 +5,18 @@ Chat & Workspace Service — manages Firestore sub-collections for per-user conv
 Firestore path structure:
     users/{uid}/workspaces/{connection_id}                               ← workspace doc
     users/{uid}/workspaces/{connection_id}/chats/{chat_id}              ← chat doc
-    users/{uid}/workspaces/{connection_id}/chats/{chat_id}/messages/{seq_hex}  ← message doc
+    users/{uid}/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}  ← message doc
 
-Message document IDs are zero-padded hex integers: 0001, 0002, 0003, ...
-This allows natural lexicographic ordering without a separate timestamp index.
+Message document IDs are turn-prefixed:
+    u_0001  — user message from turn 1
+    a_0001  — assistant message from turn 1
+    u_0002  — user message from turn 2
+    a_0002  — assistant message from turn 2
+    ...
 
-Message counter is stored as `msg_count` on the chat doc and incremented
-atomically via a Firestore transaction on every write (+2 per turn).
+Turn counter is stored as `turn_count` on the chat doc and incremented
+atomically via a Firestore transaction on every write (+1 per turn).
+Ordering is by `seq` integer field (user=odd, assistant=even).
 
 Rules:
   - Messages are APPEND-ONLY — never call .update() or .delete() on message docs
@@ -33,11 +38,24 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _hex_id(seq: int) -> str:
-    """Convert integer sequence number to zero-padded 4-char hex string.
-    e.g. 1 → '0001', 255 → '00ff', 65536 → '10000'
-    """
-    return f"{seq:04x}"
+def _detect_query_type(sql: str) -> str:
+    """Return first keyword of the SQL as the query type (SELECT, INSERT, etc.)."""
+    first = (sql or "").strip().upper().split()
+    if not first:
+        return "UNKNOWN"
+    word = first[0]
+    # WITH ... SELECT is still a SELECT
+    return "SELECT" if word == "WITH" else word if word in {"SELECT", "INSERT", "UPDATE", "DELETE"} else "OTHER"
+
+
+def _user_msg_id(turn: int) -> str:
+    """e.g. turn 1 → 'u_0001', turn 12 → 'u_0012'"""
+    return f"u_{turn:04d}"
+
+
+def _ai_msg_id(turn: int) -> str:
+    """e.g. turn 1 → 'a_0001', turn 12 → 'a_0012'"""
+    return f"a_{turn:04d}"
 
 
 def _workspace_ref(db, firebase_uid: str, connection_id: str):
@@ -101,7 +119,7 @@ def create_chat(
             "firebase_uid":  firebase_uid,   # stored for collection group queries
             "connection_id": connection_id,  # stored for collection group queries
             "title":         title,
-            "msg_count":     0,
+            "turn_count":    0,
             "created_at":    now,
             "updated_at":    now,
         })
@@ -167,6 +185,7 @@ def append_messages(
     chat_id:            str,
     user_content:       str,
     assistant_response: dict,
+    connection_name:    str = "",
 ) -> None:
     """
     Atomically append a user message and an assistant message to the chat.
@@ -177,7 +196,7 @@ def append_messages(
 
     assistant_response should be the full final_response dict from the agent:
         {
-            sql_query, summary, total_records,
+            title, sql_query, summary, total_records,
             numerical_insights, data,         ← on success
             error_message                      ← on error
         }
@@ -196,15 +215,25 @@ def append_messages(
         # ── Atomic counter increment via transaction ────────────────────────
         @fs_transactional
         def _write(transaction, chat_ref):
-            snapshot     = chat_ref.get(transaction=transaction)
-            current_seq  = snapshot.to_dict().get("msg_count", 0) if snapshot.exists else 0
-            user_seq     = current_seq + 1
-            ai_seq       = current_seq + 2
+            snapshot   = chat_ref.get(transaction=transaction)
+            prev_turn  = snapshot.to_dict().get("turn_count", 0) if snapshot.exists else 0
+            new_turn   = prev_turn + 1
+            user_seq   = new_turn * 2 - 1   # 1, 3, 5, ...
+            ai_seq     = new_turn * 2        # 2, 4, 6, ...
 
-            # User message
+            # Shared path fields — stored on every message for collection group queries
+            _path = {
+                "firebase_uid":  firebase_uid,
+                "connection_id": connection_id,
+                "connection_name": connection_name,
+                "chat_id":       chat_id,
+            }
+
+            # User message — ID: u_0001, u_0002, ...
             transaction.set(
-                msgs_col.document(_hex_id(user_seq)),
+                msgs_col.document(_user_msg_id(new_turn)),
                 {
+                    **_path,
                     "seq":        user_seq,
                     "role":       "user",
                     "content":    user_content,
@@ -212,24 +241,30 @@ def append_messages(
                 },
             )
 
-            # Assistant message — store every AI field as a flat Firestore field
+            # Assistant message — ID: a_0001, a_0002, ...
+            sql_q = assistant_response.get("sql_query") or ""
             ai_doc = {
-                "seq":               ai_seq,
-                "role":              "assistant",
-                "content":           assistant_response.get("summary") or assistant_response.get("error_message", ""),
-                "created_at":        now,
+                **_path,
+                "seq":                ai_seq,
+                "role":               "assistant",
+                "title":              assistant_response.get("title", ""),
+                "content":            assistant_response.get("summary") or assistant_response.get("error_message", ""),
+                "created_at":         now,
+                "favourited":         False,
                 # ── AI response fields ─────────────────────────────────────
-                "sql_query":         assistant_response.get("sql_query", ""),
-                "summary":           assistant_response.get("summary", ""),
-                "total_records":     assistant_response.get("total_records", 0),
+                "sql_query":          sql_q,
+                "query_type":         _detect_query_type(sql_q),
+                "status":             "error" if assistant_response.get("error_message") else "success",
+                "summary":            assistant_response.get("summary", ""),
+                "total_records":      assistant_response.get("total_records", 0),
                 "numerical_insights": assistant_response.get("numerical_insights", {}),
-                "data":              assistant_response.get("data", []),
-                "error_message":     assistant_response.get("error_message", None),
+                "data":               assistant_response.get("data", []),
+                "error_message":      assistant_response.get("error_message", None),
             }
-            transaction.set(msgs_col.document(_hex_id(ai_seq)), ai_doc)
+            transaction.set(msgs_col.document(_ai_msg_id(new_turn)), ai_doc)
 
-            # Advance the counter + touch updated_at on the chat doc
-            transaction.update(chat_ref, {"msg_count": ai_seq, "updated_at": now})
+            # Advance the turn counter + touch updated_at on the chat doc
+            transaction.update(chat_ref, {"turn_count": new_turn, "updated_at": now})
 
         txn = db.transaction()
         _write(txn, chat_doc)

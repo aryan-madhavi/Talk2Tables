@@ -6,22 +6,13 @@ All data is scoped to the authenticated user's firebase_uid.
 Users can only read their own chats — no cross-user access.
 
 Endpoints:
-    GET /api/v1/chat/recent
-        — Last 5 chats across ALL workspaces (newest first).
-          Uses a Firestore collection group query on "chats" filtered by firebase_uid.
-          Requires Firestore index: chats (firebase_uid ASC, updated_at DESC).
-
-    GET /api/v1/chat/workspaces
-        — List all workspaces (one per DB connection) for the current user.
-
-    GET /api/v1/chat/workspaces/{connection_id}/chats
-        — List all chats in a specific workspace.
-
-    GET /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages
-        — All messages in a chat, ordered by seq (hex ID order).
-
-    GET /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}
-        — Single message with ALL stored fields (sql_query, data, insights, etc.).
+    GET    /api/v1/chat/recent
+    GET    /api/v1/chat/workspaces
+    GET    /api/v1/chat/workspaces/{connection_id}/chats
+    GET    /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages
+    GET    /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}
+    POST   /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite
+    DELETE /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite
 """
 from __future__ import annotations
 
@@ -63,17 +54,21 @@ def _messages_col(db, uid: str, connection_id: str, chat_id: str):
 
 def _to_message_out(doc_id: str, data: dict) -> dict:
     return {
-        "msg_id":            doc_id,
-        "seq":               data.get("seq", 0),
-        "role":              data.get("role", ""),
-        "content":           data.get("content", ""),
-        "sql_query":         data.get("sql_query"),
-        "summary":           data.get("summary"),
-        "total_records":     data.get("total_records"),
+        "msg_id":             doc_id,
+        "seq":                data.get("seq", 0),
+        "role":               data.get("role", ""),
+        "content":            data.get("content", ""),
+        "title":              data.get("title"),
+        "sql_query":          data.get("sql_query"),
+        "query_type":         data.get("query_type"),
+        "status":             data.get("status"),
+        "summary":            data.get("summary"),
+        "total_records":      data.get("total_records"),
         "numerical_insights": data.get("numerical_insights"),
-        "data":              data.get("data"),
-        "error_message":     data.get("error_message"),
-        "created_at":        data.get("created_at", ""),
+        "data":               data.get("data"),
+        "error_message":      data.get("error_message"),
+        "favourited":         data.get("favourited", False),
+        "created_at":         data.get("created_at", ""),
     }
 
 
@@ -110,7 +105,7 @@ async def get_recent_chats(
                 "chat_id":       d.get("chat_id", doc.id),
                 "title":         d.get("title", ""),
                 "connection_id": d.get("connection_id", ""),
-                "msg_count":     d.get("msg_count", 0),
+                "turn_count":    d.get("turn_count", 0),
                 "created_at":    d.get("created_at", ""),
                 "updated_at":    d.get("updated_at", ""),
             })
@@ -176,7 +171,7 @@ async def list_chats(
                 chat_id       = d.get("chat_id", doc.id),
                 title         = d.get("title", ""),
                 connection_id = d.get("connection_id", connection_id),
-                msg_count     = d.get("msg_count", 0),
+                msg_count     = d.get("turn_count", 0),
                 created_at    = d.get("created_at", ""),
                 updated_at    = d.get("updated_at", ""),
             ))
@@ -246,4 +241,66 @@ async def get_message(
         raise
     except Exception as exc:
         logger.error(f"[GET message/{msg_id}] chat={chat_id} uid={uid} error: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── POST /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite ──
+
+@router.post(
+    "/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite",
+    summary="Favourite an AI message",
+    description="Mark an assistant message as favourited. Only assistant (a_XXXX) messages can be favourited.",
+    status_code=status.HTTP_200_OK,
+)
+async def favourite_message(
+    connection_id: str,
+    chat_id:       str,
+    msg_id:        str,
+    current_user:  dict = Depends(require_analyst),
+):
+    uid = current_user["firebase_uid"]
+    try:
+        db  = _db()
+        ref = _messages_col(db, uid, connection_id, chat_id).document(msg_id)
+        doc = ref.get()
+        if not doc.exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
+        if doc.to_dict().get("role") != "assistant":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
+        ref.update({"favourited": True})
+        return {"msg_id": msg_id, "favourited": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[POST favourite/{msg_id}] chat={chat_id} uid={uid} error: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── DELETE /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite ──
+
+@router.delete(
+    "/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}/favourite",
+    summary="Remove favourite from an AI message",
+    description="Unmark an assistant message as favourited.",
+    status_code=status.HTTP_200_OK,
+)
+async def unfavourite_message(
+    connection_id: str,
+    chat_id:       str,
+    msg_id:        str,
+    current_user:  dict = Depends(require_analyst),
+):
+    uid = current_user["firebase_uid"]
+    try:
+        db  = _db()
+        ref = _messages_col(db, uid, connection_id, chat_id).document(msg_id)
+        doc = ref.get()
+        if not doc.exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
+        ref.update({"favourited": False})
+        return {"msg_id": msg_id, "favourited": False}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[DELETE favourite/{msg_id}] chat={chat_id} uid={uid} error: {exc}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

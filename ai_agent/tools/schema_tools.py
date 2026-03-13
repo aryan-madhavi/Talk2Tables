@@ -61,7 +61,10 @@ def detect_dialect(connection_string: str) -> str:
 
 
 def _get_engine(connection_string: str):
-    return create_engine(connection_string, pool_pre_ping=True, echo=False)
+    kwargs: dict = {"pool_pre_ping": True, "echo": False}
+    if not connection_string.lower().startswith("sqlite"):
+        kwargs["connect_args"] = {"connect_timeout": 10}
+    return create_engine(connection_string, **kwargs)
 
 
 def _cache_ref(db, connection_id: str, doc_id: str):

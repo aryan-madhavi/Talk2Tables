@@ -146,7 +146,8 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
         try:
             from sqlalchemy import create_engine, text as sa_text
 
-            engine  = create_engine(connection_string, pool_pre_ping=True, echo=False)
+            _ct     = {} if connection_string.lower().startswith("sqlite") else {"connect_args": {"connect_timeout": 10}}
+            engine  = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
             t_start = time.perf_counter()
 
             if is_write:

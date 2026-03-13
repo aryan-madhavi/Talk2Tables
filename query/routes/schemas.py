@@ -59,12 +59,25 @@ class QueryResponse(BaseModel):
 
 
 class SchemaTable(BaseModel):
-    table:   str
-    schema:  Optional[str] = None
-    columns: int = 0
+    table:       str
+    schema_name: Optional[str] = Field(default=None, alias="schema")
+    columns:     int = 0
+
+    model_config = {"populate_by_name": True}
 
 
 class SchemaResponse(BaseModel):
+    """Response for GET /api/v1/schema/{connection_id}
+
+    schemas: tables grouped by schema name  e.g. {"public": ["users", "orders"]}
+    tables:  flat list kept for backwards-compat (schema explorer sidebar)
+    cached:  True if result was served from Firestore cache
+    cached_at: ISO timestamp of when the cache was last populated (None if live fetch)
+    """
     connection_id: str
+    schemas:       dict[str, list[str]]
     tables:        list[SchemaTable]
     table_count:   int
+    cached:        bool = False
+    cached_at:     Optional[str] = None
+    stale:         bool = False  # True = served from stale cache; background refresh triggered

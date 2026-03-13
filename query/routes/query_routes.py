@@ -91,12 +91,22 @@ async def query(
     final_response = result.get("final_response", {})
 
     # ── 4. Save messages to Firestore chat sub-collection ─────────────────
+    # Resolve connection display name for denormalized message docs
+    _conn_name = ""
+    try:
+        from connections.services.connection_service import get_connection_by_id
+        _c = await get_connection_by_id(body.connection_id)
+        _conn_name = (_c or {}).get("name", "")
+    except Exception:
+        pass
+
     append_messages(
         firebase_uid        = firebase_uid,
         connection_id       = body.connection_id,
         chat_id             = chat_id,
         user_content        = body.chat_input,
         assistant_response  = final_response,
+        connection_name     = _conn_name,
     )
 
     # ── 5. Write audit log ────────────────────────────────────────────────
@@ -125,16 +135,21 @@ async def query(
     "/schema/{connection_id}",
     response_model=SchemaResponse,
     summary="List tables for schema explorer",
-    description="Returns all tables and column counts for the schema explorer sidebar.",
+    description=(
+        "Returns all tables grouped by schema name. Uses Firestore schema cache (1h TTL). "
+        "Safe for users who have never run a query — triggers a live DB fetch + cache write on first call. "
+        "Requires an active access grant (or admin/db_manager role)."
+    ),
 )
 async def list_schema(
     connection_id: str,
     current_user:  dict = Depends(require_analyst),
 ):
+    import json as _json
+    import asyncio as _asyncio
     firebase_uid = current_user["firebase_uid"]
 
-    # Verify access before exposing schema info.
-    # admin and db_manager bypass the grant check — they can see all connections.
+    # admin/db_manager bypass the grant check — they can see all connections.
     _BYPASS_ROLES = {"admin", "db_manager"}
     if current_user["role"] not in _BYPASS_ROLES:
         try:
@@ -150,34 +165,86 @@ async def list_schema(
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
-    # Fetch connection and reflect schema
     try:
         from connections.services.connection_service import get_connection_with_password
-        from ai_agent.tools.schema_tools import detect_dialect, _get_engine
-        from sqlalchemy import inspect as sa_inspect
+        from ai_agent.nodes.entry import _build_connection_string
+        from ai_agent.tools.schema_tools import (
+            make_schema_tools, _cache_ref, _is_fresh,
+            _TABLES_DOC_ID,
+        )
+        from auth.core.firebase import get_firestore_client
 
         conn = await get_connection_with_password(connection_id)
         if not conn:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found.")
 
-        from ai_agent.nodes.entry import _build_connection_string
-        conn_str  = _build_connection_string(conn)
-        engine    = _get_engine(conn_str)
-        inspector = sa_inspect(engine)
+        conn_str = _build_connection_string(conn)
 
-        tables = []
-        for tbl in inspector.get_table_names():
+        def _build_response(raw_tables: list, *, cached: bool, stale: bool, cached_at: str | None) -> SchemaResponse:
+            schemas_grouped: dict[str, list[str]] = {}
+            flat_tables: list[SchemaTable] = []
+            for row in raw_tables:
+                s = row.get("table_schema") or "default"
+                t = row.get("table_name", "")
+                schemas_grouped.setdefault(s, []).append(t)
+                flat_tables.append(SchemaTable(table=t, schema_name=s))
+            return SchemaResponse(
+                connection_id = connection_id,
+                schemas       = schemas_grouped,
+                tables        = flat_tables,
+                table_count   = len(flat_tables),
+                cached        = cached,
+                stale         = stale,
+                cached_at     = cached_at,
+            )
+
+        async def _bg_refresh():
+            """Background task: re-fetch and overwrite stale cache without blocking response."""
             try:
-                col_count = len(inspector.get_columns(tbl))
-            except Exception:
-                col_count = 0
-            tables.append(SchemaTable(table=tbl, columns=col_count))
+                tools = make_schema_tools(conn_str, connection_id)
+                await _asyncio.to_thread(tools[0].invoke, {})
+                logger.info(f"[SchemaCache] Background refresh done | conn={connection_id}")
+            except Exception as exc:
+                logger.warning(f"[SchemaCache] Background refresh failed (non-fatal): {exc}")
 
-        return SchemaResponse(
-            connection_id = connection_id,
-            tables        = tables,
-            table_count   = len(tables),
-        )
+        # ── 1. Check Firestore cache ───────────────────────────────────────
+        try:
+            db  = get_firestore_client()
+            ref = _cache_ref(db, connection_id, _TABLES_DOC_ID)
+            doc = ref.get()
+            if doc.exists:
+                meta       = doc.to_dict()
+                raw_tables = meta.get("tables", [])
+                cached_at  = meta.get("cached_at")
+                if _is_fresh(cached_at or ""):
+                    # Fresh cache — return immediately, no DB call needed
+                    return _build_response(raw_tables, cached=True, stale=False, cached_at=cached_at)
+                elif raw_tables:
+                    # Stale cache — return old data instantly + refresh in background
+                    _asyncio.create_task(_bg_refresh())
+                    return _build_response(raw_tables, cached=True, stale=True, cached_at=cached_at)
+        except Exception as exc:
+            logger.warning(f"[SchemaCache] Cache read failed (non-fatal): {exc}")
+
+        # ── 2. Cold start — no cache yet, fetch live (blocks max ~10s) ────
+        tools     = make_schema_tools(conn_str, connection_id)
+        result_raw = await _asyncio.to_thread(tools[0].invoke, {})
+
+        try:
+            raw_tables = _json.loads(result_raw)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result_raw)
+
+        # Read back cached_at that the tool just wrote
+        cached_at = None
+        try:
+            doc = ref.get()
+            if doc.exists:
+                cached_at = doc.to_dict().get("cached_at")
+        except Exception:
+            pass
+
+        return _build_response(raw_tables, cached=False, stale=False, cached_at=cached_at)
 
     except HTTPException:
         raise
@@ -254,4 +321,127 @@ async def get_table_schema(
         raise
     except Exception as exc:
         logger.error(f"[GET /schema/{connection_id}/{schema_name}/{table_name}] Failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── GET /api/v1/query/history ─────────────────────────────────────────────────
+
+@router.get(
+    "/query/history",
+    summary="Get query history for the current user",
+    description=(
+        "Returns a paginated list of AI assistant messages across all chats and workspaces. "
+        "Each item shows title, sql_query, timestamp, database, query_type, status, and favourited flag. "
+        "Requires Firestore composite index on 'messages' collection group: "
+        "firebase_uid ASC + role ASC + created_at DESC."
+    ),
+)
+async def get_query_history(
+    limit:        int  = 50,
+    offset:       int  = 0,
+    favourites_only: bool = False,
+    current_user: dict = Depends(require_analyst),
+):
+    from google.cloud.firestore_v1 import Query as FSQuery
+    from auth.core.firebase import get_firestore_client
+
+    uid = current_user["firebase_uid"]
+    try:
+        db = get_firestore_client()
+        q  = (
+            db.collection_group("messages")
+              .where("firebase_uid", "==", uid)
+              .where("role", "==", "assistant")
+              .order_by("created_at", direction=FSQuery.DESCENDING)
+        )
+        if favourites_only:
+            q = q.where("favourited", "==", True)
+
+        docs = q.limit(limit + offset).stream()
+
+        items = []
+        for i, doc in enumerate(docs):
+            if i < offset:
+                continue
+            d = doc.to_dict()
+            items.append({
+                "msg_id":          doc.id,
+                "chat_id":         d.get("chat_id", ""),
+                "connection_id":   d.get("connection_id", ""),
+                "connection_name": d.get("connection_name", ""),
+                "title":           d.get("title", ""),
+                "sql_query":       d.get("sql_query", ""),
+                "query_type":      d.get("query_type", "UNKNOWN"),
+                "status":          d.get("status", "success"),
+                "total_records":   d.get("total_records", 0),
+                "favourited":      d.get("favourited", False),
+                "created_at":      d.get("created_at", ""),
+            })
+
+        return {"history": items, "total": len(items), "limit": limit, "offset": offset}
+
+    except Exception as exc:
+        logger.error(f"[GET /query/history] uid={uid} error: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── GET /api/v1/query/audits ──────────────────────────────────────────────────
+
+@router.get(
+    "/query/audits",
+    summary="Get audit logs for the current user",
+    description=(
+        "Returns raw audit records for queries run by the current user, across all connections. "
+        "Each record contains sql_query, row_count, execution_time_ms, status, error_message, and timestamp. "
+        "Optional filters: connection_id, status (success|error). "
+        "Requires Firestore composite index on 'audits' collection group: "
+        "firebase_uid ASC + created_at DESC."
+    ),
+)
+async def get_audit_logs(
+    limit:         int       = 50,
+    offset:        int       = 0,
+    connection_id: str | None = None,   # ?connection_id= filter by specific DB
+    status_filter: str | None = None,   # ?status=success or ?status=error
+    current_user:  dict      = Depends(require_analyst),
+):
+    from google.cloud.firestore_v1 import Query as FSQuery
+    from auth.core.firebase import get_firestore_client
+
+    uid = current_user["firebase_uid"]
+    try:
+        db = get_firestore_client()
+        q  = (
+            db.collection_group("audits")
+              .where("firebase_uid", "==", uid)
+              .order_by("created_at", direction=FSQuery.DESCENDING)
+        )
+        if connection_id:
+            q = q.where("connection_id", "==", connection_id)
+        if status_filter in ("success", "error", "results"):
+            q = q.where("status", "==", status_filter)
+
+        docs   = q.limit(limit + offset).stream()
+        audits = []
+        for i, doc in enumerate(docs):
+            if i < offset:
+                continue
+            d = doc.to_dict()
+            audits.append({
+                "audit_id":          d.get("audit_id", doc.id),
+                "connection_id":     d.get("connection_id", ""),
+                "chat_id":           d.get("chat_id", ""),
+                "sql_query":         d.get("sql_query", ""),
+                "summary":           d.get("summary", ""),
+                "row_count":         d.get("row_count", 0),
+                "execution_time_ms": d.get("execution_time_ms", 0),
+                "status":            d.get("status", ""),
+                "error_message":     d.get("error_message"),
+                "created_at":        d.get("created_at", ""),
+            })
+
+        return {"audits": audits, "total": len(audits), "limit": limit, "offset": offset}
+
+    except Exception as exc:
+        logger.error(f"[GET /query/audits] uid={uid} error: {exc}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

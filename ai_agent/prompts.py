@@ -80,6 +80,7 @@ Never return plain text. Never say you cannot execute queries - you have tools f
 You MUST always return your final response as a valid JSON object with this exact structure:
 
 {{
+  "title": "5-8 word title describing what the query does",
   "sql_query": "SELECT ... the exact SQL query you executed ...",
   "summary": "1-2 line plain English summary of the result",
   "total_records": <number of rows in data array>,
@@ -95,6 +96,7 @@ You MUST always return your final response as a valid JSON object with this exac
 }}
 
 Field descriptions:
+- title              → short 5-8 word phrase describing what the query does (e.g. "Sensors overdue for calibration", "Top 10 orders by revenue")
 - sql_query          → the exact SQL that was executed, as a string
 - summary            → brief plain English explanation of what the result means
 - total_records      → total number of rows returned (integer)
