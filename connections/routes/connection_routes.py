@@ -217,6 +217,7 @@ async def list_audits_route(
     try:
         from auth.core.firebase import get_firestore_client
         from google.cloud.firestore_v1 import Query
+        from google.cloud.firestore_v1.base_query import FieldFilter
         db = get_firestore_client()
 
         q = (
@@ -226,9 +227,9 @@ async def list_audits_route(
               .order_by("created_at", direction=Query.DESCENDING)
         )
         if status_filter in ("success", "error"):
-            q = q.where("status", "==", status_filter)
+            q = q.where(filter=FieldFilter("status", "==", status_filter))
         if uid:
-            q = q.where("firebase_uid", "==", uid)
+            q = q.where(filter=FieldFilter("firebase_uid", "==", uid))
 
         docs   = q.limit(limit + offset).stream()
         audits = []
@@ -280,6 +281,7 @@ async def connection_stats_route(
 ):
     from auth.core.firebase import get_firestore_client
     from google.cloud.firestore_v1 import Query
+    from google.cloud.firestore_v1.base_query import FieldFilter
     from datetime import datetime, timezone, timedelta
     from collections import defaultdict
 
@@ -293,7 +295,7 @@ async def connection_stats_route(
         )
         if days and days > 0:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            q = q.where("created_at", ">=", cutoff)
+            q = q.where(filter=FieldFilter("created_at", ">=", cutoff))
 
         docs = list(q.stream())
 

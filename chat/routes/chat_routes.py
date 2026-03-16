@@ -90,10 +90,11 @@ async def get_recent_chats(
     uid = current_user["firebase_uid"]
     try:
         from google.cloud.firestore_v1 import Query
+        from google.cloud.firestore_v1.base_query import FieldFilter
         db   = _db()
         docs = (
             db.collection_group("chats")
-              .where("firebase_uid", "==", uid)
+              .where(filter=FieldFilter("firebase_uid", "==", uid))
               .order_by("updated_at", direction=Query.DESCENDING)
               .limit(5)
               .stream()

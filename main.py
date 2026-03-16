@@ -163,3 +163,4 @@ async def health():
 @app.get("/", tags=["system"])
 async def root():
     return {"message": "Talk2Tables API running. See /docs", "docs": "/docs"}
+

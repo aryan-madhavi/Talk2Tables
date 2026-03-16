@@ -5,8 +5,9 @@ Auth endpoints — Firebase Service Account + Firestore, no PostgreSQL.
   POST /api/v1/auth/login          verify Firebase ID token → return custom token
   POST /api/v1/auth/register       same flow as login (Firebase handles signup client-side)
   POST /api/v1/auth/logout         revoke session + Firebase refresh tokens
-  POST /api/v1/auth/logout-all     revoke ALL sessions for this user
-  POST /api/v1/auth/token-active   check if token + Firestore session are valid
+  POST /api/v1/auth/logout-all             revoke ALL sessions for this user
+  POST /api/v1/auth/admin/logout/{uid}     force-logout any user (admin only)
+  POST /api/v1/auth/token-active           check if token + Firestore session are valid
   GET  /api/v1/auth/me             current user profile from Firestore
   GET  /api/v1/auth/sessions       list active Firestore sessions
 
@@ -54,7 +55,7 @@ from auth.services.auth_service import (
     logout_all,
     get_all_sessions,
 )
-from auth.routes.dependencies import get_current_user
+from auth.routes.dependencies import get_current_user, require_admin
 from auth.routes.schemas import (
     FirebaseTokenRequest,
     LoginResponse,
@@ -167,6 +168,31 @@ async def logout_all_route(current_user: dict = Depends(get_current_user)):
     count = await logout_all(current_user["firebase_uid"])
     logger.info(f"[POST /auth/logout-all] uid={current_user['firebase_uid']} revoked={count}")
     return {"message": f"Logged out from all {count} active session(s)."}
+
+
+# ── POST /api/v1/auth/admin/logout/{uid} ─────────────────────────────────────
+
+@router.post(
+    "/admin/logout/{target_uid}",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Force-logout any user (admin only)",
+    description=(
+        "Revokes all Firestore sessions and Firebase refresh tokens for the target user. "
+        "Their current tokens will stop working on the next API call. "
+        "Requires admin role."
+    ),
+)
+async def admin_force_logout(
+    target_uid:   str,
+    current_user: dict = Depends(require_admin),
+):
+    count = await logout_all(target_uid)
+    logger.info(
+        f"[POST /auth/admin/logout/{target_uid}] "
+        f"forced by admin={current_user['firebase_uid']} sessions_revoked={count}"
+    )
+    return {"message": f"User {target_uid} force-logged out ({count} session(s) revoked)."}
 
 
 # ── GET /api/v1/auth/me ───────────────────────────────────────────────────────

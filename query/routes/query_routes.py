@@ -345,17 +345,19 @@ async def get_query_history(
     from google.cloud.firestore_v1 import Query as FSQuery
     from auth.core.firebase import get_firestore_client
 
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
     uid = current_user["firebase_uid"]
     try:
         db = get_firestore_client()
         q  = (
             db.collection_group("messages")
-              .where("firebase_uid", "==", uid)
-              .where("role", "==", "assistant")
+              .where(filter=FieldFilter("firebase_uid", "==", uid))
+              .where(filter=FieldFilter("role", "==", "assistant"))
               .order_by("created_at", direction=FSQuery.DESCENDING)
         )
         if favourites_only:
-            q = q.where("favourited", "==", True)
+            q = q.where(filter=FieldFilter("favourited", "==", True))
 
         docs = q.limit(limit + offset).stream()
 
@@ -408,18 +410,20 @@ async def get_audit_logs(
     from google.cloud.firestore_v1 import Query as FSQuery
     from auth.core.firebase import get_firestore_client
 
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
     uid = current_user["firebase_uid"]
     try:
         db = get_firestore_client()
         q  = (
             db.collection_group("audits")
-              .where("firebase_uid", "==", uid)
+              .where(filter=FieldFilter("firebase_uid", "==", uid))
               .order_by("created_at", direction=FSQuery.DESCENDING)
         )
         if connection_id:
-            q = q.where("connection_id", "==", connection_id)
+            q = q.where(filter=FieldFilter("connection_id", "==", connection_id))
         if status_filter in ("success", "error", "results"):
-            q = q.where("status", "==", status_filter)
+            q = q.where(filter=FieldFilter("status", "==", status_filter))
 
         docs   = q.limit(limit + offset).stream()
         audits = []
