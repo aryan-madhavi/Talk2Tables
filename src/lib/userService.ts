@@ -76,6 +76,10 @@ export async function deactivateUser(uid: string): Promise<UserOut> {
   return apiFetch<UserOut>(`/users/${uid}/deactivate`, { method: 'PATCH' });
 }
 
+export async function updateUser(uid: string, payload: { display_name?: string; is_active?: boolean }): Promise<UserOut> {
+  return apiFetch<UserOut>(`/users/${uid}`, { method: 'PATCH', body: JSON.stringify(payload) });
+}
+
 export async function deleteUser(uid: string): Promise<{ message: string }> {
   return apiFetch<{ message: string }>(`/users/${uid}`, { method: 'DELETE' });
 }

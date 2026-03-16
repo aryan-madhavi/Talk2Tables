@@ -228,3 +228,8 @@ export async function getMe(): Promise<BackendUser> {
 export async function getSessions(): Promise<{ sessions: SessionEntry[]; total: number }> {
   return apiFetch<{ sessions: SessionEntry[]; total: number }>('/sessions');
 }
+
+/** Admin: force-logout a specific user by UID — POST /auth/admin/logout/{uid} */
+export async function forceLogoutUser(uid: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/admin/logout/${uid}`, { method: 'POST' });
+}
