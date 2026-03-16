@@ -17,6 +17,7 @@ export interface QueryResult {
   columns:       string[];
   executionTime: number;
   rowCount:      number;
+  msgId?:        string;
   chartData?:    { name: string; value: number }[];
 }
 

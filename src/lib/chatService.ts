@@ -64,18 +64,21 @@ async function getIdToken(): Promise<string> {
   return user.getIdToken();
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getIdToken();
   const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       Authorization:  `Bearer ${token}`,
+      ...options.headers,
     },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Request failed: ${res.status}`);
   }
+  if (res.status === 204) return {} as T;
   return res.json() as Promise<T>;
 }
 
@@ -97,6 +100,26 @@ export async function getMessages(connectionId: string, chatId: string): Promise
 }
 
 /** GET /api/v1/chat/recent — last 5 recent chats across all workspaces */
-export async function getRecentChats(): Promise<ChatOut[]> {
-  return apiFetch<ChatOut[]>('/chat/recent');
+export async function getRecentChats(): Promise<{ chats: ChatOut[]; total: number }> {
+  return apiFetch<{ chats: ChatOut[]; total: number }>('/chat/recent');
+}
+
+/** POST /api/v1/chat/workspaces/{conn}/chats/{chat}/messages/{msg}/favourite */
+export async function favouriteMessage(
+  connectionId: string, chatId: string, msgId: string,
+): Promise<void> {
+  await apiFetch<unknown>(
+    `/chat/workspaces/${connectionId}/chats/${chatId}/messages/${msgId}/favourite`,
+    { method: 'POST' },
+  );
+}
+
+/** DELETE /api/v1/chat/workspaces/{conn}/chats/{chat}/messages/{msg}/favourite */
+export async function unfavouriteMessage(
+  connectionId: string, chatId: string, msgId: string,
+): Promise<void> {
+  await apiFetch<unknown>(
+    `/chat/workspaces/${connectionId}/chats/${chatId}/messages/${msgId}/favourite`,
+    { method: 'DELETE' },
+  );
 }

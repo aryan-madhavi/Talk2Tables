@@ -19,6 +19,7 @@ function buildResultFromMessage(m: MessageOut): QueryResult | null {
     columns:       Object.keys(m.data[0] ?? {}),
     executionTime: 0,
     rowCount:      m.total_records ?? m.data.length,
+    msgId:         m.msg_id,
     chartData:     m.data.slice(0, 10).map(item => {
       const keys = Object.keys(item);
       return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -34,13 +35,17 @@ export function useQueryExecution(selectedConnectionId: string) {
   const [chartType,      setChartType]      = useState<'bar' | 'pie'>('bar');
   const [chatId,         setChatId]         = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef  = useRef<HTMLDivElement | null>(null);
+  // Increments each time the connection changes; used to discard stale responses
+  const generationRef   = useRef(0);
 
   // Reset when switching connections
   useEffect(() => {
+    generationRef.current += 1;
     setChatId(null);
     setCurrentResult(null);
     setMessages([INITIAL_MESSAGE]);
+    setIsTyping(false);
     setRefreshTrigger(0);
   }, [selectedConnectionId]);
 
@@ -85,27 +90,31 @@ export function useQueryExecution(selectedConnectionId: string) {
 
   // ── Send a message ─────────────────────────────────────────────────────────
 
-  const handleSend = async () => {
-    if (!input.trim() || !selectedConnectionId) return;
+  const sendQuery = useCallback(async (queryText: string) => {
+    if (!queryText.trim() || !selectedConnectionId) return;
+
+    const generation = generationRef.current;
 
     const userMsg: Message = {
       id:        Date.now().toString(),
       role:      'user',
-      content:   input,
+      content:   queryText,
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
     setIsTyping(true);
 
     try {
       const startTime = Date.now();
       const response = await executeQuery({
         connection_id: selectedConnectionId,
-        chat_input:    input,
+        chat_input:    queryText,
         chat_id:       chatId,
       });
       const executionTime = Date.now() - startTime;
+
+      // Connection was switched while request was in-flight — discard response
+      if (generationRef.current !== generation) return;
 
       setChatId(response.chat_id);
 
@@ -144,10 +153,10 @@ export function useQueryExecution(selectedConnectionId: string) {
         queryResult: result,
       }]);
 
-      // Signal sidebar to refresh (new chat title / message count)
       setRefreshTrigger(n => n + 1);
 
     } catch (error) {
+      if (generationRef.current !== generation) return;
       const msg = error instanceof Error ? error.message : 'Query failed. Please try again.';
       setMessages(prev => [...prev, {
         id:        (Date.now() + 1).toString(),
@@ -156,8 +165,15 @@ export function useQueryExecution(selectedConnectionId: string) {
         timestamp: new Date(),
       }]);
     } finally {
-      setIsTyping(false);
+      if (generationRef.current === generation) setIsTyping(false);
     }
+  }, [selectedConnectionId, chatId]);
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    const text = input;
+    setInput('');
+    await sendQuery(text);
   };
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
@@ -187,6 +203,6 @@ export function useQueryExecution(selectedConnectionId: string) {
     messages, input, setInput, isTyping, currentResult,
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
-    chatId, loadChat, newChat, refreshTrigger,
+    chatId, loadChat, newChat, refreshTrigger, sendQuery,
   };
 }

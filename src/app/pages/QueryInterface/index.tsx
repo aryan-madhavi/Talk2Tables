@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
 import { getMyConnections } from '../../../lib/accessService';
 import { listConnections } from '../../../lib/connectionService';
-import { MessageOut } from '../../../lib/chatService';
+import { getMessages, favouriteMessage, unfavouriteMessage } from '../../../lib/chatService';
 import { useQueryExecution } from './hook/useQueryExecution';
 import { ChatSidebar }  from './components/ChatSidebar';
 import { ChatHeader }   from './components/ChatHeader';
 import { ChatMessages } from './components/ChatMessages';
 import { ChatInput }    from './components/ChatInput';
 import { ResultPanel }  from './components/ResultPanel';
+import { MessageOut }   from '../../../lib/chatService';
 
 export interface ConnectionOption {
   connection_id: string;
@@ -17,8 +19,19 @@ export interface ConnectionOption {
 
 export default function QueryInterface() {
   const { isDbManager, isAdmin } = useAuth();
+  const location  = useLocation();
+  const navigate  = useNavigate();
+
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
   const [selectedDb,  setSelectedDb]  = useState('');
+
+  // Pending auto-run from History "Run" button
+  const pendingRun = useRef<{ query: string; connectionId: string } | null>(
+    (location.state as { query?: string; connectionId?: string } | null)?.query
+      ? { query: (location.state as { query: string; connectionId: string }).query,
+          connectionId: (location.state as { query: string; connectionId: string }).connectionId }
+      : null
+  );
 
   useEffect(() => {
     const load = isAdmin || isDbManager
@@ -31,7 +44,14 @@ export default function QueryInterface() {
 
     load.then(opts => {
       setConnections(opts);
-      if (opts.length > 0) setSelectedDb(opts[0].connection_id);
+      if (pendingRun.current) {
+        // Select the connection from history "Run"
+        const connId = pendingRun.current.connectionId;
+        const found  = opts.find(c => c.connection_id === connId);
+        setSelectedDb(found ? connId : (opts[0]?.connection_id ?? ''));
+      } else if (opts.length > 0) {
+        setSelectedDb(opts[0].connection_id);
+      }
     }).catch(console.error);
   }, [isAdmin, isDbManager]);
 
@@ -39,35 +59,66 @@ export default function QueryInterface() {
     messages, input, setInput, isTyping, currentResult,
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
-    chatId, loadChat, newChat, refreshTrigger,
+    chatId, loadChat, newChat, refreshTrigger, sendQuery,
   } = useQueryExecution(selectedDb);
 
-  const handleSelectChat = (restoredChatId: string, history: MessageOut[]) => {
-    loadChat(restoredChatId, history);
-  };
+  // Auto-run pending query once connection is ready
+  const autoRunFired = useRef(false);
+  useEffect(() => {
+    if (!pendingRun.current || !selectedDb || autoRunFired.current) return;
+    autoRunFired.current = true;
+    const { query } = pendingRun.current;
+    pendingRun.current = null;
+    navigate(location.pathname, { replace: true, state: null });
+    newChat();
+    // small delay to let newChat() state settle
+    setTimeout(() => sendQuery(query), 50);
+  }, [selectedDb]);
 
-  const handleSelectDb = (id: string) => {
-    setSelectedDb(id);
+  // ── Favourite toggle ───────────────────────────────────────────────────────
+  const [isFavourited,   setIsFavourited]   = useState(false);
+
+  // Reset favourite state when result changes
+  useEffect(() => { setIsFavourited(false); }, [currentResult?.id]);
+
+  const handleSaveToggle = async () => {
+    if (!currentResult || !chatId) return;
+
+    let msgId = currentResult.msgId;
+    if (!msgId) {
+      // For fresh queries, fetch messages to find the msg_id
+      const msgs = await getMessages(selectedDb, chatId);
+      const last = [...msgs.messages]
+        .reverse()
+        .find(m => m.role === 'assistant' && m.sql_query === currentResult.sql);
+      msgId = last?.msg_id;
+      if (!msgId) return;
+    }
+
+    if (isFavourited) {
+      await unfavouriteMessage(selectedDb, chatId, msgId);
+    } else {
+      await favouriteMessage(selectedDb, chatId, msgId);
+    }
+    setIsFavourited(f => !f);
   };
 
   return (
     <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row">
 
-      {/* ── Left: Chat History Sidebar ── */}
       <ChatSidebar
         connectionId={selectedDb}
         activeChatId={chatId}
         refreshTrigger={refreshTrigger}
         onNewChat={newChat}
-        onSelectChat={handleSelectChat}
+        onSelectChat={(id, msgs: MessageOut[]) => loadChat(id, msgs)}
       />
 
-      {/* ── Middle: Chat Panel ── */}
       <div className="flex flex-col h-full relative flex-1 min-w-0 border-r border-gray-200">
         <ChatHeader
           connections={connections}
           selectedDb={selectedDb}
-          onSelectDb={handleSelectDb}
+          onSelectDb={setSelectedDb}
           currentResult={currentResult}
         />
         <ChatMessages
@@ -84,7 +135,6 @@ export default function QueryInterface() {
         />
       </div>
 
-      {/* ── Right: Result Panel ── */}
       <div className="hidden md:flex flex-col h-full w-[38%] shrink-0 bg-white border-l border-gray-100">
         <ResultPanel
           result={currentResult}
@@ -92,6 +142,8 @@ export default function QueryInterface() {
           setChartType={setChartType}
           onCopy={copyToClipboard}
           onDownload={downloadCSV}
+          onSave={handleSaveToggle}
+          isFavourited={isFavourited}
         />
       </div>
 

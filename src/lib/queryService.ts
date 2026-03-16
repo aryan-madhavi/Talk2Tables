@@ -79,3 +79,46 @@ export async function executeQuery(payload: QueryRequest): Promise<QueryResponse
 
   return res.json() as Promise<QueryResponse>;
 }
+
+// ── Query History ──────────────────────────────────────────────────────────────
+
+export interface QueryHistoryItem {
+  msg_id:            string;
+  chat_id:           string;
+  connection_id:     string;
+  connection_name:   string;
+  title:             string;
+  sql_query:         string;
+  query_type:        string;
+  status:            'success' | 'error';
+  favourited:        boolean;
+  total_records:     number | null;
+  execution_time_ms: number | null;
+  created_at:        string;
+}
+
+export interface QueryHistoryResponse {
+  history: QueryHistoryItem[];
+  total:   number;
+  limit:   number;
+  offset:  number;
+}
+
+export async function getQueryHistory(params?: {
+  limit?:          number;
+  offset?:         number;
+  favouritesOnly?: boolean;
+}): Promise<QueryHistoryResponse> {
+  const token = await getIdToken();
+  const qs = new URLSearchParams();
+  if (params?.limit    != null) qs.set('limit',           String(params.limit));
+  if (params?.offset   != null) qs.set('offset',          String(params.offset));
+  if (params?.favouritesOnly)   qs.set('favourites_only', 'true');
+  const url = `${API_BASE}/query/history${qs.toString() ? '?' + qs.toString() : ''}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { detail?: string };
+    throw new Error(body.detail ?? `Request failed: ${res.status}`);
+  }
+  return res.json() as Promise<QueryHistoryResponse>;
+}
