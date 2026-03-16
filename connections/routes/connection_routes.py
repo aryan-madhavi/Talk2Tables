@@ -210,7 +210,7 @@ async def list_audits_route(
     connection_id: str,
     limit:         int            = 50,
     offset:        int            = 0,
-    status_filter: str | None     = None,   # ?status=success or ?status=error
+    status:        str | None     = None,   # ?status=success or ?status=error
     uid:           str | None     = None,   # ?uid=<firebase_uid> filter by user
     current_user:  dict           = Depends(require_db_manager),
 ):
@@ -226,8 +226,10 @@ async def list_audits_route(
               .collection("audits")
               .order_by("created_at", direction=Query.DESCENDING)
         )
-        if status_filter in ("success", "error"):
-            q = q.where(filter=FieldFilter("status", "==", status_filter))
+        if status == "success":
+            q = q.where(filter=FieldFilter("status", "in", ["success", "results"]))
+        elif status == "error":
+            q = q.where(filter=FieldFilter("status", "==", "error"))
         if uid:
             q = q.where(filter=FieldFilter("firebase_uid", "==", uid))
 

@@ -1,7 +1,7 @@
 # Talk2Tables — Firestore Schema v3
-**Last updated:** 2026-03-09
+**Last updated:** 2026-03-18
 **Project:** Talk2Tables Backend (FastAPI + LangGraph)
-**Breaking changes from v2:** query_audit moved inside database_connections; schema_cache sub-collection added; message IDs changed from UUID to hex sequence; messages now store flat AI fields.
+**Breaking changes from v2:** query_audit moved inside database_connections; schema_cache sub-collection added; message IDs changed from UUID to role-prefixed turn IDs; messages now store flat AI fields including title, query_type, status, favourited, firebase_uid, connection_id, chat_id.
 
 ---
 
@@ -56,47 +56,67 @@ One workspace document per user per database connection.
 | `firebase_uid` | string | Owner UID — **stored here for collection group queries** |
 | `connection_id` | string | Parent connection — **stored here for collection group queries** |
 | `title` | string | Auto-generated from first user message (first 60 chars) |
-| `msg_count` | integer | Total messages written; incremented atomically (+2 per turn) |
+| `turn_count` | integer | Number of turns (user+AI pairs); incremented atomically (+1 per turn) |
 | `created_at` | string (ISO 8601) | Chat creation time |
 | `updated_at` | string (ISO 8601) | Last message time; used for `recent chats` ordering |
 
-> `firebase_uid` and `connection_id` are stored as fields (not just path segments) to support the `GET /api/v1/chat/recent` collection group query.
+> `turn_count` replaced `msg_count` in v3.1. Each turn = 1 user message + 1 assistant message.
 > **Firestore index required:** collection group `chats` — `firebase_uid ASC` + `updated_at DESC`
 
 ---
 
-### 1.3 `users/{uid}/workspaces/{connection_id}/chats/{chat_id}/messages/{seq_hex}`
+### 1.3 `users/{uid}/workspaces/{connection_id}/chats/{chat_id}/messages/{msg_id}`
 
-**Document ID:** Zero-padded hex sequence integer — `0001`, `0002`, `0003`, ..., `00ff`, `0100`, ...
-IDs sort lexicographically in the correct order, enabling natural ordering without a timestamp index.
-Written atomically via Firestore transaction; `msg_count` on the parent chat doc is the counter.
+**Document ID:** Role-prefixed turn ID:
+- User messages: `u_0001`, `u_0002`, `u_0003`, …
+- Assistant messages: `a_0001`, `a_0002`, `a_0003`, …
+
+Turn N always produces `u_000N` (seq = 2N-1) and `a_000N` (seq = 2N).
+Written atomically via Firestore transaction; `turn_count` on the parent chat doc is the counter.
 **Append-only — never update or delete message documents.**
 
 #### User message (role: `user`)
 
 | Field | Type | Description |
 |---|---|---|
-| `seq` | integer | Sequence number (1, 2, 3, …); same as hex doc ID decoded |
+| `seq` | integer | Global sequence (odd: 1, 3, 5, …); used for ordering |
 | `role` | string | `"user"` |
 | `content` | string | The user's natural language query |
+| `firebase_uid` | string | Owner UID — stored for collection group queries |
+| `connection_id` | string | Parent connection — stored for collection group queries |
+| `connection_name` | string | Display name of the DB — denormalized for history display |
+| `chat_id` | string | Parent chat ID — stored for collection group queries |
 | `created_at` | string (ISO 8601) | Timestamp |
 
 #### Assistant message (role: `assistant`)
 
 | Field | Type | Description |
 |---|---|---|
-| `seq` | integer | Sequence number (always even; user is seq-1) |
+| `seq` | integer | Global sequence (even: 2, 4, 6, …); used for ordering |
 | `role` | string | `"assistant"` |
-| `content` | string | Summary text (same as `summary` — stored for quick display) |
+| `title` | string | 5–8 word LLM-generated phrase describing the query (e.g. `"Top 10 orders by revenue"`) |
+| `content` | string | Summary text (same as `summary` — stored for quick list display) |
 | `sql_query` | string | The exact SQL executed against the target DB |
+| `query_type` | string | `"SELECT"` \| `"INSERT"` \| `"UPDATE"` \| `"DELETE"` \| `"OTHER"` \| `"UNKNOWN"` |
+| `status` | string | `"success"` \| `"error"` |
 | `summary` | string | 1–2 line plain English explanation of the result |
 | `total_records` | integer | Number of rows returned |
 | `numerical_insights` | map | `{ total_records: N, aggregations: { key: value } }` |
 | `data` | array of maps | Full query result rows (up to 10,000) |
-| `error_message` | string \| null | Set when `response_type` is `error`; null on success |
+| `error_message` | string \| null | Set when status is `error`; null on success |
+| `favourited` | boolean | Whether user has starred this query; default `false` |
+| `firebase_uid` | string | Owner UID — stored for collection group queries |
+| `connection_id` | string | Parent connection — stored for collection group queries |
+| `connection_name` | string | Display name of the DB — denormalized for history display |
+| `chat_id` | string | Parent chat ID — stored for collection group queries |
 | `created_at` | string (ISO 8601) | Timestamp |
 
-> On error responses: `content` = error message, `sql_query` = `""`, `data` = `[]`, `error_message` = error detail.
+> `firebase_uid`, `connection_id`, `connection_name`, `chat_id` are stored on every message doc
+> to enable `GET /api/v1/query/history` collection group query without path traversal.
+>
+> **Firestore indexes required:**
+> - Collection group `messages`: `firebase_uid ASC` + `role ASC` + `created_at DESC` (base history)
+> - Collection group `messages`: `firebase_uid ASC` + `role ASC` + `favourited ASC` + `created_at DESC` (favourites filter)
 
 ---
 
@@ -144,11 +164,14 @@ Previously stored in the root `query_audit` collection (v2). Moved here in v3 so
 | `summary` | string | Agent summary |
 | `row_count` | integer | Number of rows returned |
 | `execution_time_ms` | float | SQL execution time in milliseconds |
-| `status` | string | `"results"` \| `"error"` |
+| `status` | string | `"success"` \| `"error"` |
 | `error_message` | string \| null | Error detail if status is `"error"` |
 | `created_at` | string (ISO 8601) | Query timestamp |
 
-> API: `GET /api/v1/connections/{id}/audits?limit=50` — requires `db_manager` or `admin` role.
+> API: `GET /api/v1/connections/{id}/audits?limit=50&status=success&uid=<uid>` — requires `db_manager+`
+> Admin stats: `GET /api/v1/connections/{id}/stats?days=30` — aggregates audit docs for usage metrics.
+>
+> **Firestore index required:** collection group `audits` — `firebase_uid ASC` + `created_at DESC` (for `GET /api/v1/query/audits`)
 
 ---
 
@@ -156,10 +179,11 @@ Previously stored in the root `query_audit` collection (v2). Moved here in v3 so
 
 **Document ID:** `_tables` (literal string)
 Stores the full table list for this connection. Populated on cache miss; TTL = 1 hour.
+Served with **stale-while-revalidate**: if cache is stale (>1hr), the old data is returned instantly and a background task refreshes the cache.
 
 | Field | Type | Description |
 |---|---|---|
-| `tables` | array of maps | `[{ table_schema: "public", table_name: "sensors" }, …]` |
+| `tables` | array of maps | `[{ table_schema: "public", table_name: "sensors", column_count: 12 }, …]` |
 | `cached_at` | string (ISO 8601) | Timestamp of last DB fetch; used for TTL check |
 
 ---
@@ -186,7 +210,7 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | `referenced_table` | string \| null | FK target: `schema.table.column` or null |
 
 > Cache is invalidated by `POST /api/v1/connections/{id}/schema/refresh` (db_manager+).
-> Next query after invalidation re-fetches from live DB and re-caches.
+> Next request after invalidation re-fetches from live DB and re-caches.
 
 ---
 
@@ -207,8 +231,8 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | `expires_at` | string \| null | Optional expiry; null = never expires |
 | `note` | string \| null | Admin notes |
 
-> **RBAC bypass:** users with role `admin` or `db_manager` skip the access grant check entirely and can query any connection without a `user_db_access` document.
-> **Security:** revoking a grant immediately invalidates the Redis cache — blocked on very next query, no TTL delay.
+> **RBAC bypass:** users with role `admin` or `db_manager` skip the access grant check entirely.
+> **Security:** revoking a grant immediately invalidates the Redis cache — blocked on very next query.
 
 ---
 
@@ -227,6 +251,7 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 
 > Passwords are **never** stored in Redis.
 > Access revocation immediately deletes `access:{uid}:{conn_id}` — no TTL wait.
+> All Redis operations have a 1.0s app-level timeout; on timeout the request falls back to Firestore silently.
 
 ---
 
@@ -236,7 +261,12 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | Method | Path | Role | Description |
 |---|---|---|---|
 | POST | `/login` | public | Firebase ID token → custom token with role claim |
-| POST | `/logout` | analyst+ | Revoke refresh tokens |
+| POST | `/register` | public | Same as login — server upserts user doc |
+| POST | `/logout` | analyst+ | Revoke session + Firebase refresh tokens |
+| POST | `/admin/logout/{uid}` | admin | Force-logout any user |
+| POST | `/token-active` | public | Check if token + session are still valid |
+| GET | `/me` | analyst+ | Current user profile |
+| GET | `/sessions` | analyst+ | List active sessions |
 
 ### Connections — `/api/v1/connections/*`
 | Method | Path | Role | Description |
@@ -249,16 +279,21 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | PATCH | `/{id}/activate` | db_manager+ | Enable connection |
 | PATCH | `/{id}/deactivate` | db_manager+ | Disable connection |
 | POST | `/{id}/test` | db_manager+ | Live connectivity test |
-| GET | `/{id}/audits` | db_manager+ | Query audit log for this DB |
+| GET | `/{id}/audits` | db_manager+ | Query audit log (`?limit&offset&status&uid`) |
+| GET | `/{id}/stats` | db_manager+ | Usage stats (`?days=30`) |
 | POST | `/{id}/schema/refresh` | db_manager+ | Force-invalidate schema cache |
 
 ### Users — `/api/v1/users/*`
 | Method | Path | Role | Description |
 |---|---|---|---|
-| GET | `/` | admin | List all users |
-| GET | `/{uid}` | admin | Get single user |
+| GET | `/` | db_manager+ | List all users (`?active_only=true`) |
+| GET | `/{uid}` | db_manager+ | Get single user |
+| POST | `/` | admin | Create user |
+| PATCH | `/{uid}` | admin | Update display_name / is_active |
 | PATCH | `/{uid}/role` | admin | Change user role |
-| DELETE | `/{uid}` | admin | Deactivate user |
+| PATCH | `/{uid}/activate` | admin | Re-enable a deactivated user |
+| PATCH | `/{uid}/deactivate` | admin | Disable user (blocks login instantly) |
+| DELETE | `/{uid}` | admin | Soft-delete — sets `is_active=False`, preserves all data |
 
 ### Access Grants — `/api/v1/access-grants/*`
 | Method | Path | Role | Description |
@@ -275,8 +310,10 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | Method | Path | Role | Description |
 |---|---|---|---|
 | POST | `/query` | analyst+ | NL → SQL → results |
-| GET | `/schema/{conn_id}` | analyst+ | Table list (cache-aware) |
+| GET | `/schema/{conn_id}` | analyst+ | Table list grouped by schema (stale-while-revalidate) |
 | GET | `/schema/{conn_id}/{schema}/{table}` | analyst+ | Column definitions (cache-aware) |
+| GET | `/query/history` | analyst+ | AI message history (`?limit&offset&favourites_only`) |
+| GET | `/query/audits` | analyst+ | Audit logs (`?uid=` admin/db_manager only; `?limit&offset&connection_id&status`) |
 
 ### Chat — `/api/v1/chat/*`
 | Method | Path | Role | Description |
@@ -286,6 +323,8 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | GET | `/workspaces/{conn_id}/chats` | analyst+ | Chats in a workspace |
 | GET | `/workspaces/{conn_id}/chats/{chat_id}/messages` | analyst+ | All messages in a chat |
 | GET | `/workspaces/{conn_id}/chats/{chat_id}/messages/{msg_id}` | analyst+ | Single message (all fields) |
+| POST | `/workspaces/{conn_id}/chats/{chat_id}/messages/{msg_id}/favourite` | analyst+ | Star a query |
+| DELETE | `/workspaces/{conn_id}/chats/{chat_id}/messages/{msg_id}/favourite` | analyst+ | Unstar a query |
 
 ---
 
@@ -295,9 +334,14 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 |---|---|---|---|
 | `user_db_access` | `firebase_uid ASC`, `is_active ASC` | Composite | `list_grants_by_user` |
 | `user_db_access` | `connection_id ASC`, `is_active ASC` | Composite | `list_grants_by_connection` |
-| `chats` (collection group) | `firebase_uid ASC`, `updated_at DESC` | Composite | `GET /chat/recent` |
-| `messages` | `seq ASC` | Single field | `GET .../messages` |
-| `audits` | `created_at DESC` | Single field | `GET .../audits` |
+| `chats` (group) | `firebase_uid ASC`, `updated_at DESC` | Composite | `GET /chat/recent` |
+| `messages` (group) | `firebase_uid ASC`, `role ASC`, `created_at DESC` | Composite | `GET /query/history` |
+| `messages` (group) | `firebase_uid ASC`, `role ASC`, `favourited ASC`, `created_at DESC` | Composite | `GET /query/history?favourites_only=true` |
+| `audits` (group) | `firebase_uid ASC`, `created_at DESC` | Composite | `GET /query/audits` |
+| `messages` | `seq ASC` | Single field | `GET .../messages` (per-chat) |
+| `audits` | `created_at DESC` | Single field | `GET .../audits` (per-connection) |
+
+> Firestore will print the index creation URL in the server terminal on first call if an index is missing. Open the URL and click **Create Index**. Build takes 1–3 minutes.
 
 ---
 
@@ -307,4 +351,7 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 |---|---|---|
 | v1 | 2025-12 | Initial schema — users, connections, user_db_access, query_audit (root) |
 | v2 | 2026-01 | Added sessions sub-collection; Redis cache keys documented |
-| v3 | 2026-03-09 | • `query_audit` moved to `database_connections/{id}/audits/{id}` <br> • `schema_cache` sub-collection added to `database_connections` <br> • Message IDs changed from UUID to zero-padded hex (`0001`, `0002`, …) <br> • `msg_count` counter field added to chat docs <br> • Assistant messages now store flat fields: `sql_query`, `summary`, `total_records`, `numerical_insights`, `data`, `error_message` <br> • `firebase_uid` + `connection_id` added as fields to chat docs for collection group query <br> • New endpoints: `/chat/*`, `/access-grants/my/connections`, `/schema/{id}/{schema}/{table}`, `/connections/{id}/test`, `/connections/{id}/schema/refresh` |
+| v3 | 2026-03-09 | • `query_audit` moved to `database_connections/{id}/audits/{id}` <br> • `schema_cache` sub-collection added to `database_connections` <br> • Message IDs changed from UUID to zero-padded hex (`0001`, `0002`, …) <br> • `msg_count` counter field added to chat docs <br> • Assistant messages now store flat fields: `sql_query`, `summary`, `total_records`, `numerical_insights`, `data`, `error_message` <br> • `firebase_uid` + `connection_id` added as fields to chat docs for collection group query |
+| v3.1 | 2026-03-16 | • Message IDs changed from plain hex to role-prefixed turn IDs: `u_0001`/`a_0001` <br> • `msg_count` renamed to `turn_count` on chat docs (increments +1 per turn, not +2) <br> • `title` field added to assistant messages (LLM-generated, 5–8 words) <br> • `query_type` (`SELECT`/`INSERT`/…), `status` (`success`/`error`), `favourited` fields added to assistant messages <br> • `firebase_uid`, `connection_id`, `connection_name`, `chat_id` stored on every message doc for collection group queries <br> • Schema cache served with stale-while-revalidate (instant response + background refresh) <br> • New endpoints: `POST/DELETE .../favourite`, `GET /query/history`, `GET /query/audits`, `GET /connections/{id}/stats`, `POST /auth/admin/logout/{uid}` <br> • All Firestore `.where()` calls updated to `FieldFilter` API |
+| v3.2 | 2026-03-17 | • `DELETE /users/{uid}` changed from hard-delete to soft-delete (sets `is_active=False`, preserves all Firestore data and audit history) <br> • `POST /auth/logout-all` (self logout-all) removed — use `POST /auth/logout` with no session_id <br> • `GET /query/audits` now accepts `?uid=` for admin/db_manager to view any user's logs <br> • `_tables` schema cache doc now stores `column_count` per table entry <br> • `GET /api/v1/schema/{conn_id}` response includes `columns` count on each `SchemaTable` |
+| v3.3 | 2026-03-18 | • Fixed `GET /query/audits` crash: `status` query param renamed to `status_filter` internally (URL stays `?status=`) — parameter was shadowing the `fastapi.status` module causing `AttributeError` on 500 errors <br> • Redis app-level timeout increased from 0.5s → 1.0s to reduce false-positive timeout warnings on local Redis <br> • Firestore composite index confirmed required: `audits` collection group — `firebase_uid ASC` + `created_at DESC` |

@@ -172,10 +172,16 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                     schema_tables = inspector.get_table_names(schema=schema)
                 except Exception:
                     schema_tables = inspector.get_table_names()
+                schema_arg = schema if schema and schema != "default" else None
                 for tbl in schema_tables:
+                    try:
+                        col_count = len(inspector.get_columns(tbl, schema=schema_arg))
+                    except Exception:
+                        col_count = 0
                     results.append({
-                        "table_schema": schema or "default",
-                        "table_name":   tbl,
+                        "table_schema":  schema or "default",
+                        "table_name":    tbl,
+                        "column_count":  col_count,
                     })
 
             engine.dispose()

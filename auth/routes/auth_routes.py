@@ -4,10 +4,9 @@ Auth endpoints — Firebase Service Account + Firestore, no PostgreSQL.
 
   POST /api/v1/auth/login          verify Firebase ID token → return custom token
   POST /api/v1/auth/register       same flow as login (Firebase handles signup client-side)
-  POST /api/v1/auth/logout         revoke session + Firebase refresh tokens
-  POST /api/v1/auth/logout-all             revoke ALL sessions for this user
-  POST /api/v1/auth/admin/logout/{uid}     force-logout any user (admin only)
-  POST /api/v1/auth/token-active           check if token + Firestore session are valid
+  POST /api/v1/auth/logout                   revoke session + Firebase refresh tokens
+  POST /api/v1/auth/admin/logout/{uid}       force-logout any user (admin only)
+  POST /api/v1/auth/token-active             check if token + Firestore session are valid
   GET  /api/v1/auth/me             current user profile from Firestore
   GET  /api/v1/auth/sessions       list active Firestore sessions
 
@@ -154,20 +153,6 @@ async def logout_route(
     scope = f"session {body.session_id}" if body.session_id else "all sessions"
     logger.info(f"[POST /auth/logout] uid={current_user['firebase_uid']} scope={scope}")
     return {"message": f"Logged out ({scope})."}
-
-
-# ── POST /api/v1/auth/logout-all ─────────────────────────────────────────────
-
-@router.post(
-    "/logout-all",
-    response_model=MessageResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Logout from all devices — revoke all Firestore sessions",
-)
-async def logout_all_route(current_user: dict = Depends(get_current_user)):
-    count = await logout_all(current_user["firebase_uid"])
-    logger.info(f"[POST /auth/logout-all] uid={current_user['firebase_uid']} revoked={count}")
-    return {"message": f"Logged out from all {count} active session(s)."}
 
 
 # ── POST /api/v1/auth/admin/logout/{uid} ─────────────────────────────────────

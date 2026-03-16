@@ -29,7 +29,7 @@ from typing import Any, Optional
 
 from auth.core.config import settings
 
-_REDIS_TIMEOUT = 0.5  # max seconds any Redis call may take before we give up and hit Firestore
+_REDIS_TIMEOUT = 1.0  # max seconds any Redis call may take before we give up and hit Firestore
 
 logger = logging.getLogger(__name__)
 

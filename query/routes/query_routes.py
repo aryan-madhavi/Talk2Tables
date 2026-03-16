@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth.routes.dependencies import require_analyst
 from ai_agent import run_agent
@@ -71,6 +71,8 @@ async def query(
     )
 
     # ── 3. Run the AI agent ───────────────────────────────────────────────
+    import time as _time
+    _t0 = _time.perf_counter()
     try:
         result = await run_agent(
             natural_language_query = body.chat_input,
@@ -117,8 +119,8 @@ async def query(
         sql_query         = final_response.get("sql_query"),
         summary           = final_response.get("summary"),
         row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
-        execution_time_ms = 0,  # execution time tracked inside execute_sql tool
-        status            = response_type,
+        execution_time_ms = round((_time.perf_counter() - _t0) * 1000, 1),
+        status            = "success" if response_type == "results" else response_type,
         error_message     = final_response.get("error_message"),
     )
 
@@ -187,7 +189,7 @@ async def list_schema(
                 s = row.get("table_schema") or "default"
                 t = row.get("table_name", "")
                 schemas_grouped.setdefault(s, []).append(t)
-                flat_tables.append(SchemaTable(table=t, schema_name=s))
+                flat_tables.append(SchemaTable(table=t, schema_name=s, columns=row.get("column_count", 0)))
             return SchemaResponse(
                 connection_id = connection_id,
                 schemas       = schemas_grouped,
@@ -391,39 +393,56 @@ async def get_query_history(
 
 @router.get(
     "/query/audits",
-    summary="Get audit logs for the current user",
+    summary="Get audit logs (own logs; admin/db_manager can view any user)",
     description=(
-        "Returns raw audit records for queries run by the current user, across all connections. "
-        "Each record contains sql_query, row_count, execution_time_ms, status, error_message, and timestamp. "
+        "Returns audit records across all connections. "
+        "Regular users see only their own logs. "
+        "Admin and db_manager can pass ?uid=<firebase_uid> to view any user's logs. "
         "Optional filters: connection_id, status (success|error). "
         "Requires Firestore composite index on 'audits' collection group: "
         "firebase_uid ASC + created_at DESC."
     ),
 )
 async def get_audit_logs(
-    limit:         int       = 50,
-    offset:        int       = 0,
-    connection_id: str | None = None,   # ?connection_id= filter by specific DB
-    status_filter: str | None = None,   # ?status=success or ?status=error
-    current_user:  dict      = Depends(require_analyst),
+    limit:         int        = 50,
+    offset:        int        = 0,
+    uid:           str | None = None,                               # admin/db_manager only
+    connection_id: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),  # ?status=success|error
+    current_user:  dict       = Depends(require_analyst),
 ):
     from google.cloud.firestore_v1 import Query as FSQuery
     from auth.core.firebase import get_firestore_client
-
     from google.cloud.firestore_v1.base_query import FieldFilter
 
-    uid = current_user["firebase_uid"]
+    _ELEVATED = {"admin", "db_manager"}
+    caller_uid  = current_user["firebase_uid"]
+    caller_role = current_user["role"]
+
+    # If ?uid= provided, only admin/db_manager may use it
+    if uid and uid != caller_uid:
+        if caller_role not in _ELEVATED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admin or db_manager can view another user's audit logs.",
+            )
+        target_uid = uid
+    else:
+        target_uid = caller_uid
+
     try:
         db = get_firestore_client()
         q  = (
             db.collection_group("audits")
-              .where(filter=FieldFilter("firebase_uid", "==", uid))
+              .where(filter=FieldFilter("firebase_uid", "==", target_uid))
               .order_by("created_at", direction=FSQuery.DESCENDING)
         )
         if connection_id:
             q = q.where(filter=FieldFilter("connection_id", "==", connection_id))
-        if status_filter in ("success", "error", "results"):
-            q = q.where(filter=FieldFilter("status", "==", status_filter))
+        if status_filter == "success":
+            q = q.where(filter=FieldFilter("status", "in", ["success", "results"]))
+        elif status_filter == "error":
+            q = q.where(filter=FieldFilter("status", "==", "error"))
 
         docs   = q.limit(limit + offset).stream()
         audits = []
@@ -433,6 +452,7 @@ async def get_audit_logs(
             d = doc.to_dict()
             audits.append({
                 "audit_id":          d.get("audit_id", doc.id),
+                "firebase_uid":      d.get("firebase_uid", ""),
                 "connection_id":     d.get("connection_id", ""),
                 "chat_id":           d.get("chat_id", ""),
                 "sql_query":         d.get("sql_query", ""),
@@ -444,8 +464,16 @@ async def get_audit_logs(
                 "created_at":        d.get("created_at", ""),
             })
 
-        return {"audits": audits, "total": len(audits), "limit": limit, "offset": offset}
+        return {
+            "audits":     audits,
+            "total":      len(audits),
+            "limit":      limit,
+            "offset":     offset,
+            "viewed_uid": target_uid,
+        }
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error(f"[GET /query/audits] uid={uid} error: {exc}")
+        logger.error(f"[GET /query/audits] caller={caller_uid} target={target_uid} error: {exc}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

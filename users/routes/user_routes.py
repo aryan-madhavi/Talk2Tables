@@ -25,7 +25,6 @@ from users.routes.schemas import (
     UpdateUserRequest,
     UserOut,
     UserListResponse,
-    MessageResponse,
 )
 from users.services.user_service import (
     create_user,
@@ -34,7 +33,6 @@ from users.services.user_service import (
     update_user,
     update_user_role,
     set_user_active,
-    delete_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -230,11 +228,12 @@ async def deactivate_user_route(
 
 @router.delete(
     "/{uid}",
-    response_model=MessageResponse,
-    summary="Hard delete a user (admin only)",
+    response_model=UserOut,
+    summary="Delete a user (admin only)",
     description=(
-        "Permanently removes user from Firebase Auth AND Firestore. "
-        "Consider deactivating instead to preserve audit history."
+        "Soft-deletes the user by setting is_active=False and disabling them in Firebase Auth. "
+        "All audit history and data are preserved. "
+        "Use PATCH /{uid}/activate to restore access."
     ),
 )
 async def delete_user_route(
@@ -247,11 +246,11 @@ async def delete_user_route(
             detail="You cannot delete your own account.",
         )
 
-    logger.info(f"[DELETE /users/{uid}] by={current_user['firebase_uid']}")
-    deleted = await delete_user(uid, deleted_by_uid=current_user["firebase_uid"])
-    if not deleted:
+    logger.info(f"[DELETE /users/{uid}] soft-delete by={current_user['firebase_uid']}")
+    user = await set_user_active(uid, is_active=False, changed_by_uid=current_user["firebase_uid"])
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User '{uid}' not found.",
         )
-    return MessageResponse(message=f"User '{uid}' permanently deleted.")
+    return user
