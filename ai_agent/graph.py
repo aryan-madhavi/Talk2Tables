@@ -31,6 +31,14 @@ from .tools import get_tools
 logger = logging.getLogger(__name__)
 
 
+# ── Inner ReAct agent cache ────────────────────────────────────────────────────
+# create_react_agent(llm, tools) compiles a small StateGraph.  It's cheap but
+# still takes ~10-30ms and allocates objects on every call.  Cache keyed by
+# (connection_id, user_role) so the same user hitting the same DB reuses the
+# compiled agent; the LLM singleton is already shared across all entries.
+_react_agent_cache: dict[tuple, Any] = {}
+
+
 # ── React agent node ───────────────────────────────────────────────────────────
 
 async def node_react_agent(state: AgentState) -> AgentState:
@@ -55,11 +63,18 @@ async def node_react_agent(state: AgentState) -> AgentState:
         f"dialect={dialect} retry={state.get('retry_count', 0)}"
     )
 
-    # ── Build tools and LLM ───────────────────────────────────────────────
+    # ── Build tools and compiled inner agent (cached) ────────────────────
+    cache_key = (state["connection_id"], user_role)
     try:
-        tools          = get_tools(conn_str, user_role, state["connection_id"])
-        llm            = get_llm()
-        system_prompt  = build_system_prompt(dialect)
+        llm           = get_llm()
+        system_prompt = build_system_prompt(dialect)
+        if cache_key not in _react_agent_cache:
+            tools = get_tools(conn_str, user_role, state["connection_id"])
+            _react_agent_cache[cache_key] = create_react_agent(llm, tools)
+            logger.debug(f"[node_react_agent] Compiled new inner agent for key={cache_key}")
+        else:
+            logger.debug(f"[node_react_agent] Reusing cached inner agent for key={cache_key}")
+        agent = _react_agent_cache[cache_key]
     except Exception as exc:
         logger.error(f"[node_react_agent] Setup failed: {exc}")
         msg = f"AI agent could not be initialised: {exc}"
@@ -99,7 +114,6 @@ async def node_react_agent(state: AgentState) -> AgentState:
 
     # ── Run react agent ────────────────────────────────────────────────────
     try:
-        agent  = create_react_agent(llm, tools)
         result = await agent.ainvoke({"messages": messages})
 
         # The last message in the output is the final AI response

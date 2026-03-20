@@ -31,7 +31,7 @@ from users import users_router
 from access import access_router
 from query import query_router
 from chat import chat_router
-from core.redis_client import init_redis, close_redis
+from core.redis_client import init_redis, close_redis, redis_health
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -159,6 +159,21 @@ app.include_router(chat_router)         # /api/v1/chat/*
 @app.get("/health", tags=["system"])
 async def health():
     return {"status": "ok", "service": "talk2tables-backend", "version": "2.0.0"}
+
+
+@app.get("/health/redis", tags=["system"])
+async def health_redis():
+    """
+    Ping Redis and return its health status.
+
+    Response shape:
+      { status, latency_ms, url, message }
+
+    - status "ok"             — Redis reachable, PING returned PONG
+    - status "error"          — configured but unreachable or timed out
+    - status "not_configured" — REDIS_URL env var not set
+    """
+    return await redis_health()
 
 @app.get("/", tags=["system"])
 async def root():

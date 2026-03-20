@@ -58,3 +58,16 @@ def key_access_user(firebase_uid: str) -> str:
 def key_access_pair(firebase_uid: str, connection_id: str) -> str:
     """Used by verify_access() — the hottest cache path."""
     return f"access:{firebase_uid}:{connection_id}"
+
+# Schema cache (mirrors Firestore schema_cache sub-collection)
+TTL_SCHEMA = 60 * 60  # 1 hour — same as SCHEMA_CACHE_TTL_SECONDS in schema_tools.py
+
+def key_schema_tables(connection_id: str) -> str:
+    return f"schema:{connection_id}:_tables"
+
+def key_schema_table_def(connection_id: str, schema: str, table: str) -> str:
+    return f"schema:{connection_id}:{schema}__{table}"
+
+def key_schema_pattern(connection_id: str) -> str:
+    """Glob pattern for invalidating all schema keys for a connection."""
+    return f"schema:{connection_id}:*"

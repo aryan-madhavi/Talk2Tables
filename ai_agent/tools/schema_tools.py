@@ -1,6 +1,8 @@
 # ai_agent/tools/schema_tools.py
 """
-LangChain tools for schema inspection with Firestore cache.
+LangChain tools for schema inspection with two-tier cache:
+  1. Redis   (~1ms)   — TTL 1h, invalidated on schema refresh
+  2. Firestore (~80ms) — source of truth, persists across restarts
 
 Firestore cache paths (under each connection doc):
     database_connections/{connection_id}/schema_cache/_tables
@@ -9,7 +11,7 @@ Firestore cache paths (under each connection doc):
         → { columns: [...], cached_at: ISO }
 
 Cache TTL: SCHEMA_CACHE_TTL_SECONDS (default 3600 = 1 hour).
-On cache miss the tool fetches from the live DB and writes back to Firestore.
+On cache miss the tool fetches from the live DB and writes back to both caches.
 Cache can be force-invalidated via POST /api/v1/connections/{id}/schema/refresh.
 
 Tools:
@@ -28,9 +30,9 @@ from sqlalchemy import create_engine, inspect
 
 logger = logging.getLogger(__name__)
 
-_CONNECTIONS_COL       = "database_connections"
-_CACHE_COL             = "schema_cache"
-_TABLES_DOC_ID         = "_tables"
+_CONNECTIONS_COL         = "database_connections"
+_CACHE_COL               = "schema_cache"
+_TABLES_DOC_ID           = "_tables"
 SCHEMA_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 _SYSTEM_SCHEMAS = {
@@ -49,6 +51,12 @@ _DIALECT_HINTS: dict[str, str] = {
     "oracle":     "oracle",
 }
 
+# ── SQLAlchemy engine pool ────────────────────────────────────────────────────
+# Creating a new engine (and TCP connection) per tool call was the biggest
+# latency driver after the LLM.  Keep one engine per connection string so the
+# underlying connection pool is reused across tool calls and agent retries.
+_engine_cache: dict[str, Any] = {}
+
 
 def detect_dialect(connection_string: str) -> str:
     """Detect SQL dialect from SQLAlchemy connection URL."""
@@ -61,10 +69,16 @@ def detect_dialect(connection_string: str) -> str:
 
 
 def _get_engine(connection_string: str):
+    """Return a cached SQLAlchemy engine, creating it on first use."""
+    if connection_string in _engine_cache:
+        return _engine_cache[connection_string]
     kwargs: dict = {"pool_pre_ping": True, "echo": False}
     if not connection_string.lower().startswith("sqlite"):
         kwargs["connect_args"] = {"connect_timeout": 10}
-    return create_engine(connection_string, **kwargs)
+    engine = create_engine(connection_string, **kwargs)
+    _engine_cache[connection_string] = engine
+    logger.debug(f"[SchemaTools] New engine cached (total={len(_engine_cache)})")
+    return engine
 
 
 def _cache_ref(db, connection_id: str, doc_id: str):
@@ -100,10 +114,27 @@ def _table_doc_id(schema: str, table: str) -> str:
 
 def invalidate_schema_cache(connection_id: str) -> None:
     """
-    Delete all schema_cache documents for a connection.
+    Delete all schema cache entries for a connection (Redis + Firestore).
     Called by POST /api/v1/connections/{id}/schema/refresh.
     Non-fatal.
     """
+    # Redis invalidation (sync-friendly — fire and forget via asyncio)
+    try:
+        import asyncio
+        from core.redis_client import redis_delete_pattern
+        from core.cache_keys import key_schema_pattern
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(redis_delete_pattern(key_schema_pattern(connection_id)))
+            else:
+                loop.run_until_complete(redis_delete_pattern(key_schema_pattern(connection_id)))
+        except Exception as exc:
+            logger.warning(f"[SchemaCache] Redis invalidation failed (non-fatal): {exc}")
+    except ImportError:
+        pass
+
+    # Firestore invalidation
     try:
         from auth.core.firebase import get_firestore_client
         db   = get_firestore_client()
@@ -117,7 +148,30 @@ def invalidate_schema_cache(connection_id: str) -> None:
             doc.reference.delete()
         logger.info(f"[SchemaCache] Invalidated all cache for connection_id={connection_id}")
     except Exception as exc:
-        logger.warning(f"[SchemaCache] invalidate_schema_cache failed (non-fatal): {exc}")
+        logger.warning(f"[SchemaCache] invalidate_schema_cache Firestore failed (non-fatal): {exc}")
+
+
+# ── Redis helpers (sync wrappers for use inside sync @tool functions) ─────────
+
+def _redis_get_sync(key: str) -> Any | None:
+    """Synchronous Redis GET that runs the async helper in the current loop."""
+    try:
+        import asyncio
+        from core.redis_client import redis_get
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(redis_get(key))
+    except Exception:
+        return None
+
+
+def _redis_set_sync(key: str, value: Any, ttl: int) -> None:
+    try:
+        import asyncio
+        from core.redis_client import redis_set
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(redis_set(key, value, ttl))
+    except Exception:
+        pass
 
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
@@ -125,12 +179,15 @@ def invalidate_schema_cache(connection_id: str) -> None:
 def make_schema_tools(connection_string: str, connection_id: str) -> list:
     """
     Return [get_schema_list, get_table_definition] LangChain tools.
-    Both tools are cache-aware — they read from Firestore first and only
-    hit the live DB on cache miss or stale cache (older than TTL).
+
+    Cache priority (fastest first):
+      1. Redis   — ~1ms, populated on first miss
+      2. Firestore — ~80ms, source of truth across restarts
+      3. Live DB — on full cache miss; writes back to both caches
 
     Args:
         connection_string: SQLAlchemy URL for the target database.
-        connection_id:     Firestore document ID in database_connections — used for cache path.
+        connection_id:     Firestore document ID in database_connections.
     """
 
     @tool
@@ -140,7 +197,17 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         Call this FIRST before constructing any SQL query.
         Returns a JSON array of objects with keys: table_schema, table_name.
         """
-        # ── 1. Try Firestore cache ─────────────────────────────────────────
+        from core.cache_keys import key_schema_tables, TTL_SCHEMA
+
+        redis_key = key_schema_tables(connection_id)
+
+        # ── 1. Redis cache ─────────────────────────────────────────────────
+        cached = _redis_get_sync(redis_key)
+        if cached is not None:
+            logger.info(f"[SchemaCache] Redis HIT tables | conn={connection_id}")
+            return json.dumps(cached, indent=2)
+
+        # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
             from auth.core.firebase import get_firestore_client
             db  = get_firestore_client()
@@ -149,13 +216,16 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             if doc.exists:
                 data = doc.to_dict()
                 if _is_fresh(data.get("cached_at", "")):
-                    logger.info(f"[SchemaCache] HIT tables | conn={connection_id}")
-                    return json.dumps(data["tables"], indent=2)
+                    tables = data["tables"]
+                    logger.info(f"[SchemaCache] Firestore HIT tables | conn={connection_id}")
+                    _redis_set_sync(redis_key, tables, TTL_SCHEMA)
+                    return json.dumps(tables, indent=2)
                 logger.info(f"[SchemaCache] STALE tables | conn={connection_id}")
         except Exception as exc:
-            logger.warning(f"[SchemaCache] Cache read failed (non-fatal): {exc}")
+            logger.warning(f"[SchemaCache] Firestore read failed (non-fatal): {exc}")
+            ref = None  # type: ignore
 
-        # ── 2. Live DB fetch ───────────────────────────────────────────────
+        # ── 3. Live DB fetch ───────────────────────────────────────────────
         try:
             engine    = _get_engine(connection_string)
             inspector = inspect(engine)
@@ -172,29 +242,22 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                     schema_tables = inspector.get_table_names(schema=schema)
                 except Exception:
                     schema_tables = inspector.get_table_names()
-                schema_arg = schema if schema and schema != "default" else None
                 for tbl in schema_tables:
-                    try:
-                        col_count = len(inspector.get_columns(tbl, schema=schema_arg))
-                    except Exception:
-                        col_count = 0
                     results.append({
-                        "table_schema":  schema or "default",
-                        "table_name":    tbl,
-                        "column_count":  col_count,
+                        "table_schema": schema or "default",
+                        "table_name":   tbl,
                     })
-
-            engine.dispose()
 
             if not results:
                 return "No tables found in the connected database."
 
-            # ── 3. Write to Firestore cache ────────────────────────────────
+            # ── 4. Write to Redis + Firestore ──────────────────────────────
+            _redis_set_sync(redis_key, results, TTL_SCHEMA)
             try:
                 ref.set({"tables": results, "cached_at": _now_iso()})
-                logger.info(f"[SchemaCache] MISS tables — cached {len(results)} tables | conn={connection_id}")
+                logger.info(f"[SchemaCache] MISS tables — cached {len(results)} | conn={connection_id}")
             except Exception as exc:
-                logger.warning(f"[SchemaCache] Cache write failed (non-fatal): {exc}")
+                logger.warning(f"[SchemaCache] Firestore write failed (non-fatal): {exc}")
 
             return json.dumps(results, indent=2)
 
@@ -213,9 +276,18 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             table_name:  Name of the table to inspect.
             schema_name: Schema the table belongs to (e.g. 'public', 'mydb').
         """
-        doc_id = _table_doc_id(schema_name or "default", table_name)
+        from core.cache_keys import key_schema_table_def, TTL_SCHEMA
 
-        # ── 1. Try Firestore cache ─────────────────────────────────────────
+        redis_key = key_schema_table_def(connection_id, schema_name or "default", table_name)
+        doc_id    = _table_doc_id(schema_name or "default", table_name)
+
+        # ── 1. Redis cache ─────────────────────────────────────────────────
+        cached = _redis_get_sync(redis_key)
+        if cached is not None:
+            logger.info(f"[SchemaCache] Redis HIT {schema_name}.{table_name} | conn={connection_id}")
+            return json.dumps(cached, indent=2)
+
+        # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
             from auth.core.firebase import get_firestore_client
             db  = get_firestore_client()
@@ -224,13 +296,16 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             if doc.exists:
                 data = doc.to_dict()
                 if _is_fresh(data.get("cached_at", "")):
-                    logger.info(f"[SchemaCache] HIT {schema_name}.{table_name} | conn={connection_id}")
-                    return json.dumps(data["columns"], indent=2)
+                    columns = data["columns"]
+                    logger.info(f"[SchemaCache] Firestore HIT {schema_name}.{table_name} | conn={connection_id}")
+                    _redis_set_sync(redis_key, columns, TTL_SCHEMA)
+                    return json.dumps(columns, indent=2)
                 logger.info(f"[SchemaCache] STALE {schema_name}.{table_name}")
         except Exception as exc:
-            logger.warning(f"[SchemaCache] Cache read failed (non-fatal): {exc}")
+            logger.warning(f"[SchemaCache] Firestore read failed (non-fatal): {exc}")
+            ref = None  # type: ignore
 
-        # ── 2. Live DB fetch ───────────────────────────────────────────────
+        # ── 3. Live DB fetch ───────────────────────────────────────────────
         try:
             engine     = _get_engine(connection_string)
             inspector  = inspect(engine)
@@ -255,8 +330,6 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             except Exception:
                 fk_map = {}
 
-            engine.dispose()
-
             result_rows = []
             for col in columns:
                 col_name = col["name"]
@@ -272,12 +345,13 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             if not result_rows:
                 return f"No columns found for table {schema_name}.{table_name}"
 
-            # ── 3. Write to Firestore cache ────────────────────────────────
+            # ── 4. Write to Redis + Firestore ──────────────────────────────
+            _redis_set_sync(redis_key, result_rows, TTL_SCHEMA)
             try:
                 ref.set({"columns": result_rows, "cached_at": _now_iso()})
                 logger.info(f"[SchemaCache] MISS {schema_name}.{table_name} — cached | conn={connection_id}")
             except Exception as exc:
-                logger.warning(f"[SchemaCache] Cache write failed (non-fatal): {exc}")
+                logger.warning(f"[SchemaCache] Firestore write failed (non-fatal): {exc}")
 
             return json.dumps(result_rows, indent=2)
 

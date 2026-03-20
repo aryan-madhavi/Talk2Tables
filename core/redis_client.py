@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Optional
 
 from auth.core.config import settings
@@ -80,6 +81,64 @@ def _client():
     except Exception as e:
         logger.warning(f"[Redis] Client creation failed: {e}")
         return None
+
+
+# ── Health check ─────────────────────────────────────────────────────────────
+
+async def redis_health() -> dict:
+    """
+    Ping Redis and return a health dict:
+      { status, latency_ms, url, message }
+
+    status values:
+      "ok"             — reachable and PING returned PONG
+      "error"          — configured but unreachable / timed out
+      "not_configured" — REDIS_URL not set
+    """
+    url = settings.redis_url
+    if not url:
+        return {
+            "status":     "not_configured",
+            "latency_ms": None,
+            "url":        None,
+            "message":    "REDIS_URL is not set — caching disabled.",
+        }
+
+    safe_url = url.split("@")[-1]   # strip credentials if present
+    client   = _client()
+    if client is None:
+        return {
+            "status":     "error",
+            "latency_ms": None,
+            "url":        safe_url,
+            "message":    "Redis client could not be created.",
+        }
+
+    try:
+        t0 = time.perf_counter()
+        async with client as r:
+            await asyncio.wait_for(r.ping(), timeout=_REDIS_TIMEOUT)
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        return {
+            "status":     "ok",
+            "latency_ms": latency_ms,
+            "url":        safe_url,
+            "message":    "PONG",
+        }
+    except asyncio.TimeoutError:
+        return {
+            "status":     "error",
+            "latency_ms": None,
+            "url":        safe_url,
+            "message":    f"Ping timed out after {_REDIS_TIMEOUT}s.",
+        }
+    except Exception as exc:
+        return {
+            "status":     "error",
+            "latency_ms": None,
+            "url":        safe_url,
+            "message":    str(exc),
+        }
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────

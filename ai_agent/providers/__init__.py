@@ -28,10 +28,19 @@ _PROVIDER_MAP: dict[str, type[LLMProvider]] = {
     "ollama":     OllamaProvider,
 }
 
+# ── LLM singleton ─────────────────────────────────────────────────────────────
+# LLM instantiation (API key validation, HTTP client init) takes 50-200ms.
+# Cache the model object so only the first request pays that cost.
+_llm_singleton = None
+_llm_singleton_key: Optional[str] = None
+
 
 def get_llm(preferred: Optional[str] = None):
     """
-    Instantiate the best available LLM provider and return its LangChain ChatModel.
+    Return the singleton LangChain ChatModel, instantiating it on first call.
+
+    The singleton is keyed by the effective provider name so a runtime change
+    to LLM_PROVIDER (e.g., in tests) still produces a fresh instance.
 
     Args:
         preferred: Provider key override. Falls back to LLM_PROVIDER env var,
@@ -43,7 +52,14 @@ def get_llm(preferred: Optional[str] = None):
     Raises:
         RuntimeError if no provider can be instantiated.
     """
-    env_pref = preferred or os.environ.get("LLM_PROVIDER", "").lower().strip()
+    global _llm_singleton, _llm_singleton_key
+
+    env_pref  = preferred or os.environ.get("LLM_PROVIDER", "").lower().strip()
+    cache_key = env_pref or "auto"
+
+    if _llm_singleton is not None and _llm_singleton_key == cache_key:
+        logger.debug(f"[LLMFactory] Returning cached LLM (provider_key={cache_key})")
+        return _llm_singleton
 
     priority = (
         [env_pref] + [p for p in _PRIORITY if p != env_pref]
@@ -60,6 +76,8 @@ def get_llm(preferred: Optional[str] = None):
             provider = cls()
             model    = provider.get_model()
             logger.info(f"[LLMFactory] Using provider: {provider.name}")
+            _llm_singleton     = model
+            _llm_singleton_key = cache_key
             return model
         except Exception as exc:
             logger.warning(f"[LLMFactory] Provider '{key}' unavailable: {exc}")

@@ -133,9 +133,20 @@ async def check_token_active(id_token: str) -> dict:
 
     check_revoked=False so we can distinguish "expired" from "revoked".
 
+    Cache fast-path:
+        token:{uid} is populated by verify_request_token() after a full
+        Firestore user + session check passes. A cache HIT here means the
+        user is active and had a valid session within the last 55 minutes.
+        We skip both Firestore reads and the session touch on a HIT.
+        The cache is invalidated by logout / revoke_session / deactivate /
+        role-change, so a stale hit is not a security concern.
+
     Returns:
         { active, uid, email, role, db_user_id, expires_at, session_id, reason? }
     """
+    from core.redis_client import redis_get, redis_set
+    from core.cache_keys import key_token, key_user, TTL_USER
+
     try:
         claims = verify_id_token(id_token, check_revoked=False)
     except ValueError as exc:
@@ -155,8 +166,28 @@ async def check_token_active(id_token: str) -> dict:
             "reason":     "Token expired.",
         }
 
-    # Fetch user from Firestore
-    user = fs_get_user(firebase_uid)
+    # ── Redis fast-path ───────────────────────────────────────────────────
+    cached_token = await redis_get(key_token(firebase_uid))
+    if cached_token:
+        logger.debug(f"[AuthService] check_token_active CACHE HIT uid={firebase_uid}")
+        return {
+            "active":     True,
+            "uid":        firebase_uid,
+            "email":      email,
+            "role":       cached_token.get("role", "analyst"),
+            "db_user_id": firebase_uid,
+            "expires_at": expires_at.isoformat(),
+            "session_id": None,  # not stored in token cache; cookie holds it
+        }
+
+    # ── Firestore fallback (cache miss) ───────────────────────────────────
+    # Try user cache before hitting Firestore
+    user = await redis_get(key_user(firebase_uid))
+    if not user:
+        user = fs_get_user(firebase_uid)
+        if user:
+            await redis_set(key_user(firebase_uid), user, TTL_USER)
+
     if not user:
         return {"active": False, "uid": firebase_uid, "reason": "User not found in Firestore."}
     if not user.get("is_active", True):
@@ -172,7 +203,7 @@ async def check_token_active(id_token: str) -> dict:
             "reason": "No active session. Please log in again.",
         }
 
-    # Touch last_seen_at
+    # Touch last_seen_at (only on a real Firestore check, not on cache hit)
     fs_touch_session(firebase_uid, session["session_id"])
 
     return {
@@ -216,16 +247,31 @@ async def logout_all(firebase_uid: str) -> int:
 
 async def update_profile(firebase_uid: str, display_name: str) -> dict:
     """Update a user's display name in Firestore + Firebase Auth. Returns updated profile."""
-    return fs_update_user_display_name(firebase_uid, display_name.strip())
+    updated = fs_update_user_display_name(firebase_uid, display_name.strip())
+    # Bust caches so the updated name is reflected immediately on next request
+    from core.redis_client import redis_delete
+    from core.cache_keys import key_token, key_user
+    await redis_delete(key_token(firebase_uid), key_user(firebase_uid))
+    return updated
 
 
 async def revoke_single_session(firebase_uid: str, session_id: str) -> bool:
     """
     Revoke a specific Firestore session WITHOUT revoking Firebase refresh tokens.
     This removes access for that device on the next API call without affecting other sessions.
+
+    Also invalidates token:{uid} cache so the revoked device is denied on its
+    very next request (rather than coasting on a cached auth result for up to 55 min).
+    Active devices will re-populate the cache transparently after re-checking Firestore.
+
     Returns True if the session was found and revoked, False if not found.
     """
-    return fs_revoke_session(firebase_uid, session_id)
+    revoked = fs_revoke_session(firebase_uid, session_id)
+    if revoked:
+        from core.redis_client import redis_delete
+        from core.cache_keys import key_token
+        await redis_delete(key_token(firebase_uid))
+    return revoked
 
 
 async def get_user_by_firebase_uid(firebase_uid: str) -> Optional[dict]:
