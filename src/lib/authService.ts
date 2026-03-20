@@ -75,7 +75,7 @@ export interface SessionEntry {
 //   Path=/           — accessible on all routes
 
 const SESSION_KEY     = 't2t_session_id';
-const SESSION_MAX_AGE = 3600; // seconds — 1 hour
+const SESSION_MAX_AGE = 28800; // seconds — 8 hours (matches backend session_expiry_seconds)
 
 function saveSession(id: string): void {
   const secure = location.protocol === 'https:' ? '; Secure' : '';
@@ -223,10 +223,24 @@ export async function getMe(): Promise<BackendUser> {
   return apiFetch<BackendUser>('/me');
 }
 
+// ── Profile update ────────────────────────────────────────────────────────────
+
+export async function updateProfile(displayName: string): Promise<BackendUser> {
+  return apiFetch<BackendUser>('/me', {
+    method: 'PATCH',
+    body:   JSON.stringify({ display_name: displayName }),
+  });
+}
+
 // ── Sessions list ─────────────────────────────────────────────────────────────
 
-export async function getSessions(): Promise<{ sessions: SessionEntry[]; total: number }> {
-  return apiFetch<{ sessions: SessionEntry[]; total: number }>('/sessions');
+export async function getSessions(): Promise<SessionEntry[]> {
+  return apiFetch<SessionEntry[]>('/sessions');
+}
+
+/** Revoke a single session by ID — does NOT sign out other devices. */
+export async function revokeSession(sessionId: string): Promise<void> {
+  await apiFetch<{ message: string }>(`/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
 /** Admin: force-logout a specific user by UID — POST /auth/admin/logout/{uid} */

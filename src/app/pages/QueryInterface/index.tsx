@@ -33,6 +33,9 @@ export default function QueryInterface() {
       : null
   );
 
+  // Pre-fill from Suggested Queries (no auto-run)
+  const prefillText = (location.state as { prefill?: string } | null)?.prefill ?? null;
+
   useEffect(() => {
     const load = isAdmin || isDbManager
       ? listConnections(true).then(res =>
@@ -61,6 +64,15 @@ export default function QueryInterface() {
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
   } = useQueryExecution(selectedDb);
+
+  // Pre-fill input from Suggested Queries click (fires once, no auto-run)
+  const prefillFired = useRef(false);
+  useEffect(() => {
+    if (!prefillText || prefillFired.current) return;
+    prefillFired.current = true;
+    setInput(prefillText);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [prefillText]);
 
   // Auto-run pending query once connection is ready
   const autoRunFired = useRef(false);

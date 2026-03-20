@@ -13,6 +13,7 @@ import History            from './pages/History';
 import SchemaBrowser      from './pages/SchemaBrowser';
 import AdminPanel         from './pages/AdminPanel';
 import Settings           from './pages/Settings';
+import Reports            from './pages/Reports';
 
 const NotFound = () => (
   <div className="p-8 text-center text-gray-500">Page Not Found</div>
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
       { path: 'history',    element: <History /> },
       { path: 'schema',     element: <SchemaBrowser /> },
       { path: 'settings',   element: <Settings /> },
+      { path: 'reports',    element: <Reports /> },
       { path: 'comingsoon', element: <ComingSoon /> },
 
       // Admin-only — ProtectedRoute checks role hierarchy

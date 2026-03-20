@@ -1,8 +1,16 @@
 import React from 'react';
-import { currentUser } from '../../data/mockData';
+import { useAuth } from '../../../context/AuthContext';
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export function WelcomeBanner() {
-  const firstName = currentUser.name.split(' ')[0];
+  const { user } = useAuth();
+  const firstName = (user?.display_name || user?.email?.split('@')[0] || 'there').split(' ')[0];
 
   return (
     <div className="bg-gradient-to-r from-blue-700 to-blue-900 rounded-xl p-8 text-white shadow-lg relative overflow-hidden">
@@ -16,7 +24,7 @@ export function WelcomeBanner() {
       </div>
 
       <div className="relative z-10">
-        <h1 className="text-3xl font-bold mb-2">Good morning, {firstName} 👋</h1>
+        <h1 className="text-3xl font-bold mb-2">{getGreeting()}, {firstName} 👋</h1>
         <p className="text-blue-100 text-lg">What would you like to know today?</p>
       </div>
     </div>
