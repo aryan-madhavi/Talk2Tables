@@ -52,6 +52,8 @@ from auth.services.auth_service import (
     check_token_active,
     logout,
     logout_all,
+    update_profile,
+    revoke_single_session,
     get_all_sessions,
 )
 from auth.routes.dependencies import get_current_user, require_admin
@@ -64,6 +66,7 @@ from auth.routes.schemas import (
     SessionOut,
     TokenActiveRequest,
     TokenActiveResponse,
+    UpdateProfileRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,6 +203,31 @@ async def me_route(current_user: dict = Depends(get_current_user)):
     }
 
 
+# ── PATCH /api/v1/auth/me ─────────────────────────────────────────────────────
+
+@router.patch(
+    "/me",
+    response_model=MeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update current user's display name",
+)
+async def update_me_route(
+    body:         UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    updated = await update_profile(current_user["firebase_uid"], body.display_name)
+    logger.info(f"[PATCH /auth/me] uid={current_user['firebase_uid']} display_name={body.display_name!r}")
+    return {
+        "firebase_uid":   updated["firebase_uid"],
+        "email":          updated["email"],
+        "display_name":   updated.get("display_name"),
+        "photo_url":      updated.get("photo_url"),
+        "role":           updated["role"],
+        "email_verified": updated.get("email_verified", True),
+        "is_active":      updated["is_active"],
+    }
+
+
 # ── GET /api/v1/auth/sessions ─────────────────────────────────────────────────
 
 @router.get(
@@ -211,3 +239,30 @@ async def me_route(current_user: dict = Depends(get_current_user)):
 async def sessions_route(current_user: dict = Depends(get_current_user)):
     sessions = await get_all_sessions(current_user["firebase_uid"])
     return sessions
+
+
+# ── DELETE /api/v1/auth/sessions/{session_id} ─────────────────────────────────
+
+@router.delete(
+    "/sessions/{session_id}",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Revoke a specific session (does not affect other active sessions)",
+    description=(
+        "Marks the Firestore session as revoked. The device using that session will "
+        "be denied on its next API call. Other sessions and Firebase refresh tokens "
+        "are NOT affected — this is a targeted single-device sign-out."
+    ),
+)
+async def revoke_session_route(
+    session_id:   str,
+    current_user: dict = Depends(get_current_user),
+):
+    revoked = await revoke_single_session(current_user["firebase_uid"], session_id)
+    if not revoked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found or already revoked.",
+        )
+    logger.info(f"[DELETE /auth/sessions/{session_id}] uid={current_user['firebase_uid']}")
+    return {"message": f"Session {session_id} revoked."}

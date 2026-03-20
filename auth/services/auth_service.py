@@ -26,6 +26,7 @@ from auth.core.firebase import (
     revoke_refresh_tokens,
     fs_get_user,
     fs_upsert_user,
+    fs_update_user_display_name,
     fs_create_session,
     fs_get_latest_active_session,
     fs_get_active_sessions,
@@ -75,12 +76,9 @@ async def login(
     email_verified   = claims.get("email_verified", False)
     sign_in_provider = claims.get("firebase", {}).get("sign_in_provider", "unknown")
 
-    token_exp  = claims.get("exp")
-    expires_at = (
-        datetime.fromtimestamp(token_exp, tz=timezone.utc)
-        if token_exp
-        else datetime.now(timezone.utc) + timedelta(seconds=settings.session_expiry_seconds)
-    )
+    # Session lifetime is always driven by our setting (8 h), not the
+    # Firebase ID token's 1-hour exp — the SDK auto-refreshes that token.
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.session_expiry_seconds)
 
     logger.info(f"[AuthService] Login | uid={firebase_uid} email={email} provider={sign_in_provider}")
 
@@ -215,6 +213,20 @@ async def logout_all(firebase_uid: str) -> int:
 
 
 # ── User lookup (used by dependencies.py) ────────────────────────────────────
+
+async def update_profile(firebase_uid: str, display_name: str) -> dict:
+    """Update a user's display name in Firestore + Firebase Auth. Returns updated profile."""
+    return fs_update_user_display_name(firebase_uid, display_name.strip())
+
+
+async def revoke_single_session(firebase_uid: str, session_id: str) -> bool:
+    """
+    Revoke a specific Firestore session WITHOUT revoking Firebase refresh tokens.
+    This removes access for that device on the next API call without affecting other sessions.
+    Returns True if the session was found and revoked, False if not found.
+    """
+    return fs_revoke_session(firebase_uid, session_id)
+
 
 async def get_user_by_firebase_uid(firebase_uid: str) -> Optional[dict]:
     """Fetch user dict from Firestore. Returns None if not found."""

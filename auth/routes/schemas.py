@@ -97,3 +97,13 @@ class MessageResponse(BaseModel):
 class SetRoleRequest(BaseModel):
     """Body for PATCH /users/{uid}/role — admin only."""
     role: RoleType = Field(..., description="New role to assign: analyst | power_user | db_manager | admin")
+
+
+class UpdateProfileRequest(BaseModel):
+    """Body for PATCH /auth/me — update own display name."""
+    display_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="New display name for the current user.",
+    )

@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     firestore_users_collection:    str = "users"
     firestore_sessions_collection: str = "sessions"   # sub-collection under each user doc
 
-    # ── Session TTL — matches Firebase ID token lifetime ──────────────────
-    session_expiry_seconds: int = 3600   # 1 hour
+    # ── Session TTL ───────────────────────────────────────────────────────
+    session_expiry_seconds: int = 28800  # 8 hours
 
     # ── Redis cache (optional) ────────────────────────────────────────────
     # Leave blank/unset to disable — app works without Redis.

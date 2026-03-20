@@ -377,7 +377,12 @@ def fs_get_active_sessions(firebase_uid: str) -> list[dict]:
           .where(filter=firestore.FieldFilter("is_revoked", "==", False))
           .stream()
     )
-    sessions = [d.to_dict() for d in docs]
+    now = _now_iso()
+    sessions = [
+        d.to_dict() for d in docs
+        # Drop expired sessions in Python — avoids a Firestore composite index
+        if d.to_dict().get("expires_at", "9999") > now
+    ]
     # Sort newest first in Python — no composite index required
     sessions.sort(key=lambda s: s.get("created_at", ""), reverse=True)
     return sessions
@@ -419,6 +424,27 @@ def fs_revoke_session(firebase_uid: str, session_id: str) -> bool:
     ref.update({"is_revoked": True})
     logger.info(f"[Firestore] Session revoked | uid={firebase_uid} session={session_id}")
     return True
+
+
+def fs_update_user_display_name(firebase_uid: str, display_name: str) -> dict:
+    """
+    Update display_name in the Firestore user doc and sync to Firebase Auth.
+    Returns the updated user document dict.
+    """
+    db  = get_firestore_client()
+    ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
+    ref.update({"display_name": display_name, "updated_at": _now_iso()})
+
+    # Best-effort sync to Firebase Auth profile (non-fatal if it fails)
+    try:
+        firebase_auth.update_user(firebase_uid, display_name=display_name)
+    except Exception as exc:
+        logger.warning(f"[Firebase] display_name sync to Auth warning (non-fatal): {exc}")
+
+    data = ref.get().to_dict()
+    data["id"] = firebase_uid
+    logger.info(f"[Firestore] display_name updated | uid={firebase_uid}")
+    return data
 
 
 def fs_revoke_all_sessions(firebase_uid: str) -> int:
