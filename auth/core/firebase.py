@@ -74,9 +74,8 @@ def get_firebase_app() -> firebase_admin.App:
     Initialise Firebase Admin SDK exactly once per process using the
     Service Account credentials.  lru_cache = singleton.
 
-    Credential priority:
-      1. FIREBASE_CREDENTIALS_JSON  — full JSON string (Docker / cloud env var)
-      2. FIREBASE_CREDENTIALS_PATH  — path to .json file (local dev)
+    Requires `FIREBASE_CREDENTIALS_JSON` env var — the full service-account
+    JSON as a single-line string (set in Railway / Docker / local .env).
 
     The Service Account credentials give us:
       • Token signing authority  (create_custom_token)
@@ -87,13 +86,14 @@ def get_firebase_app() -> firebase_admin.App:
     if firebase_admin._apps:
         return firebase_admin.get_app()
 
-    if settings.firebase_credentials_json:
-        cred_dict = json.loads(settings.firebase_credentials_json)
-        cred = credentials.Certificate(cred_dict)
-        logger.info("[Firebase] Admin SDK: credentials loaded from JSON env var")
-    else:
-        cred = credentials.Certificate(settings.firebase_credentials_path)
-        logger.info(f"[Firebase] Admin SDK: credentials loaded from {settings.firebase_credentials_path}")
+    if not settings.firebase_credentials_json:
+        raise RuntimeError(
+            "FIREBASE_CREDENTIALS_JSON is not set. "
+            "Paste the full service-account JSON as a single-line string in your environment variables."
+        )
+    cred_dict = json.loads(settings.firebase_credentials_json)
+    cred = credentials.Certificate(cred_dict)
+    logger.info("[Firebase] Admin SDK: credentials loaded from FIREBASE_CREDENTIALS_JSON")
 
     app = firebase_admin.initialize_app(cred, {
         "projectId": settings.firebase_project_id,

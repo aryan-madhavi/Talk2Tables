@@ -23,8 +23,7 @@ Copy `ai_agent/.env.example` to `.env` in the project root. Required variables:
 
 | Variable | Purpose |
 |---|---|
-| `FIREBASE_CREDENTIALS_PATH` | Path to Service Account JSON (local dev) |
-| `FIREBASE_CREDENTIALS_JSON` | Full JSON string (Docker/cloud, overrides path) |
+| `FIREBASE_CREDENTIALS_JSON` | Full service-account JSON as a single-line string (required) |
 | `FIREBASE_PROJECT_ID` | Firebase project ID |
 | `DB_ENCRYPTION_KEY` | 64-char hex string (32 bytes) for AES-256-GCM |
 | `OPENROUTER_API_KEY` | Primary LLM provider |

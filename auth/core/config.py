@@ -42,8 +42,9 @@ class Settings(BaseSettings):
     )
 
     # ── Firebase Service Account ───────────────────────────────────────────
-    # Priority: JSON env var (Docker) > file path (local dev)
-    firebase_credentials_path: str           = "firebase-credentials.json"
+    # Paste the full service-account JSON as a single-line string.
+    # Download from: Firebase Console → Project Settings → Service Accounts
+    #                → Generate new private key → copy contents as one line.
     firebase_credentials_json: Optional[str] = None
 
     firebase_project_id: str = ""
