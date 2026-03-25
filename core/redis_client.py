@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from auth.core.config import settings
 
-_REDIS_TIMEOUT = 1.0  # max seconds any Redis call may take before we give up and hit Firestore
+_REDIS_TIMEOUT = 3.0  # max seconds any Redis call may take before we give up and hit Firestore
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +75,9 @@ def _client():
             url,
             encoding="utf-8",
             decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=False,
         )
     except Exception as e:
         logger.warning(f"[Redis] Client creation failed: {e}")

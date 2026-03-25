@@ -112,43 +112,59 @@ class SecurityError(Exception):
 # Redis cache helpers (lazy import — Redis is optional)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_sync_redis():
+    """Return a synchronous Redis client, or None if Redis is not configured."""
+    try:
+        import redis as _redis
+        from auth.core.config import settings
+        if not settings.redis_url:
+            return None
+        return _redis.from_url(settings.redis_url, decode_responses=False)
+    except Exception:
+        return None
+
+
 def _cache_get_sync(key: str):
     """
-    Synchronous Redis GET via asyncio.
+    Synchronous Redis GET using redis-py sync client.
     Called from verify_request_token() which runs in a thread pool.
     Returns parsed value or None on miss/error.
     """
     try:
-        import asyncio as _asyncio
-        from core.redis_client import redis_get
-        loop = _asyncio.new_event_loop()
-        result = loop.run_until_complete(redis_get(key))
-        loop.close()
-        return result
+        import json as _json
+        client = _get_sync_redis()
+        if client is None:
+            return None
+        raw = client.get(key)
+        client.close()
+        if raw is None:
+            return None
+        return _json.loads(raw)
     except Exception:
         return None
 
 
 def _cache_set_sync(key: str, value: dict, ttl: int) -> None:
-    """Synchronous Redis SET via asyncio."""
+    """Synchronous Redis SET using redis-py sync client."""
     try:
-        import asyncio as _asyncio
-        from core.redis_client import redis_set
-        loop = _asyncio.new_event_loop()
-        loop.run_until_complete(redis_set(key, value, ttl))
-        loop.close()
+        import json as _json
+        client = _get_sync_redis()
+        if client is None:
+            return
+        client.setex(key, ttl, _json.dumps(value))
+        client.close()
     except Exception:
         pass  # Redis failure must never block auth
 
 
 def _cache_invalidate_sync(*keys: str) -> None:
-    """Synchronous Redis DELETE via asyncio."""
+    """Synchronous Redis DELETE using redis-py sync client."""
     try:
-        import asyncio as _asyncio
-        from core.redis_client import redis_delete
-        loop = _asyncio.new_event_loop()
-        loop.run_until_complete(redis_delete(*keys))
-        loop.close()
+        client = _get_sync_redis()
+        if client is None:
+            return
+        client.delete(*keys)
+        client.close()
     except Exception:
         pass
 

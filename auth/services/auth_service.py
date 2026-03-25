@@ -82,8 +82,10 @@ async def login(
 
     logger.info(f"[AuthService] Login | uid={firebase_uid} email={email} provider={sign_in_provider}")
 
-    # ── Step 2: Upsert user in Firestore ──────────────────────────────────
-    user = fs_upsert_user(
+    # ── Step 2: Upsert user in Firestore (run in thread — SDK is sync) ────
+    import asyncio as _asyncio
+    user = await _asyncio.to_thread(
+        fs_upsert_user,
         firebase_uid     = firebase_uid,
         email            = email,
         display_name     = display_name,
@@ -97,16 +99,18 @@ async def login(
 
     # ── Step 3: Create custom token — signed by Service Account ───────────
     # Role + db_user_id travel inside every subsequent Firebase ID token
-    custom_token = create_custom_token(
+    custom_token = await _asyncio.to_thread(
+        create_custom_token,
         uid               = firebase_uid,
         additional_claims = {
             "role":       user["role"],
-            "db_user_id": firebase_uid,   # Firestore doc ID = firebase_uid
+            "db_user_id": firebase_uid,
         },
     )
 
-    # ── Step 4: Persist session in Firestore ──────────────────────────────
-    session = fs_create_session(
+    # ── Step 4: Persist session in Firestore (run in thread) ──────────────
+    session = await _asyncio.to_thread(
+        fs_create_session,
         firebase_uid = firebase_uid,
         device_info  = device_info or "",
         ip_address   = ip_address  or "",
@@ -147,8 +151,9 @@ async def check_token_active(id_token: str) -> dict:
     from core.redis_client import redis_get, redis_set
     from core.cache_keys import key_token, key_user, TTL_USER
 
+    import asyncio as _asyncio
     try:
-        claims = verify_id_token(id_token, check_revoked=False)
+        claims = await _asyncio.to_thread(verify_id_token, id_token, False)
     except ValueError as exc:
         return {"active": False, "reason": str(exc)}
 
@@ -184,7 +189,7 @@ async def check_token_active(id_token: str) -> dict:
     # Try user cache before hitting Firestore
     user = await redis_get(key_user(firebase_uid))
     if not user:
-        user = fs_get_user(firebase_uid)
+        user = await _asyncio.to_thread(fs_get_user, firebase_uid)
         if user:
             await redis_set(key_user(firebase_uid), user, TTL_USER)
 
@@ -194,7 +199,7 @@ async def check_token_active(id_token: str) -> dict:
         return {"active": False, "uid": firebase_uid, "reason": "Account deactivated."}
 
     # Check for active session in Firestore
-    session = fs_get_latest_active_session(firebase_uid)
+    session = await _asyncio.to_thread(fs_get_latest_active_session, firebase_uid)
     if not session:
         return {
             "active": False,
@@ -203,8 +208,8 @@ async def check_token_active(id_token: str) -> dict:
             "reason": "No active session. Please log in again.",
         }
 
-    # Touch last_seen_at (only on a real Firestore check, not on cache hit)
-    fs_touch_session(firebase_uid, session["session_id"])
+    # Touch last_seen_at (fire-and-forget — don't block the response)
+    _asyncio.ensure_future(_asyncio.to_thread(fs_touch_session, firebase_uid, session["session_id"]))
 
     return {
         "active":      True,
@@ -227,18 +232,20 @@ async def logout(
     Revoke a specific Firestore session (or all if session_id is None),
     then revoke Firebase refresh tokens so the Firebase SDK is signed out too.
     """
+    import asyncio as _asyncio
     if session_id:
-        fs_revoke_session(firebase_uid, session_id)
+        await _asyncio.to_thread(fs_revoke_session, firebase_uid, session_id)
     else:
-        fs_revoke_all_sessions(firebase_uid)
+        await _asyncio.to_thread(fs_revoke_all_sessions, firebase_uid)
 
-    revoke_refresh_tokens(firebase_uid)
+    await _asyncio.to_thread(revoke_refresh_tokens, firebase_uid)
 
 
 async def logout_all(firebase_uid: str) -> int:
     """Revoke all Firestore sessions + Firebase tokens. Returns revoked count."""
-    count = fs_revoke_all_sessions(firebase_uid)
-    revoke_refresh_tokens(firebase_uid)
+    import asyncio as _asyncio
+    count = await _asyncio.to_thread(fs_revoke_all_sessions, firebase_uid)
+    await _asyncio.to_thread(revoke_refresh_tokens, firebase_uid)
     logger.info(f"[AuthService] Logout-all | uid={firebase_uid} revoked={count}")
     return count
 
@@ -247,7 +254,8 @@ async def logout_all(firebase_uid: str) -> int:
 
 async def update_profile(firebase_uid: str, display_name: str) -> dict:
     """Update a user's display name in Firestore + Firebase Auth. Returns updated profile."""
-    updated = fs_update_user_display_name(firebase_uid, display_name.strip())
+    import asyncio as _asyncio
+    updated = await _asyncio.to_thread(fs_update_user_display_name, firebase_uid, display_name.strip())
     # Bust caches so the updated name is reflected immediately on next request
     from core.redis_client import redis_delete
     from core.cache_keys import key_token, key_user
