@@ -28,13 +28,14 @@ function buildResultFromMessage(m: MessageOut): QueryResult | null {
 }
 
 export function useQueryExecution(selectedConnectionId: string) {
-  const [messages,       setMessages]       = useState<Message[]>([INITIAL_MESSAGE]);
-  const [input,          setInput]          = useState('');
-  const [isTyping,       setIsTyping]       = useState(false);
-  const [currentResult,  setCurrentResult]  = useState<QueryResult | null>(null);
-  const [chartType,      setChartType]      = useState<'bar' | 'pie'>('bar');
-  const [chatId,         setChatId]         = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [messages,        setMessages]        = useState<Message[]>([INITIAL_MESSAGE]);
+  const [input,           setInput]           = useState('');
+  const [isTyping,        setIsTyping]        = useState(false);
+  const [executingChatId, setExecutingChatId] = useState<string | null | undefined>(undefined);
+  const [currentResult,   setCurrentResult]   = useState<QueryResult | null>(null);
+  const [chartType,       setChartType]       = useState<'bar' | 'pie'>('bar');
+  const [chatId,          setChatId]          = useState<string | null>(null);
+  const [refreshTrigger,  setRefreshTrigger]  = useState(0);
   const messagesEndRef  = useRef<HTMLDivElement | null>(null);
   // Increments each time the connection changes; used to discard stale responses
   const generationRef   = useRef(0);
@@ -46,6 +47,7 @@ export function useQueryExecution(selectedConnectionId: string) {
     setCurrentResult(null);
     setMessages([INITIAL_MESSAGE]);
     setIsTyping(false);
+    setExecutingChatId(undefined);
     setRefreshTrigger(0);
   }, [selectedConnectionId]);
 
@@ -103,6 +105,7 @@ export function useQueryExecution(selectedConnectionId: string) {
     };
     setMessages(prev => [...prev, userMsg]);
     setIsTyping(true);
+    setExecutingChatId(chatId);   // capture which chat is running (null = new chat)
 
     try {
       const startTime = Date.now();
@@ -138,6 +141,10 @@ export function useQueryExecution(selectedConnectionId: string) {
         columns:       payload.data?.length > 0 ? Object.keys(payload.data[0]) : [],
         executionTime,
         rowCount:      payload.total_records ?? payload.data?.length ?? 0,
+        question:          queryText,
+        summary:           payload.summary,
+        insights:          (payload as any).numerical_insights  ?? undefined,
+        narrativeInsights: (payload as any).narrative_insights  ?? undefined,
         chartData:     (payload.data || []).slice(0, 10).map(item => {
           const keys = Object.keys(item);
           return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -165,7 +172,10 @@ export function useQueryExecution(selectedConnectionId: string) {
         timestamp: new Date(),
       }]);
     } finally {
-      if (generationRef.current === generation) setIsTyping(false);
+      if (generationRef.current === generation) {
+        setIsTyping(false);
+        setExecutingChatId(undefined);
+      }
     }
   }, [selectedConnectionId, chatId]);
 
@@ -199,10 +209,18 @@ export function useQueryExecution(selectedConnectionId: string) {
     if (msg.queryResult) setCurrentResult(msg.queryResult);
   };
 
+  const updateCurrentResultInsights = (
+    insights:         QueryResult['insights'],
+    narrativeInsights: QueryResult['narrativeInsights'],
+  ) => {
+    setCurrentResult(prev => prev ? { ...prev, insights, narrativeInsights } : prev);
+  };
+
   return {
-    messages, input, setInput, isTyping, currentResult,
+    messages, input, setInput, isTyping, executingChatId, currentResult,
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
+    updateCurrentResultInsights,
   };
 }

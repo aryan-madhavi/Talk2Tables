@@ -80,6 +80,53 @@ export async function executeQuery(payload: QueryRequest): Promise<QueryResponse
   return res.json() as Promise<QueryResponse>;
 }
 
+// ── Query Suggestions ─────────────────────────────────────────────────────────
+
+export interface SuggestionsResponse {
+  suggestions:   string[];
+  connection_id: string;
+}
+
+export async function getSuggestions(connectionId: string): Promise<SuggestionsResponse> {
+  const token = await getIdToken();
+  const res = await fetch(`${API_BASE}/query/suggestions?connection_id=${encodeURIComponent(connectionId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { detail?: string };
+    throw new Error(body.detail ?? `Request failed: ${res.status}`);
+  }
+  return res.json() as Promise<SuggestionsResponse>;
+}
+
+// ── On-demand Insights ────────────────────────────────────────────────────────
+
+export interface InsightsResponse {
+  numerical_insights: Record<string, unknown>;
+  narrative_insights: {
+    key_finding:      string;
+    business_insight: string;
+    analyst_note:     string;
+  } | null;
+}
+
+export async function generateInsights(
+  data:     Record<string, unknown>[],
+  question: string,
+): Promise<InsightsResponse> {
+  const token = await getIdToken();
+  const res = await fetch(`${API_BASE}/query/insights`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ data, question }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { detail?: string };
+    throw new Error(body.detail ?? `Request failed: ${res.status}`);
+  }
+  return res.json() as Promise<InsightsResponse>;
+}
+
 // ── Query History ──────────────────────────────────────────────────────────────
 
 export interface QueryHistoryItem {

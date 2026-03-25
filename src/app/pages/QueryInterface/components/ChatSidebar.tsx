@@ -21,11 +21,12 @@ function timeAgo(iso: string): string {
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface ChatSidebarProps {
-  connectionId:   string;
-  activeChatId:   string | null;
-  refreshTrigger: number;
-  onNewChat:      () => void;
-  onSelectChat:   (chatId: string, messages: MessageOut[]) => void;
+  connectionId:    string;
+  activeChatId:    string | null;
+  executingChatId: string | null | undefined;
+  refreshTrigger:  number;
+  onNewChat:       () => void;
+  onSelectChat:    (chatId: string, messages: MessageOut[]) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -33,6 +34,7 @@ interface ChatSidebarProps {
 export function ChatSidebar({
   connectionId,
   activeChatId,
+  executingChatId,
   refreshTrigger,
   onNewChat,
   onSelectChat,
@@ -155,8 +157,9 @@ export function ChatSidebar({
         )}
 
         {!loading && chats.map(chat => {
-          const isActive  = activeChatId === chat.chat_id;
-          const isLoading = loadingId === chat.chat_id;
+          const isActive    = activeChatId  === chat.chat_id;
+          const isLoading   = loadingId     === chat.chat_id;
+          const isExecuting = executingChatId === chat.chat_id && !isActive;
 
           return (
             <button
@@ -176,7 +179,7 @@ export function ChatSidebar({
                   'mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0',
                   isActive ? 'bg-blue-100' : 'bg-gray-100 group-hover:bg-blue-50',
                 )}>
-                  {isLoading
+                  {isLoading || isExecuting
                     ? <Loader2 className="w-2.5 h-2.5 animate-spin text-blue-500" />
                     : <MessageSquare className={cn('w-2.5 h-2.5', isActive ? 'text-blue-600' : 'text-gray-400')} />
                   }

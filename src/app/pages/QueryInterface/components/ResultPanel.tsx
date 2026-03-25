@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Table } from 'lucide-react';
 import { QueryResult, ResultTab } from '../types';
-import { ResultTabs }      from './ResultTabs';
-import { ResultTable }     from './ResultTable';
-import { ResultSQL }       from './ResultSQL';
-import { ResultChart }     from './ResultChart';
+import { ResultTabs }     from './ResultTabs';
+import { ResultTable }    from './ResultTable';
+import { ResultSQL }      from './ResultSQL';
+import { ResultChart }    from './ResultChart';
+import { ResultInsights } from './ResultInsights';
 import { ResultActionBar } from './ResultActionBar';
 
 interface ResultPanelProps {
@@ -15,10 +16,11 @@ interface ResultPanelProps {
   onDownload:   () => void;
   onSave:       () => Promise<void>;
   isFavourited: boolean;
+  onInsightsGenerated: (insights: QueryResult['insights'], narrativeInsights: QueryResult['narrativeInsights']) => void;
 }
 
 export function ResultPanel({
-  result, chartType, setChartType, onCopy, onDownload, onSave, isFavourited,
+  result, chartType, setChartType, onCopy, onDownload, onSave, isFavourited, onInsightsGenerated,
 }: ResultPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('table');
 
@@ -34,13 +36,16 @@ export function ResultPanel({
     );
   }
 
+  const hasInsights = result.data.length > 0;
+
   return (
     <>
-      <ResultTabs active={activeTab} onChange={setActiveTab} />
+      <ResultTabs active={activeTab} onChange={setActiveTab} hasInsights={hasInsights} />
       <div className="flex-1 overflow-auto p-4 bg-white relative">
-        {activeTab === 'table' && <ResultTable result={result} />}
-        {activeTab === 'sql'   && <ResultSQL   result={result} onCopy={onCopy} />}
-        {activeTab === 'chart' && <ResultChart result={result} chartType={chartType} setChartType={setChartType} />}
+        {activeTab === 'table'    && <ResultTable    result={result} />}
+        {activeTab === 'sql'      && <ResultSQL      result={result} onCopy={onCopy} />}
+        {activeTab === 'chart'    && <ResultChart    result={result} chartType={chartType} setChartType={setChartType} />}
+        {activeTab === 'insights' && <ResultInsights result={result} onInsightsGenerated={onInsightsGenerated} />}
       </div>
       <ResultActionBar
         result={result}

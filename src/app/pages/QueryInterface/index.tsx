@@ -25,11 +25,19 @@ export default function QueryInterface() {
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
   const [selectedDb,  setSelectedDb]  = useState('');
 
-  // Pending auto-run from History "Run" button
+  // Pending auto-run from History "Run Again" button
   const pendingRun = useRef<{ query: string; connectionId: string } | null>(
     (location.state as { query?: string; connectionId?: string } | null)?.query
       ? { query: (location.state as { query: string; connectionId: string }).query,
           connectionId: (location.state as { query: string; connectionId: string }).connectionId }
+      : null
+  );
+
+  // Open existing chat from History / Recent Queries click
+  const pendingChat = useRef<{ chatId: string; connectionId: string } | null>(
+    (location.state as { chatId?: string; connectionId?: string } | null)?.chatId
+      ? { chatId:       (location.state as { chatId: string; connectionId: string }).chatId,
+          connectionId: (location.state as { chatId: string; connectionId: string }).connectionId }
       : null
   );
 
@@ -48,8 +56,11 @@ export default function QueryInterface() {
     load.then(opts => {
       setConnections(opts);
       if (pendingRun.current) {
-        // Select the connection from history "Run"
         const connId = pendingRun.current.connectionId;
+        const found  = opts.find(c => c.connection_id === connId);
+        setSelectedDb(found ? connId : (opts[0]?.connection_id ?? ''));
+      } else if (pendingChat.current) {
+        const connId = pendingChat.current.connectionId;
         const found  = opts.find(c => c.connection_id === connId);
         setSelectedDb(found ? connId : (opts[0]?.connection_id ?? ''));
       } else if (opts.length > 0) {
@@ -59,10 +70,11 @@ export default function QueryInterface() {
   }, [isAdmin, isDbManager]);
 
   const {
-    messages, input, setInput, isTyping, currentResult,
+    messages, input, setInput, isTyping, executingChatId, currentResult,
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
+    updateCurrentResultInsights,
   } = useQueryExecution(selectedDb);
 
   // Pre-fill input from Suggested Queries click (fires once, no auto-run)
@@ -85,6 +97,19 @@ export default function QueryInterface() {
     newChat();
     // small delay to let newChat() state settle
     setTimeout(() => sendQuery(query), 50);
+  }, [selectedDb]);
+
+  // Open existing chat once connection is selected
+  const openChatFired = useRef(false);
+  useEffect(() => {
+    if (!pendingChat.current || !selectedDb || openChatFired.current) return;
+    openChatFired.current = true;
+    const { chatId } = pendingChat.current;
+    pendingChat.current = null;
+    navigate(location.pathname, { replace: true, state: null });
+    getMessages(selectedDb, chatId)
+      .then(res => loadChat(chatId, res.messages ?? []))
+      .catch(console.error);
   }, [selectedDb]);
 
   // ── Favourite toggle ───────────────────────────────────────────────────────
@@ -121,6 +146,7 @@ export default function QueryInterface() {
       <ChatSidebar
         connectionId={selectedDb}
         activeChatId={chatId}
+        executingChatId={executingChatId}
         refreshTrigger={refreshTrigger}
         onNewChat={newChat}
         onSelectChat={(id, msgs: MessageOut[]) => loadChat(id, msgs)}
@@ -135,7 +161,7 @@ export default function QueryInterface() {
         />
         <ChatMessages
           messages={messages}
-          isTyping={isTyping}
+          isTyping={isTyping && executingChatId === chatId}
           messagesEndRef={messagesEndRef}
           onMessageClick={handleMessageClick}
         />
@@ -156,6 +182,7 @@ export default function QueryInterface() {
           onDownload={downloadCSV}
           onSave={handleSaveToggle}
           isFavourited={isFavourited}
+          onInsightsGenerated={updateCurrentResultInsights}
         />
       </div>
 

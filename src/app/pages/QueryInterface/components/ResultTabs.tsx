@@ -1,23 +1,26 @@
 import React from 'react';
-import { Table, Code, BarChart2 } from 'lucide-react';
+import { Table, Code, BarChart2, Lightbulb } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import { ResultTab } from '../types';
 
 interface ResultTabsProps {
-  active:   ResultTab;
-  onChange: (tab: ResultTab) => void;
+  active:      ResultTab;
+  onChange:    (tab: ResultTab) => void;
+  hasInsights: boolean;
 }
 
 const TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
-  { id: 'table', label: 'Results', icon: Table    },
-  { id: 'sql',   label: 'SQL',     icon: Code     },
-  { id: 'chart', label: 'Chart',   icon: BarChart2 },
+  { id: 'table',    label: 'Results', icon: Table    },
+  { id: 'sql',      label: 'SQL',     icon: Code     },
+  { id: 'chart',    label: 'Chart',   icon: BarChart2 },
+  { id: 'insights', label: 'Insights', icon: Lightbulb },
 ];
 
-export function ResultTabs({ active, onChange }: ResultTabsProps) {
+export function ResultTabs({ active, onChange, hasInsights }: ResultTabsProps) {
+  const visibleTabs = TABS.filter(t => t.id !== 'insights' || hasInsights);
   return (
     <div className="flex items-center border-b border-gray-100 bg-gray-50/50 px-2">
-      {TABS.map(tab => (
+      {visibleTabs.map(tab => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}

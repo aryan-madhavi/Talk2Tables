@@ -64,20 +64,25 @@ export function RecentQueries() {
               className="flex items-center justify-between p-4 bg-gray-50 rounded-lg
                          hover:bg-gray-100 transition-colors group"
             >
-              <div className="flex items-start gap-3 overflow-hidden">
+              <button
+                onClick={() => navigate('/query', {
+                  state: { chatId: item.chat_id, connectionId: item.connection_id },
+                })}
+                className="flex items-start gap-3 overflow-hidden flex-1 text-left"
+              >
                 <div className={cn(
                   'mt-1.5 w-2 h-2 rounded-full shrink-0',
                   TYPE_DOT[item.query_type] ?? 'bg-gray-400',
                 )} />
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate pr-4">{item.title}</p>
+                  <p className="font-medium text-gray-900 truncate pr-4 hover:text-blue-600 transition-colors">{item.title}</p>
                   <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                     <span>{item.connection_name}</span>
                     <span>•</span>
                     <span>{format(new Date(item.created_at), 'MMM d, h:mm a')}</span>
                   </div>
                 </div>
-              </div>
+              </button>
 
               <button
                 onClick={() => navigate('/query', {

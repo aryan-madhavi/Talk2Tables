@@ -35,6 +35,12 @@ export default function History() {
   useEffect(() => { loadHistory(); }, [loadHistory]);
   useEffect(() => { loadSaved();   }, [loadSaved]);
 
+  const handleOpen = (item: QueryHistoryItem) => {
+    navigate('/query', {
+      state: { chatId: item.chat_id, connectionId: item.connection_id },
+    });
+  };
+
   const handleRun = (item: QueryHistoryItem) => {
     navigate('/query', {
       state: { query: item.title, connectionId: item.connection_id },
@@ -135,6 +141,7 @@ export default function History() {
             <HistoryCard
               key={item.msg_id}
               item={item}
+              onOpen={handleOpen}
               onRun={handleRun}
               onToggleFavourite={handleToggleFavourite}
             />

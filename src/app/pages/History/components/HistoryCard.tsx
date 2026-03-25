@@ -14,11 +14,12 @@ const TYPE_BADGE: Record<string, string> = {
 
 interface HistoryCardProps {
   item:    QueryHistoryItem;
-  onRun:   (item: QueryHistoryItem) => void;
+  onOpen:  (item: QueryHistoryItem) => void;  // open existing chat
+  onRun:   (item: QueryHistoryItem) => void;  // re-run query
   onToggleFavourite: (item: QueryHistoryItem, nowFavourited: boolean) => void;
 }
 
-export function HistoryCard({ item, onRun, onToggleFavourite }: HistoryCardProps) {
+export function HistoryCard({ item, onOpen, onRun, onToggleFavourite }: HistoryCardProps) {
   const [fav,     setFav]     = useState(item.favourited);
   const [loading, setLoading] = useState(false);
 
@@ -45,7 +46,7 @@ export function HistoryCard({ item, onRun, onToggleFavourite }: HistoryCardProps
     <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all group">
       <div className="flex items-start justify-between gap-4">
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpen(item)}>
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide', badgeClass)}>
               {item.query_type || 'QUERY'}

@@ -53,13 +53,14 @@ function formatDate(iso: string | null): string {
 
 // ── Role Dropdown ─────────────────────────────────────────────────────────────
 
-function RoleDropdown({ user, currentUid, onChange, loading }: {
+function RoleDropdown({ user, currentUid, onChange, loading, canEdit }: {
   user: UserOut; currentUid: string;
-  onChange: (r: UserRole) => void; loading: boolean;
+  onChange: (r: UserRole) => void; loading: boolean; canEdit: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const isSelf = user.firebase_uid === currentUid;
+  const interactive = canEdit && !isSelf && !loading;
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -72,20 +73,21 @@ function RoleDropdown({ user, currentUid, onChange, loading }: {
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => !isSelf && !loading && setOpen(o => !o)}
-        disabled={loading || isSelf}
-        title={isSelf ? 'Cannot change your own role' : 'Change role'}
+        onClick={() => interactive && setOpen(o => !o)}
+        disabled={!interactive}
+        title={!canEdit ? 'Only admins can change roles' : isSelf ? 'Cannot change your own role' : 'Change role'}
         className={cn(
           'flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all',
           ROLE_STYLES[user.role as UserRole] ?? ROLE_STYLES.analyst,
-          !isSelf && !loading && 'hover:opacity-80 cursor-pointer',
-          (isSelf || loading) && 'cursor-not-allowed opacity-60',
+          interactive && 'hover:opacity-80 cursor-pointer',
+          !interactive && 'cursor-default',
+          loading && 'opacity-60',
         )}
       >
         {loading
           ? <Loader2 className="w-3 h-3 animate-spin" />
           : ROLE_LABELS[user.role as UserRole] ?? user.role}
-        {!isSelf && !loading && <ChevronDown className="w-3 h-3 ml-0.5 opacity-60" />}
+        {interactive && <ChevronDown className="w-3 h-3 ml-0.5 opacity-60" />}
       </button>
 
       {open && (
@@ -382,7 +384,7 @@ function UserAuditDrawer({ user, onClose }: { user: UserOut; onClose: () => void
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function UsersTab() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
 
   const [users,          setUsers]          = useState<UserOut[]>([]);
   const [loading,        setLoading]        = useState(true);
@@ -568,13 +570,15 @@ export function UsersTab() {
           </button>
         </div>
 
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg
-                     text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
-        >
-          <UserPlus className="w-4 h-4" /> Add User
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg
+                       text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <UserPlus className="w-4 h-4" /> Add User
+          </button>
+        )}
       </div>
 
       {/* Loading skeleton */}
@@ -686,6 +690,7 @@ export function UsersTab() {
                           currentUid={currentUser?.firebase_uid ?? ''}
                           onChange={role => handleRoleChange(user, role)}
                           loading={roleLoadingUid === user.firebase_uid}
+                          canEdit={isAdmin}
                         />
                       </td>
 
