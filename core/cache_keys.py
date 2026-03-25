@@ -71,3 +71,16 @@ def key_schema_table_def(connection_id: str, schema: str, table: str) -> str:
 def key_schema_pattern(connection_id: str) -> str:
     """Glob pattern for invalidating all schema keys for a connection."""
     return f"schema:{connection_id}:*"
+
+# Query suggestions (LLM-generated from schema)
+TTL_SUGGESTIONS = 24 * 60 * 60  # 24 hours
+
+def key_suggestions(connection_id: str) -> str:
+    return f"suggestions:{connection_id}"
+
+# Query history (per user, short TTL — invalidated after every query)
+TTL_HISTORY = 2 * 60  # 2 minutes
+
+def key_history(firebase_uid: str, favourites_only: bool = False) -> str:
+    suffix = ":favourites" if favourites_only else ""
+    return f"history:{firebase_uid}{suffix}"

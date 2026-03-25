@@ -47,6 +47,9 @@ python-docx==1.1.2             # Word doc extraction
 pydantic==2.9.2                # Request/response models (FastAPI uses this)
 pydantic-settings==2.5.2       # Settings from .env
 
+# ── Rate Limiting ─────────────────────────────────────────────
+slowapi==0.1.9                 # Per-IP rate limiting for FastAPI
+
 # ── Utilities ─────────────────────────────────────────────────
 python-dotenv==1.0.1           # .env file loading
 tenacity==9.0.0                # Retry logic (optional enhancement)

@@ -19,6 +19,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Load .env before any module that reads settings
 load_dotenv()
@@ -98,6 +101,8 @@ async def lifespan(app: FastAPI):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title       = "Talk2Tables API",
     description = (
@@ -105,11 +110,14 @@ app = FastAPI(
         "Built with FastAPI + LangGraph. UX4G compliant. "
         "Diploma Final Year Project — Mumbai, 2025-26."
     ),
-    version  = "2.0.0",
-    docs_url = "/docs",
-    redoc_url= "/redoc",
-    lifespan = lifespan,
+    version   = "2.0.0",
+    docs_url  = "/docs"  if settings.debug else None,
+    redoc_url = "/redoc" if settings.debug else None,
+    lifespan  = lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 
@@ -118,9 +126,36 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins     = _cors_origins,
     allow_credentials = True,
-    allow_methods     = ["*"],
-    allow_headers     = ["*"],
+    allow_methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers     = ["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 )
+
+# ── Body size limit ───────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    max_bytes      = 1 * 1024 * 1024  # 1 MB
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > max_bytes:
+        return JSONResponse(
+            status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content     = {"error": "Request body too large. Maximum size is 1 MB."},
+        )
+    return await call_next(request)
+
+
+# ── Security headers ──────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"]        = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"]       = "1; mode=block"
+    response.headers["Referrer-Policy"]        = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"]     = "geolocation=(), microphone=(), camera=()"
+    return response
+
 
 # ── Timing middleware ─────────────────────────────────────────────────────────
 

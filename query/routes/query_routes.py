@@ -9,13 +9,16 @@ Endpoints:
 Auth: Firebase Bearer token required on all endpoints.
 RBAC: All authenticated users can query; write ops enforced inside execute_sql tool.
 """
-from __future__ import annotations
-
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from auth.routes.dependencies import require_analyst
+
+limiter = Limiter(key_func=get_remote_address)
 from ai_agent import run_agent
 from ai_agent.services.chat_service import get_or_create_chat, get_messages, append_messages
 from ai_agent.services.audit_service import log_query
@@ -42,7 +45,9 @@ router = APIRouter(
         "Requires an active access grant for the connection."
     ),
 )
+@limiter.limit("30/minute")
 async def query(
+    request:      Request,
     body:         QueryRequest,
     current_user: dict = Depends(require_analyst),
 ):
@@ -123,6 +128,14 @@ async def query(
         status            = "success" if response_type == "results" else response_type,
         error_message     = final_response.get("error_message"),
     )
+
+    # Invalidate history cache so the next GET /query/history reflects the new entry
+    try:
+        from core.redis_client import redis_delete
+        from core.cache_keys import key_history
+        await redis_delete(key_history(firebase_uid), key_history(firebase_uid, favourites_only=True))
+    except Exception:
+        pass  # non-fatal
 
     return QueryResponse(
         response_type = response_type,
@@ -326,6 +339,85 @@ async def get_table_schema(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
+# ── GET /api/v1/query/suggestions ────────────────────────────────────────────
+
+@router.get(
+    "/query/suggestions",
+    summary="Get AI-generated query suggestions for a connection",
+    description=(
+        "Returns up to 6 natural-language query suggestions derived from the "
+        "connection's schema using the configured LLM. Results are cached in "
+        "Redis for 24 hours — the LLM is only called on the first request per "
+        "connection (or after the cache expires). "
+        "Requires an active access grant (or admin/db_manager role)."
+    ),
+)
+async def get_query_suggestions(
+    connection_id: str,
+    current_user:  dict = Depends(require_analyst),
+):
+    firebase_uid = current_user["firebase_uid"]
+
+    _BYPASS_ROLES = {"admin", "db_manager"}
+    if current_user["role"] not in _BYPASS_ROLES:
+        try:
+            from access.services.access_service import verify_access
+            allowed, reason = await verify_access(firebase_uid, connection_id)
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Access denied: {reason}",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    try:
+        from ai_agent.suggestions import get_suggestions
+        suggestions = await get_suggestions(connection_id)
+        return {"suggestions": suggestions, "connection_id": connection_id}
+    except Exception as exc:
+        logger.error(f"[GET /query/suggestions] conn={connection_id} uid={firebase_uid} error: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+# ── POST /api/v1/query/insights ───────────────────────────────────────────────
+
+class InsightsRequest(BaseModel):
+    data:     list[dict]
+    question: str = ""
+
+@router.post(
+    "/query/insights",
+    summary="Generate narrative insights for a result set",
+    description=(
+        "Computes programmatic column statistics and generates three plain-English "
+        "insight cards (key finding, business insight, analyst note) using the LLM. "
+        "Use when insights were not generated during the original query execution."
+    ),
+)
+@limiter.limit("20/minute")
+async def generate_insights(
+    request:      Request,
+    body:         InsightsRequest,
+    current_user: dict = Depends(require_analyst),
+):
+    if not body.data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data must not be empty.")
+    try:
+        from ai_agent.nodes.output_parser import _compute_insights, _generate_narrative_insights
+        computed  = _compute_insights(body.data)
+        narrative = await _generate_narrative_insights(body.question, body.data, computed)
+        return {
+            "numerical_insights": computed,
+            "narrative_insights": narrative,
+        }
+    except Exception as exc:
+        logger.error(f"[POST /query/insights] uid={current_user['firebase_uid']} error: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 # ── GET /api/v1/query/history ─────────────────────────────────────────────────
 
 @router.get(
@@ -350,6 +442,20 @@ async def get_query_history(
     from google.cloud.firestore_v1.base_query import FieldFilter
 
     uid = current_user["firebase_uid"]
+
+    # Cache only first-page requests (offset=0) — non-default pagination skips cache
+    from core.redis_client import redis_get, redis_set
+    from core.cache_keys import key_history, TTL_HISTORY
+    use_cache = offset == 0
+    cache_key = key_history(uid, favourites_only) if use_cache else None
+
+    if use_cache:
+        cached = await redis_get(cache_key)
+        if cached:
+            # Respect the requested limit even on cache hit
+            items = cached if isinstance(cached, list) else []
+            return {"history": items[:limit], "total": len(items[:limit]), "limit": limit, "offset": 0}
+
     try:
         db = get_firestore_client()
         q  = (
@@ -381,6 +487,9 @@ async def get_query_history(
                 "favourited":      d.get("favourited", False),
                 "created_at":      d.get("created_at", ""),
             })
+
+        if use_cache and items:
+            await redis_set(cache_key, items, TTL_HISTORY)
 
         return {"history": items, "total": len(items), "limit": limit, "offset": offset}
 

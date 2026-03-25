@@ -269,6 +269,13 @@ async def favourite_message(
         if doc.to_dict().get("role") != "assistant":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
         ref.update({"favourited": True})
+        try:
+            from core.redis_client import redis_delete
+            from core.cache_keys import key_history
+            import asyncio
+            asyncio.ensure_future(redis_delete(key_history(uid), key_history(uid, favourites_only=True)))
+        except Exception:
+            pass
         return {"msg_id": msg_id, "favourited": True}
     except HTTPException:
         raise
@@ -299,6 +306,13 @@ async def unfavourite_message(
         if not doc.exists:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
         ref.update({"favourited": False})
+        try:
+            from core.redis_client import redis_delete
+            from core.cache_keys import key_history
+            import asyncio
+            asyncio.ensure_future(redis_delete(key_history(uid), key_history(uid, favourites_only=True)))
+        except Exception:
+            pass
         return {"msg_id": msg_id, "favourited": False}
     except HTTPException:
         raise

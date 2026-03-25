@@ -30,6 +30,215 @@ from ai_agent.state import AgentState
 _MAX_ROWS = 10_000
 
 
+def _fmt(n: float) -> str:
+    """Format a number compactly for display in summaries."""
+    if abs(n) >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    if abs(n) >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    if n == int(n):
+        return f"{int(n):,}"
+    return f"{n:,.2f}"
+
+
+def _generate_rich_summary(
+    data: list[dict],
+    insights: dict,
+    llm_summary: str,
+) -> str:
+    """
+    Build a data-driven narrative summary from computed insights.
+    Falls back to the LLM summary when data is empty or trivial.
+    """
+    total = insights.get("total_records", 0)
+    aggregations = insights.get("aggregations", {})
+
+    if total == 0:
+        return llm_summary or "No rows returned."
+
+    parts: list[str] = []
+
+    # ── Row count opener ──────────────────────────────────────────────────
+    row_word = "row" if total == 1 else "rows"
+    parts.append(f"{total:,} {row_word} returned.")
+
+    # ── Single-row result: just list key=value pairs ──────────────────────
+    if total == 1 and data:
+        row   = data[0]
+        pairs = [f"{k}: {v}" for k, v in row.items() if v is not None][:6]
+        if pairs:
+            parts.append("  ".join(pairs) + ".")
+        return "  ".join(parts)
+
+    # ── Numeric columns ───────────────────────────────────────────────────
+    numeric_stats = [
+        (col, s) for col, s in aggregations.items() if s.get("type") == "numeric"
+    ]
+    # Prioritise columns whose name suggests a meaningful metric
+    _METRIC_HINTS = {"amount", "total", "count", "revenue", "price", "cost",
+                     "salary", "age", "score", "qty", "quantity", "value", "sum"}
+    numeric_stats.sort(
+        key=lambda cs: 0 if any(h in cs[0].lower() for h in _METRIC_HINTS) else 1
+    )
+
+    for col, s in numeric_stats[:2]:          # show at most 2 numeric columns
+        mn, mx, avg = s["min"], s["max"], s["avg"]
+        sm           = s["sum"]
+        label        = col.replace("_", " ").title()
+
+        if mn == mx:
+            parts.append(f"{label}: {_fmt(mn)} (all rows equal).")
+        else:
+            stat_parts = [f"ranges {_fmt(mn)} – {_fmt(mx)}", f"avg {_fmt(avg)}"]
+            # Only add sum when it's meaningful (e.g. not for IDs)
+            _SUM_HINTS = {"amount", "total", "revenue", "price", "cost", "salary", "qty", "quantity"}
+            if any(h in col.lower() for h in _SUM_HINTS):
+                stat_parts.append(f"total {_fmt(sm)}")
+            parts.append(f"{label} {', '.join(stat_parts)}.")
+
+    # ── Categorical columns ───────────────────────────────────────────────
+    cat_stats = [
+        (col, s) for col, s in aggregations.items() if s.get("type") == "categorical"
+    ]
+    for col, s in cat_stats[:2]:              # show at most 2 categorical columns
+        unique  = s["unique_count"]
+        common  = s.get("most_common", [])
+        label   = col.replace("_", " ").title()
+
+        if unique == 1 and common:
+            parts.append(f"All {label.lower()}s: {common[0]['value']}.")
+        elif unique <= 5 and common:
+            breakdown = ", ".join(f"{e['value']} ({e['count']})" for e in common)
+            parts.append(f"{label} — {unique} types: {breakdown}.")
+        elif common:
+            top = common[0]
+            parts.append(f"{label}: {unique} unique values. Most common: {top['value']} ({top['count']} rows).")
+
+    return "  ".join(parts)
+
+
+async def _generate_narrative_insights(
+    question: str,
+    data: list[dict],
+    computed: dict,
+) -> dict | None:
+    """
+    Use the LLM to turn computed stats + original question into 3 plain-English insight cards.
+    Returns None on any failure — caller treats it as optional enrichment.
+    """
+    total = computed.get("total_records", 0)
+    if total == 0 or not data:
+        return None
+
+    # Build a compact stats summary (top 3 most interesting columns only)
+    aggs = computed.get("aggregations", {})
+    stat_lines: list[str] = []
+    _METRIC_HINTS = {"amount","total","count","revenue","price","cost","salary","age","score","qty","quantity","value","sales"}
+    sorted_cols = sorted(
+        aggs.items(),
+        key=lambda kv: 0 if any(h in kv[0].lower() for h in _METRIC_HINTS) else 1
+    )
+    for col, s in sorted_cols[:4]:
+        label = col.replace("_", " ")
+        if s.get("type") == "numeric":
+            stat_lines.append(
+                f"{label}: min={_fmt(s['min'])}, max={_fmt(s['max'])}, avg={_fmt(s['avg'])}, sum={_fmt(s['sum'])}"
+            )
+        else:
+            top = ", ".join(f"{e['value']} ({e['count']})" for e in s.get("most_common", [])[:3])
+            stat_lines.append(f"{label}: {s['unique_count']} unique — top: {top}")
+
+    stats_text = "\n".join(stat_lines) if stat_lines else "No aggregatable columns."
+
+    # Sample rows (first 5, values only — keep prompt short)
+    sample_rows = json.dumps(data[:5], default=str)
+
+    prompt = (
+        f'A user asked: "{question}"\n'
+        f"The database returned {total:,} record{'s' if total != 1 else ''}.\n\n"
+        f"Key statistics:\n{stats_text}\n\n"
+        f"Sample data ({min(5, total)} rows):\n{sample_rows}\n\n"
+        f"You are a senior data analyst presenting to a business stakeholder.\n"
+        f"Write three insights using SPECIFIC numbers from the data. Plain English only — no SQL, no column names.\n"
+        f"Return ONLY this JSON (no markdown, no explanation):\n"
+        f'{{"key_finding":"One sentence directly answering the question.",'
+        f'"business_insight":"One sentence on what this means or what action to consider.",'
+        f'"analyst_note":"One sentence on a pattern, trend, outlier, or data quality issue."}}'
+    )
+
+    try:
+        from ai_agent.providers import get_llm
+        llm      = get_llm()
+        response = await llm.ainvoke(prompt)
+        text     = response.content.strip()
+        start    = text.find("{")
+        end      = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            return None
+        result = json.loads(text[start:end])
+        if not isinstance(result, dict):
+            return None
+        return {
+            "key_finding":     str(result.get("key_finding", "")),
+            "business_insight": str(result.get("business_insight", "")),
+            "analyst_note":    str(result.get("analyst_note", "")),
+        }
+    except Exception as exc:
+        logger.warning(f"[NarrativeInsights] LLM call failed (non-fatal): {exc}")
+        return None
+
+
+def _compute_insights(data: list[dict]) -> dict:
+    """
+    Compute rich column-level statistics programmatically from the result data.
+    Far more reliable than asking the LLM to do it.
+    """
+    if not data:
+        return {"total_records": 0, "aggregations": {}}
+
+    from collections import Counter
+
+    total      = len(data)
+    columns    = list(data[0].keys())
+    aggregations: dict[str, Any] = {}
+
+    for col in columns:
+        values   = [row.get(col) for row in data]
+        non_null = [v for v in values if v is not None and v != ""]
+        null_count = total - len(non_null)
+
+        # Try to parse as numeric (handle ints, floats, Decimal-as-string)
+        numeric_vals: list[float] = []
+        for v in non_null:
+            try:
+                numeric_vals.append(float(v))
+            except (TypeError, ValueError):
+                pass
+
+        if numeric_vals and len(numeric_vals) >= len(non_null) * 0.8:
+            total_sum = sum(numeric_vals)
+            aggregations[col] = {
+                "type":       "numeric",
+                "min":        round(min(numeric_vals), 4),
+                "max":        round(max(numeric_vals), 4),
+                "avg":        round(total_sum / len(numeric_vals), 4),
+                "sum":        round(total_sum, 4),
+                "null_count": null_count,
+            }
+        else:
+            str_vals   = [str(v) for v in non_null]
+            counts     = Counter(str_vals)
+            most_common = [{"value": v, "count": c} for v, c in counts.most_common(3)]
+            aggregations[col] = {
+                "type":         "categorical",
+                "unique_count": len(counts),
+                "null_count":   null_count,
+                "most_common":  most_common,
+            }
+
+    return {"total_records": total, "aggregations": aggregations}
+
+
 def _serialize(value: Any) -> Any:
     if isinstance(value, (datetime.date, datetime.datetime)):
         return value.isoformat()
@@ -99,8 +308,8 @@ async def node_output_parser(state: AgentState) -> AgentState:
         if isinstance(parsed, list):
             parsed = {
                 "sql_query": "",
-                "summary": f"{len(parsed)} rows returned.",
-                "numerical_insights": {"total_records": len(parsed), "aggregations": {}},
+                "summary":   "",   # will be overwritten by _generate_rich_summary below
+                "numerical_insights": {},
                 "data": parsed,
             }
         # Validate required keys
@@ -123,23 +332,31 @@ async def node_output_parser(state: AgentState) -> AgentState:
                 logger.warning(f"[node_output_parser] Full data re-fetch failed: {exc}")
                 # Fall back to whatever preview the LLM put in data
 
-        # Always derive total_records from the actual data array length.
-        actual_count = len(parsed.get("data", []))
-        ni = parsed.get("numerical_insights", {})
-        if not isinstance(ni, dict):
-            ni = {"aggregations": {}}
-        ni["total_records"] = actual_count
-        parsed["numerical_insights"] = ni
-        parsed["total_records"] = actual_count
+        # Compute rich insights programmatically — much more reliable than LLM-generated ones
+        insights = _compute_insights(parsed.get("data", []))
+        parsed["numerical_insights"] = insights
+        parsed["total_records"]      = insights["total_records"]
+
+        # Replace LLM summary with a data-driven narrative
+        parsed["summary"] = _generate_rich_summary(
+            parsed.get("data", []),
+            insights,
+            parsed.get("summary", ""),
+        )
+
+        # Generate narrative insight cards alongside the query response
+        question = state.get("natural_language_query", "")
+        parsed["narrative_insights"] = await _generate_narrative_insights(
+            question, parsed.get("data", []), insights
+        )
 
         # Auto-generate title if LLM omitted it
         if not parsed.get("title"):
-            summary = parsed.get("summary", "")
-            parsed["title"] = summary.split(".")[0].strip()[:80] or "Query result"
+            parsed["title"] = parsed["summary"].split(".")[0].strip()[:80] or "Query result"
 
         logger.info(
             f"[node_output_parser] Parse OK | "
-            f"rows={ni.get('total_records', '?')} | "
+            f"rows={insights['total_records']} | "
             f"sql={parsed.get('sql_query', '')[:80]!r}"
         )
 

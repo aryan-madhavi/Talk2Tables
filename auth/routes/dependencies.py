@@ -78,10 +78,18 @@ async def get_current_user(
         )
 
     try:
-        user = await asyncio.to_thread(
-            verify_request_token,
-            credentials.credentials,
-            True,   # check_revoked=True
+        user = await asyncio.wait_for(
+            asyncio.to_thread(
+                verify_request_token,
+                credentials.credentials,
+                True,   # check_revoked=True
+            ),
+            timeout=10.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service timed out. Please try again.",
         )
     except SecurityError as exc:
         raise HTTPException(

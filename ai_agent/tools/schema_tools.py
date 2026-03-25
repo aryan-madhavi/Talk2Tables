@@ -39,6 +39,12 @@ _SYSTEM_SCHEMAS = {
     "information_schema", "pg_catalog",       # PostgreSQL
     "mysql", "performance_schema", "sys",      # MySQL
     "SYSTEM", "SYS", "DBSNMP",                # Oracle
+    # Supabase internal schemas
+    "auth", "storage", "realtime", "extensions",
+    "graphql", "graphql_public", "net",
+    "pgsodium", "pgsodium_masks",
+    "supabase_functions", "supabase_migrations",
+    "vault", "_realtime", "pgbouncer",
 }
 
 _DIALECT_HINTS: dict[str, str] = {
@@ -243,9 +249,14 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                 except Exception:
                     schema_tables = inspector.get_table_names()
                 for tbl in schema_tables:
+                    try:
+                        col_count = len(inspector.get_columns(tbl, schema=schema))
+                    except Exception:
+                        col_count = 0
                     results.append({
                         "table_schema": schema or "default",
                         "table_name":   tbl,
+                        "column_count": col_count,
                     })
 
             if not results:

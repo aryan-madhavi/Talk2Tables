@@ -40,12 +40,14 @@ Frontend flow:
   //    const freshIdToken = await auth.currentUser.getIdToken(true)
 ──────────────────────────────────────────────────────────────────────
 """
-from __future__ import annotations
-
 import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 from auth.services.auth_service import (
     login,
@@ -82,6 +84,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
     status_code=status.HTTP_200_OK,
     summary="Login — verify Firebase ID token, return Service Account custom token",
 )
+@limiter.limit("10/minute")
 async def login_route(body: FirebaseTokenRequest, request: Request):
     try:
         result = await login(
@@ -109,6 +112,7 @@ async def login_route(body: FirebaseTokenRequest, request: Request):
         "and returns a custom token. Functionally identical to /login."
     ),
 )
+@limiter.limit("5/minute")
 async def register_route(body: FirebaseTokenRequest, request: Request):
     try:
         result = await login(
