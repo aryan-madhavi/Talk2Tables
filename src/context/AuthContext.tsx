@@ -4,7 +4,7 @@
 // Boot sequence on every page load / refresh:
 //   1. loading = true  (ProtectedRoute shows spinner, NO redirect yet)
 //   2. Firebase onAuthStateChanged fires — may take 0-2s to restore cached session
-//   3. If fbUser exists  → POST /token-active → GET /me → set user
+//   3. If fbUser exists  → GET /me → set user (401 = session revoked → sign out)
 //   4. If fbUser is null → set user = null
 //   5. loading = false  → ProtectedRoute now decides: allow or redirect to /login
 //
@@ -27,7 +27,6 @@ import { auth }             from '../lib/firebaseConfig';
 import {
   login  as apiLogin,
   logout as apiLogout,
-  checkTokenActive,
   getMe,
   BackendUser,
 }                           from '../lib/authService';
@@ -76,23 +75,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Firebase has a cached session — now verify our Firestore session too
+      // Firebase has a cached session — verify via /me (single call)
       try {
-        const status = await checkTokenActive();
-
-        if (status.active) {
-          const profile = await getMe();
-          setUser(profile);
-        } else {
-          // Our Firestore session was revoked (logout from another device etc.)
-          // Sign out Firebase so the next boot goes straight to /login
+        const profile = await getMe();
+        setUser(profile);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('401') || msg.includes('Session') || msg.includes('sign in')) {
+          // Session revoked on backend — sign out Firebase too
           await firebaseSignOut(auth);
-          setUser(null);
         }
-      } catch {
-        // Network error during boot — keep user logged in optimistically
-        // (avoids logging people out just because their WiFi was slow)
-        // getMe failed but Firebase session is valid — set minimal user from claims
         setUser(null);
       } finally {
         setLoading(false);  // ← only NOW does ProtectedRoute make a decision
