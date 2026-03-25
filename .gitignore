@@ -1,6 +1,0 @@
-#firebase congifuration file
-src/components/firebase/FirebaseApp.ts
-
-# local env files
-.env*.local
-.env
