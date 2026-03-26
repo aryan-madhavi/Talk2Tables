@@ -57,8 +57,26 @@ export function ChatSidebar({
     }
   }, [connectionId]);
 
-  // Reload when connection changes or after a successful query
-  useEffect(() => { fetchChats(); }, [fetchChats, refreshTrigger]);
+  // Reload when connection changes
+  useEffect(() => { fetchChats(); }, [fetchChats]);
+
+  // After a successful query: optimistic update for existing chats, refetch for new ones
+  useEffect(() => {
+    if (refreshTrigger === 0) return;
+    const isExisting = activeChatId ? chats.some(c => c.chat_id === activeChatId) : false;
+    if (isExisting && activeChatId) {
+      setChats(prev =>
+        prev
+          .map(c => c.chat_id === activeChatId
+            ? { ...c, updated_at: new Date().toISOString(), msg_count: c.msg_count + 2 }
+            : c
+          )
+          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      );
+    } else {
+      fetchChats();
+    }
+  }, [refreshTrigger]);
 
   const handleSelectChat = async (chat: ChatOut) => {
     if (loadingId) return;

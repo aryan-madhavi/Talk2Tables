@@ -186,9 +186,9 @@ export function useQueryExecution(selectedConnectionId: string) {
     await sendQuery(text);
   };
 
-  const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
+  const copyToClipboard = useCallback((text: string) => navigator.clipboard.writeText(text), []);
 
-  const downloadCSV = () => {
+  const downloadCSV = useCallback(() => {
     if (!currentResult?.data || currentResult.data.length === 0) return;
     const headers = Object.keys(currentResult.data[0]).join(',');
     const rows    = currentResult.data.map(row => Object.values(row).join(',')).join('\n');
@@ -199,7 +199,7 @@ export function useQueryExecution(selectedConnectionId: string) {
     a.download    = `data_export_${Date.now()}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
-  };
+  }, [currentResult]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }

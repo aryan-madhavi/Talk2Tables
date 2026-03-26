@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
 import { getMyConnections } from '../../../lib/accessService';
@@ -118,7 +118,7 @@ export default function QueryInterface() {
   // Reset favourite state when result changes
   useEffect(() => { setIsFavourited(false); }, [currentResult?.id]);
 
-  const handleSaveToggle = async () => {
+  const handleSaveToggle = useCallback(async () => {
     if (!currentResult || !chatId) return;
 
     let msgId = currentResult.msgId;
@@ -138,7 +138,7 @@ export default function QueryInterface() {
       await favouriteMessage(selectedDb, chatId, msgId);
     }
     setIsFavourited(f => !f);
-  };
+  }, [currentResult, chatId, selectedDb, isFavourited]);
 
   return (
     <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row">
