@@ -166,10 +166,12 @@ export function useQueryExecution(selectedConnectionId: string) {
       if (generationRef.current !== generation) return;
       const msg = error instanceof Error ? error.message : 'Query failed. Please try again.';
       setMessages(prev => [...prev, {
-        id:        (Date.now() + 1).toString(),
-        role:      'assistant',
-        content:   `Error: ${msg}`,
-        timestamp: new Date(),
+        id:         (Date.now() + 1).toString(),
+        role:       'assistant',
+        content:    `Error: ${msg}`,
+        timestamp:  new Date(),
+        isError:    true,
+        retryInput: queryText,
       }]);
     } finally {
       if (generationRef.current === generation) {

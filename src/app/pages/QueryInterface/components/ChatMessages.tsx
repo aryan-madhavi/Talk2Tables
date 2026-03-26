@@ -1,5 +1,5 @@
 import React from 'react';
-import { TableProperties } from 'lucide-react';
+import { TableProperties, RotateCcw } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import { Message } from '../types';
 import { TypingIndicator } from './TypingIndicator';
@@ -9,9 +9,10 @@ interface ChatMessagesProps {
   isTyping:       boolean;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onMessageClick: (msg: Message) => void;
+  onRetry?:       (input: string) => void;
 }
 
-export function ChatMessages({ messages, isTyping, messagesEndRef, onMessageClick }: ChatMessagesProps) {
+export function ChatMessages({ messages, isTyping, messagesEndRef, onMessageClick, onRetry }: ChatMessagesProps) {
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50/30">
       {messages.map(msg => {
@@ -39,6 +40,16 @@ export function ChatMessages({ messages, isTyping, messagesEndRef, onMessageClic
                   <TableProperties className="w-3 h-3" />
                   <span>Click to view results</span>
                 </div>
+              )}
+
+              {msg.isError && msg.retryInput && onRetry && (
+                <button
+                  onClick={e => { e.stopPropagation(); onRetry(msg.retryInput!); }}
+                  className="mt-2 flex items-center gap-1.5 text-[11px] text-red-500 hover:text-red-700 font-medium transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Retry</span>
+                </button>
               )}
 
               <div

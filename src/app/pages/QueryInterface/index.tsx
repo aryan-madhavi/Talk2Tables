@@ -45,7 +45,7 @@ export default function QueryInterface() {
   const prefillText = (location.state as { prefill?: string } | null)?.prefill ?? null;
 
   useEffect(() => {
-    const load = isAdmin || isDbManager
+    const connectionsP = isAdmin || isDbManager
       ? listConnections(true).then(res =>
           res.connections.map(c => ({ connection_id: c.connection_id, name: c.name }))
         )
@@ -53,16 +53,27 @@ export default function QueryInterface() {
           list.map(c => ({ connection_id: c.connection_id, name: c.name }))
         );
 
-    load.then(opts => {
+    // Fetch pending chat messages in parallel with connections if we already know the IDs
+    const messagesP = pendingChat.current
+      ? getMessages(pendingChat.current.connectionId, pendingChat.current.chatId).catch(() => null)
+      : Promise.resolve(null);
+
+    Promise.all([connectionsP, messagesP]).then(([opts, msgs]) => {
       setConnections(opts);
       if (pendingRun.current) {
         const connId = pendingRun.current.connectionId;
         const found  = opts.find(c => c.connection_id === connId);
         setSelectedDb(found ? connId : (opts[0]?.connection_id ?? ''));
       } else if (pendingChat.current) {
-        const connId = pendingChat.current.connectionId;
-        const found  = opts.find(c => c.connection_id === connId);
-        setSelectedDb(found ? connId : (opts[0]?.connection_id ?? ''));
+        const { chatId: pendingChatId, connectionId } = pendingChat.current;
+        const found = opts.find(c => c.connection_id === connectionId);
+        setSelectedDb(found ? connectionId : (opts[0]?.connection_id ?? ''));
+        if (msgs) {
+          loadChat(pendingChatId, msgs.messages ?? []);
+          openChatFired.current = true;
+          pendingChat.current = null;
+          navigate(location.pathname, { replace: true, state: null });
+        }
       } else if (opts.length > 0) {
         setSelectedDb(opts[0].connection_id);
       }
@@ -164,6 +175,7 @@ export default function QueryInterface() {
           isTyping={isTyping && executingChatId === chatId}
           messagesEndRef={messagesEndRef}
           onMessageClick={handleMessageClick}
+          onRetry={sendQuery}
         />
         <ChatInput
           input={input}
