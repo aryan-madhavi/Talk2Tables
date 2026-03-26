@@ -322,3 +322,120 @@ async def run_agent(
         "response_type":  final_state.get("response_type", "error"),
         "final_response": final_state.get("final_response", {}),
     }
+
+
+# ── Streaming entry point ──────────────────────────────────────────────────────
+
+async def run_agent_stream(
+    natural_language_query: str,
+    connection_id:          str,
+    firebase_uid:           str,
+    user_role:              str,
+    chat_id:                str,
+    chat_history:           list[dict],
+):
+    """
+    Async generator that yields SSE-formatted strings.
+    Emits `event: progress` lines as the agent works, then `event: result` with the final response.
+    """
+    import json as _json
+
+    # ── Pre-flight: write intent ──────────────────────────────────────────────
+    if user_role not in _ROLES_ALLOWED_WRITE and _WRITE_INTENT_RE.search(natural_language_query):
+        payload = {"response_type": "results", "final_response": _WRITE_BLOCKED_RESPONSE, "chat_id": chat_id or ""}
+        yield f"event: result\ndata: {_json.dumps(payload)}\n\n"
+        return
+
+    # ── Pre-flight: in-flight dedup ───────────────────────────────────────────
+    if firebase_uid in _in_flight:
+        payload = {
+            "response_type": "results",
+            "final_response": {
+                "title": "Query in progress",
+                "sql_query": "",
+                "summary": "Your previous query is still running. Please wait.",
+                "total_records": 0,
+                "numerical_insights": {"total_records": 0, "aggregations": {}},
+                "data": [],
+            },
+            "chat_id": chat_id or "",
+        }
+        yield f"event: result\ndata: {_json.dumps(payload)}\n\n"
+        return
+
+    _in_flight.add(firebase_uid)
+
+    initial_state: AgentState = {
+        "natural_language_query": natural_language_query,
+        "connection_id":          connection_id,
+        "firebase_uid":           firebase_uid,
+        "user_role":              user_role,
+        "chat_id":                chat_id,
+        "chat_history":           chat_history,
+        "db_connection_string":   None,
+        "db_dialect":             None,
+        "db_type":                None,
+        "agent_output":           None,
+        "response_type":          None,
+        "final_response":         None,
+        "retry_count":            0,
+        "error_message":          None,
+    }
+
+    agent = get_agent()
+    final_result = None
+    _progress_sent: set[str] = set()
+
+    def _emit_progress(stage: str, message: str) -> str | None:
+        if stage in _progress_sent:
+            return None
+        _progress_sent.add(stage)
+        return f"event: progress\ndata: {_json.dumps({'stage': stage, 'message': message})}\n\n"
+
+    try:
+        async for event in agent.astream_events(initial_state, version="v2"):
+            kind = event.get("event", "")
+            name = event.get("name", "")
+
+            if kind == "on_chain_start" and name == "entry":
+                p = _emit_progress("entry", "Connecting to database...")
+                if p:
+                    yield p
+
+            elif kind == "on_tool_start":
+                if name == "get_schema_list":
+                    p = _emit_progress("schema", "Loading database schema...")
+                    if p:
+                        yield p
+                elif name == "get_table_definition":
+                    p = _emit_progress("inspect", "Inspecting table structure...")
+                    if p:
+                        yield p
+                elif name == "execute_sql":
+                    p = _emit_progress("exec", "Executing SQL query...")
+                    if p:
+                        yield p
+
+            elif kind == "on_chat_model_start":
+                p = _emit_progress("llm", "Generating SQL query...")
+                if p:
+                    yield p
+
+            elif kind == "on_chain_end" and name == "LangGraph":
+                output = event.get("data", {}).get("output", {})
+                if isinstance(output, dict) and output.get("response_type"):
+                    final_result = {
+                        "response_type":  output.get("response_type", "error"),
+                        "final_response": output.get("final_response", {}),
+                    }
+
+        if final_result is None:
+            final_result = {"response_type": "error", "final_response": {"error_message": "No response received from agent."}}
+
+    except Exception as exc:
+        logger.error(f"[run_agent_stream] Error: {exc}", exc_info=True)
+        final_result = {"response_type": "error", "final_response": {"error_message": f"AI agent error: {exc}"}}
+    finally:
+        _in_flight.discard(firebase_uid)
+
+    yield f"event: result\ndata: {_json.dumps(final_result)}\n\n"

@@ -13,6 +13,7 @@ import logging
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -20,7 +21,7 @@ from slowapi.util import get_remote_address
 from auth.routes.dependencies import require_analyst
 
 limiter = Limiter(key_func=get_remote_address)
-from ai_agent import run_agent
+from ai_agent import run_agent, run_agent_stream
 from ai_agent.services.chat_service import get_or_create_chat, get_messages, append_messages
 from ai_agent.services.audit_service import log_query
 from query.routes.schemas import QueryRequest, QueryResponse, SchemaResponse, SchemaTable
@@ -167,6 +168,150 @@ async def query(
         response_type = response_type,
         chat_id       = chat_id,
         data          = [final_response],
+    )
+
+
+# ── POST /api/v1/query/stream ─────────────────────────────────────────────────
+
+@router.post(
+    "/query/stream",
+    summary="Submit a query and receive SSE progress events",
+    description=(
+        "Same as POST /api/v1/query but returns a text/event-stream response. "
+        "Emits `event: progress` events as the agent works, then `event: result` with the final JSON. "
+        "Requires an active access grant for the connection."
+    ),
+)
+@limiter.limit("30/minute")
+async def query_stream(
+    request:      Request,
+    body:         QueryRequest,
+    current_user: dict = Depends(require_analyst),
+):
+    firebase_uid = current_user["firebase_uid"]
+    user_role    = current_user["role"]
+
+    logger.info(
+        f"[POST /api/v1/query/stream] uid={firebase_uid} role={user_role} "
+        f"connection_id={body.connection_id} | "
+        f"query='{body.chat_input[:80]}'"
+    )
+
+    # ── Resolve or create chat (same as regular query) ────────────────────────
+    if body.chat_id:
+        chat_id, chat_history = await asyncio.gather(
+            asyncio.to_thread(
+                get_or_create_chat,
+                firebase_uid  = firebase_uid,
+                connection_id = body.connection_id,
+                chat_id       = body.chat_id,
+                first_message = body.chat_input,
+            ),
+            asyncio.to_thread(
+                get_messages,
+                firebase_uid  = firebase_uid,
+                connection_id = body.connection_id,
+                chat_id       = body.chat_id,
+            ),
+        )
+    else:
+        chat_id = await asyncio.to_thread(
+            get_or_create_chat,
+            firebase_uid  = firebase_uid,
+            connection_id = body.connection_id,
+            chat_id       = None,
+            first_message = body.chat_input,
+        )
+        chat_history = []
+
+    import time as _time
+
+    async def _event_generator():
+        _t0 = _time.perf_counter()
+        final_response = {}
+        response_type  = "error"
+
+        try:
+            async for sse_line in run_agent_stream(
+                natural_language_query = body.chat_input,
+                connection_id          = body.connection_id,
+                firebase_uid           = firebase_uid,
+                user_role              = user_role,
+                chat_id                = chat_id,
+                chat_history           = chat_history,
+            ):
+                # Inject chat_id into the result event
+                if sse_line.startswith("event: result\n"):
+                    import json as _json
+                    data_part = sse_line.split("data: ", 1)[1].rstrip()
+                    parsed = _json.loads(data_part)
+                    parsed["chat_id"] = chat_id
+                    response_type  = parsed.get("response_type", "error")
+                    final_response = parsed.get("final_response", {})
+                    yield f"event: result\ndata: {_json.dumps(parsed)}\n\n"
+                else:
+                    yield sse_line
+        except Exception as exc:
+            import json as _json
+            logger.error(f"[query_stream] Stream error: {exc}", exc_info=True)
+            yield f"event: error\ndata: {_json.dumps({'message': str(exc)})}\n\n"
+        finally:
+            exec_ms = round((_time.perf_counter() - _t0) * 1000, 1)
+
+            # Fire-and-forget background save (same as regular query)
+            async def _background_save():
+                _conn_name = ""
+                try:
+                    from connections.services.connection_service import get_connection_by_id
+                    _c = await get_connection_by_id(body.connection_id)
+                    _conn_name = (_c or {}).get("name", "")
+                except Exception:
+                    pass
+                try:
+                    await asyncio.to_thread(
+                        append_messages,
+                        firebase_uid       = firebase_uid,
+                        connection_id      = body.connection_id,
+                        chat_id            = chat_id,
+                        user_content       = body.chat_input,
+                        assistant_response = final_response,
+                        connection_name    = _conn_name,
+                    )
+                except Exception as exc:
+                    logger.warning(f"[query_stream] append_messages failed: {exc}")
+                try:
+                    await log_query(
+                        firebase_uid      = firebase_uid,
+                        connection_id     = body.connection_id,
+                        chat_id           = chat_id,
+                        sql_query         = final_response.get("sql_query"),
+                        summary           = final_response.get("summary"),
+                        row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
+                        execution_time_ms = exec_ms,
+                        status            = "success" if response_type == "results" else response_type,
+                        error_message     = final_response.get("error_message"),
+                    )
+                except Exception as exc:
+                    logger.warning(f"[query_stream] log_query failed: {exc}")
+                try:
+                    from core.redis_client import redis_delete
+                    from core.cache_keys import key_history
+                    await redis_delete(
+                        key_history(firebase_uid),
+                        key_history(firebase_uid, favourites_only=True),
+                    )
+                except Exception:
+                    pass
+
+            asyncio.ensure_future(_background_save())
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

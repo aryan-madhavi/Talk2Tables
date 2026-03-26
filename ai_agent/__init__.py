@@ -16,11 +16,12 @@ Primary entry point:
         chat_history           = [],   # loaded from Firestore by route handler
     )
 """
-from .graph import run_agent, get_agent
+from .graph import run_agent, run_agent_stream, get_agent
 from .state import AgentState, ChatMessage
 
 __all__ = [
     "run_agent",
+    "run_agent_stream",
     "get_agent",
     "AgentState",
     "ChatMessage",

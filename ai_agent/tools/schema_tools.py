@@ -243,21 +243,37 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             except Exception:
                 user_schemas = [None]
 
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            all_table_specs = []
             for schema in user_schemas:
                 try:
                     schema_tables = inspector.get_table_names(schema=schema)
                 except Exception:
                     schema_tables = inspector.get_table_names()
                 for tbl in schema_tables:
-                    try:
-                        col_count = len(inspector.get_columns(tbl, schema=schema))
-                    except Exception:
-                        col_count = 0
-                    results.append({
-                        "table_schema": schema or "default",
-                        "table_name":   tbl,
-                        "column_count": col_count,
-                    })
+                    all_table_specs.append((schema, tbl))
+
+            def _get_col_count(schema_tbl):
+                s, t = schema_tbl
+                try:
+                    return s, t, len(inspector.get_columns(t, schema=s))
+                except Exception:
+                    return s, t, 0
+
+            if all_table_specs:
+                max_workers = min(10, len(all_table_specs))
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {pool.submit(_get_col_count, spec): spec for spec in all_table_specs}
+                    for future in as_completed(futures):
+                        s, t, col_count = future.result()
+                        results.append({
+                            "table_schema": s or "default",
+                            "table_name":   t,
+                            "column_count": col_count,
+                        })
+                # Sort for consistent ordering
+                results.sort(key=lambda r: (r["table_schema"], r["table_name"]))
 
             if not results:
                 return "No tables found in the connected database."
@@ -322,24 +338,41 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             inspector  = inspect(engine)
             schema_arg = schema_name if schema_name and schema_name != "default" else None
 
-            try:
-                columns = inspector.get_columns(table_name, schema=schema_arg)
-            except Exception as exc:
-                return f"Error fetching columns for {schema_name}.{table_name}: {exc}"
+            from concurrent.futures import ThreadPoolExecutor
 
-            try:
-                pk_cols = set(inspector.get_pk_constraint(table_name, schema=schema_arg).get("constrained_columns", []))
-            except Exception:
-                pk_cols = set()
+            def _fetch_columns():
+                return inspector.get_columns(table_name, schema=schema_arg)
 
-            try:
+            def _fetch_pk():
+                try:
+                    return set(inspector.get_pk_constraint(table_name, schema=schema_arg).get("constrained_columns", []))
+                except Exception:
+                    return set()
+
+            def _fetch_fks():
                 fk_map: dict[str, str] = {}
-                for fk in inspector.get_foreign_keys(table_name, schema=schema_arg):
-                    for local_col, ref_col in zip(fk["constrained_columns"], fk["referred_columns"]):
-                        ref_schema = fk.get("referred_schema") or schema_arg or ""
-                        fk_map[local_col] = f"{ref_schema}.{fk['referred_table']}.{ref_col}"
-            except Exception:
-                fk_map = {}
+                try:
+                    for fk in inspector.get_foreign_keys(table_name, schema=schema_arg):
+                        for local_col, ref_col in zip(fk["constrained_columns"], fk["referred_columns"]):
+                            ref_schema = fk.get("referred_schema") or schema_arg or ""
+                            fk_map[local_col] = f"{ref_schema}.{fk['referred_table']}.{ref_col}"
+                except Exception:
+                    pass
+                return fk_map
+
+            try:
+                with ThreadPoolExecutor(max_workers=3) as pool:
+                    col_future = pool.submit(_fetch_columns)
+                    pk_future  = pool.submit(_fetch_pk)
+                    fk_future  = pool.submit(_fetch_fks)
+                    try:
+                        columns = col_future.result()
+                    except Exception as exc:
+                        return f"Error fetching columns for {schema_name}.{table_name}: {exc}"
+                    pk_cols = pk_future.result()
+                    fk_map  = fk_future.result()
+            except Exception as exc:
+                return f"Error fetching table definition: {exc}"
 
             result_rows = []
             for col in columns:
