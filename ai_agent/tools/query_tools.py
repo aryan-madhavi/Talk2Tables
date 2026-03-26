@@ -18,14 +18,22 @@ from __future__ import annotations
 import datetime
 import decimal
 import json
+import hashlib
 import logging
 import re
+import threading
 import time
 from typing import Any
 
 from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
+
+# ── Per-request full-result cache (avoids re-execution in output_parser) ─────
+# Key: md5(connection_string + sql), Value: full serialized rows list.
+# Entries are popped on first read so memory doesn't grow unbounded.
+_full_result_cache: dict[str, list[dict]] = {}
+_full_result_lock  = threading.Lock()
 
 # ── Safety constants (from original sql_validator.py) ─────────────────────────
 
@@ -177,8 +185,11 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
                 total = len(serialized)
                 preview = serialized[:_PREVIEW_ROWS]
                 logger.info(f"[execute_sql] Query OK | {total} rows | {elapsed_ms:.0f}ms")
+                # Cache the full result so output_parser can skip re-execution.
+                _cache_key = hashlib.md5(f"{connection_string}:{sql}".encode()).hexdigest()
+                with _full_result_lock:
+                    _full_result_cache[_cache_key] = serialized
                 # Only send a small preview to the LLM to avoid token limit errors.
-                # The output_parser will re-execute for the full dataset.
                 return json.dumps({
                     "rows":              preview,
                     "row_count":         total,

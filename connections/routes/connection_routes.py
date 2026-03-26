@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from auth.routes.dependencies import require_db_manager, require_admin
 from connections.routes.schemas import (
@@ -43,7 +45,8 @@ from connections.services.connection_service import (
     test_connection,
 )
 
-logger = logging.getLogger(__name__)
+logger  = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(
     prefix="/api/v1/connections",
@@ -380,7 +383,9 @@ async def connection_stats_route(
         "Requires db_manager or admin role."
     ),
 )
+@limiter.limit("10/minute")
 async def refresh_schema_cache_route(
+    request: Request,
     connection_id: str,
     current_user: dict = Depends(require_db_manager),
 ):

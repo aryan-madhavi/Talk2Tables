@@ -317,19 +317,26 @@ async def node_output_parser(state: AgentState) -> AgentState:
         if missing:
             raise ValueError(f"Missing required fields: {missing}")
 
-        # Re-execute SQL for full data — the tool only sent a 5-row preview to
-        # the LLM to avoid token limit errors. We now fetch the complete result set.
+        # Get full data — prefer the cache written by execute_sql tool to avoid
+        # a second DB round-trip. Fall back to re-execution on cache miss.
         sql      = (parsed.get("sql_query") or "").strip()
         conn_str = state.get("db_connection_string")
         if sql and conn_str and sql.upper().split()[0] in {"SELECT", "WITH"}:
             try:
-                full_data = await asyncio.get_event_loop().run_in_executor(
-                    None, _fetch_full_data, conn_str, sql
-                )
+                import hashlib as _hashlib
+                from ai_agent.tools.query_tools import _full_result_cache, _full_result_lock
+                _cache_key = _hashlib.md5(f"{conn_str}:{sql}".encode()).hexdigest()
+                with _full_result_lock:
+                    _cached = _full_result_cache.pop(_cache_key, None)
+                if _cached is not None:
+                    full_data = _cached
+                    logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
+                else:
+                    full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
+                    logger.info(f"[node_output_parser] Full data re-fetched | rows={len(full_data)}")
                 parsed["data"] = full_data
-                logger.info(f"[node_output_parser] Full data fetched | rows={len(full_data)}")
             except Exception as exc:
-                logger.warning(f"[node_output_parser] Full data re-fetch failed: {exc}")
+                logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
                 # Fall back to whatever preview the LLM put in data
 
         # Compute rich insights programmatically — much more reliable than LLM-generated ones
