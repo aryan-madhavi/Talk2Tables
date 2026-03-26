@@ -129,15 +129,37 @@ Field descriptions:
 """
 
 
-def build_system_prompt(dialect: str) -> str:
+_ROLE_PERMISSIONS: dict[str, str] = {
+    "analyst": """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## USER PERMISSIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ This user has role: **analyst** — READ-ONLY access.
+They CANNOT run INSERT, UPDATE, DELETE, MERGE, or any other write operations.
+If the user asks to modify, change, update, delete, or insert data, do NOT call execute_sql.
+Instead, return this exact JSON immediately (no tool calls needed):
+{"title": "Write access required", "sql_query": "", "summary": "You don't have permission to modify data. Your role (analyst) only allows SELECT queries. Please contact your administrator to request write access.", "total_records": 0, "numerical_insights": {"total_records": 0, "aggregations": {}}, "data": []}""",
+
+    "power_user": """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## USER PERMISSIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This user has role: **power_user** — can run SELECT and write queries (INSERT/UPDATE/DELETE) on their assigned databases.""",
+}
+
+
+def build_system_prompt(dialect: str, user_role: str = "analyst") -> str:
     """
-    Build the full system prompt for a given database dialect.
+    Build the full system prompt for a given database dialect and user role.
 
     Args:
-        dialect: Detected dialect string (mysql | postgresql | sqlite | mssql | oracle)
+        dialect:   Detected dialect string (mysql | postgresql | sqlite | mssql | oracle)
+        user_role: RBAC role — controls which operations the LLM may attempt
 
     Returns:
         Complete system prompt string injected into the ReAct agent.
     """
     dialect_label = _DIALECT_LABELS.get(dialect.lower(), dialect.upper())
-    return _SYSTEM_PROMPT_TEMPLATE.format(dialect_label=dialect_label)
+    base        = _SYSTEM_PROMPT_TEMPLATE.format(dialect_label=dialect_label)
+    permissions = _ROLE_PERMISSIONS.get(user_role, "")
+    return base + permissions

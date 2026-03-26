@@ -15,6 +15,7 @@ when to call get_schema_list, get_table_definition, and execute_sql.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -67,7 +68,7 @@ async def node_react_agent(state: AgentState) -> AgentState:
     cache_key = (state["connection_id"], user_role)
     try:
         llm           = get_llm()
-        system_prompt = build_system_prompt(dialect)
+        system_prompt = build_system_prompt(dialect, user_role)
         if cache_key not in _react_agent_cache:
             tools = get_tools(conn_str, user_role, state["connection_id"])
             _react_agent_cache[cache_key] = create_react_agent(llm, tools)
@@ -195,6 +196,39 @@ def get_agent():
     return _agent_graph
 
 
+# ── Write-intent guard ─────────────────────────────────────────────────────────
+# Fast pre-flight check — no LLM calls needed for obvious write requests from
+# read-only roles. Saves tokens and prevents cascading rate-limit hits.
+
+_WRITE_INTENT_RE = re.compile(
+    r'\b(update|delete|insert|modify|rename|replace|edit|remove|drop)\b'
+    r'|\bchange\b.{0,80}\bto\b'
+    r'|\badd\b.{0,40}\b(record|row|entry|data|column)\b',
+    re.IGNORECASE,
+)
+_ROLES_ALLOWED_WRITE = {"admin", "power_user", "db_manager"}
+
+_WRITE_BLOCKED_RESPONSE: dict[str, Any] = {
+    "title":               "Write access required",
+    "sql_query":           "",
+    "summary":             (
+        "You don't have permission to modify data. "
+        "Your role (analyst) only allows SELECT queries. "
+        "Please contact your administrator to request write access."
+    ),
+    "total_records":       0,
+    "numerical_insights":  {"total_records": 0, "aggregations": {}},
+    "data":                [],
+}
+
+# ── In-flight deduplication ────────────────────────────────────────────────────
+# Prevents a user from accidentally submitting two concurrent heavy queries
+# (e.g., re-clicking Send while waiting) which would double the LLM token spend
+# and cascade rate-limit errors.
+
+_in_flight: set[str] = set()   # set of firebase_uid strings
+
+
 # ── Public entry point ─────────────────────────────────────────────────────────
 
 async def run_agent(
@@ -223,6 +257,32 @@ async def run_agent(
                               or { error_message }
         }
     """
+    # ── Guard 1: write-intent pre-flight for read-only roles ──────────────────
+    if user_role not in _ROLES_ALLOWED_WRITE and _WRITE_INTENT_RE.search(natural_language_query):
+        logger.info(
+            f"[run_agent] Write intent blocked — role={user_role} | "
+            f"query={natural_language_query[:80]!r}"
+        )
+        return {"response_type": "results", "final_response": _WRITE_BLOCKED_RESPONSE}
+
+    # ── Guard 2: in-flight deduplication (per user) ───────────────────────────
+    if firebase_uid in _in_flight:
+        logger.warning(
+            f"[run_agent] Concurrent query rejected — uid={firebase_uid} already has a query in flight"
+        )
+        return {
+            "response_type": "results",
+            "final_response": {
+                "title":              "Query in progress",
+                "sql_query":          "",
+                "summary":            "Your previous query is still running. Please wait for it to complete before sending a new one.",
+                "total_records":      0,
+                "numerical_insights": {"total_records": 0, "aggregations": {}},
+                "data":               [],
+            },
+        }
+
+    _in_flight.add(firebase_uid)
     agent = get_agent()
 
     initial_state: AgentState = {
@@ -255,6 +315,8 @@ async def run_agent(
             "response_type":  "error",
             "final_response": {"error_message": f"Internal agent error: {exc}"},
         }
+    finally:
+        _in_flight.discard(firebase_uid)
 
     return {
         "response_type":  final_state.get("response_type", "error"),
