@@ -10,6 +10,7 @@ Auth: Firebase Bearer token required on all endpoints.
 RBAC: All authenticated users can query; write ops enforced inside execute_sql tool.
 """
 import logging
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -60,22 +61,36 @@ async def query(
         f"query='{body.chat_input[:80]}'"
     )
 
-    # ── 1. Resolve or create chat ─────────────────────────────────────────
-    chat_id = get_or_create_chat(
-        firebase_uid  = firebase_uid,
-        connection_id = body.connection_id,
-        chat_id       = body.chat_id,
-        first_message = body.chat_input,
-    )
+    # ── 1. Resolve or create chat (parallel fetch if chat already exists) ──────
+    if body.chat_id:
+        # Known chat — fetch chat metadata and history in parallel
+        chat_id, chat_history = await asyncio.gather(
+            asyncio.to_thread(
+                get_or_create_chat,
+                firebase_uid  = firebase_uid,
+                connection_id = body.connection_id,
+                chat_id       = body.chat_id,
+                first_message = body.chat_input,
+            ),
+            asyncio.to_thread(
+                get_messages,
+                firebase_uid  = firebase_uid,
+                connection_id = body.connection_id,
+                chat_id       = body.chat_id,
+            ),
+        )
+    else:
+        # New chat — create it first, no history to load
+        chat_id = await asyncio.to_thread(
+            get_or_create_chat,
+            firebase_uid  = firebase_uid,
+            connection_id = body.connection_id,
+            chat_id       = None,
+            first_message = body.chat_input,
+        )
+        chat_history = []
 
-    # ── 2. Load conversation history from Firestore ───────────────────────
-    chat_history = get_messages(
-        firebase_uid  = firebase_uid,
-        connection_id = body.connection_id,
-        chat_id       = chat_id,
-    )
-
-    # ── 3. Run the AI agent ───────────────────────────────────────────────
+    # ── 2. Run the AI agent ───────────────────────────────────────────────────
     import time as _time
     _t0 = _time.perf_counter()
     try:
@@ -96,51 +111,62 @@ async def query(
 
     response_type  = result.get("response_type", "error")
     final_response = result.get("final_response", {})
+    exec_ms        = round((_time.perf_counter() - _t0) * 1000, 1)
 
-    # ── 4. Save messages to Firestore chat sub-collection ─────────────────
-    # Resolve connection display name for denormalized message docs
-    _conn_name = ""
-    try:
-        from connections.services.connection_service import get_connection_by_id
-        _c = await get_connection_by_id(body.connection_id)
-        _conn_name = (_c or {}).get("name", "")
-    except Exception:
-        pass
+    # ── 3. Persist messages + audit log + cache invalidate (fire-and-forget) ───
+    async def _background_save():
+        _conn_name = ""
+        try:
+            from connections.services.connection_service import get_connection_by_id
+            _c = await get_connection_by_id(body.connection_id)
+            _conn_name = (_c or {}).get("name", "")
+        except Exception:
+            pass
 
-    append_messages(
-        firebase_uid        = firebase_uid,
-        connection_id       = body.connection_id,
-        chat_id             = chat_id,
-        user_content        = body.chat_input,
-        assistant_response  = final_response,
-        connection_name     = _conn_name,
-    )
+        try:
+            await asyncio.to_thread(
+                append_messages,
+                firebase_uid       = firebase_uid,
+                connection_id      = body.connection_id,
+                chat_id            = chat_id,
+                user_content       = body.chat_input,
+                assistant_response = final_response,
+                connection_name    = _conn_name,
+            )
+        except Exception as exc:
+            logger.warning(f"[POST /api/v1/query] append_messages failed (non-fatal): {exc}")
 
-    # ── 5. Write audit log ────────────────────────────────────────────────
-    await log_query(
-        firebase_uid      = firebase_uid,
-        connection_id     = body.connection_id,
-        chat_id           = chat_id,
-        sql_query         = final_response.get("sql_query"),
-        summary           = final_response.get("summary"),
-        row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
-        execution_time_ms = round((_time.perf_counter() - _t0) * 1000, 1),
-        status            = "success" if response_type == "results" else response_type,
-        error_message     = final_response.get("error_message"),
-    )
+        try:
+            await log_query(
+                firebase_uid      = firebase_uid,
+                connection_id     = body.connection_id,
+                chat_id           = chat_id,
+                sql_query         = final_response.get("sql_query"),
+                summary           = final_response.get("summary"),
+                row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
+                execution_time_ms = exec_ms,
+                status            = "success" if response_type == "results" else response_type,
+                error_message     = final_response.get("error_message"),
+            )
+        except Exception as exc:
+            logger.warning(f"[POST /api/v1/query] log_query failed (non-fatal): {exc}")
 
-    # Invalidate history cache so the next GET /query/history reflects the new entry
-    try:
-        from core.redis_client import redis_delete
-        from core.cache_keys import key_history
-        await redis_delete(key_history(firebase_uid), key_history(firebase_uid, favourites_only=True))
-    except Exception:
-        pass  # non-fatal
+        try:
+            from core.redis_client import redis_delete
+            from core.cache_keys import key_history
+            await redis_delete(
+                key_history(firebase_uid),
+                key_history(firebase_uid, favourites_only=True),
+            )
+        except Exception:
+            pass
+
+    asyncio.ensure_future(_background_save())
 
     return QueryResponse(
         response_type = response_type,
         chat_id       = chat_id,
-        data          = [final_response],   # frontend expects array: response.data[0]
+        data          = [final_response],
     )
 
 

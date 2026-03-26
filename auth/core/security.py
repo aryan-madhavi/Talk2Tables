@@ -245,10 +245,15 @@ def verify_request_token(
         cached["claims"] = claims
         return cached
 
-    # ── Step 3: Firestore user check (cache miss) ─────────────────────────
+    # ── Steps 3 & 4: Firestore user + session checks in parallel (cache miss) ─
     logger.debug(f"[Security] Cache MISS — uid={firebase_uid}, checking Firestore")
 
-    user = fs_get_user(firebase_uid)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as _pool:
+        _user_f    = _pool.submit(fs_get_user, firebase_uid)
+        _session_f = _pool.submit(fs_get_latest_active_session, firebase_uid)
+        user    = _user_f.result()
+        session = _session_f.result()
 
     if user is None:
         raise SecurityError(
@@ -261,8 +266,6 @@ def verify_request_token(
             code="ACCOUNT_DISABLED",
         )
 
-    # ── Step 4: Active session check ──────────────────────────────────────
-    session = fs_get_latest_active_session(firebase_uid)
     if session is None:
         raise SecurityError(
             "No active session found. Please sign in again.",

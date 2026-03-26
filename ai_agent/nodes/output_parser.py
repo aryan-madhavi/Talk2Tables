@@ -344,11 +344,8 @@ async def node_output_parser(state: AgentState) -> AgentState:
             parsed.get("summary", ""),
         )
 
-        # Generate narrative insight cards alongside the query response
-        question = state.get("natural_language_query", "")
-        parsed["narrative_insights"] = await _generate_narrative_insights(
-            question, parsed.get("data", []), insights
-        )
+        # Narrative insights deferred — use POST /query/insights endpoint on demand
+        parsed["narrative_insights"] = None
 
         # Auto-generate title if LLM omitted it
         if not parsed.get("title"):
