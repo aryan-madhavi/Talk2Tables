@@ -5,14 +5,15 @@ import { Message } from '../types';
 import { TypingIndicator } from './TypingIndicator';
 
 interface ChatMessagesProps {
-  messages:       Message[];
-  isTyping:       boolean;
-  messagesEndRef: React.RefObject<HTMLDivElement | null>;
-  onMessageClick: (msg: Message) => void;
-  onRetry?:       (input: string) => void;
+  messages:        Message[];
+  isTyping:        boolean;
+  progressMessage: string | null;
+  messagesEndRef:  React.RefObject<HTMLDivElement | null>;
+  onMessageClick:  (msg: Message) => void;
+  onRetry?:        (input: string) => void;
 }
 
-export function ChatMessages({ messages, isTyping, messagesEndRef, onMessageClick, onRetry }: ChatMessagesProps) {
+export function ChatMessages({ messages, isTyping, progressMessage, messagesEndRef, onMessageClick, onRetry }: ChatMessagesProps) {
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50/30">
       {messages.map(msg => {
@@ -65,7 +66,20 @@ export function ChatMessages({ messages, isTyping, messagesEndRef, onMessageClic
         );
       })}
 
-      {isTyping && <TypingIndicator />}
+      {isTyping && (
+        progressMessage
+          ? (
+            <div className="flex justify-start w-full">
+              <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none p-4 shadow-sm flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="text-xs text-gray-500 ml-1">{progressMessage}</span>
+              </div>
+            </div>
+          )
+          : <TypingIndicator />
+      )}
 
       <div ref={messagesEndRef} />
     </div>

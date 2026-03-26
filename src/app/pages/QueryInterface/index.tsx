@@ -85,7 +85,7 @@ export default function QueryInterface() {
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
-    updateCurrentResultInsights,
+    updateCurrentResultInsights, progressMessage,
   } = useQueryExecution(selectedDb);
 
   // Pre-fill input from Suggested Queries click (fires once, no auto-run)
@@ -173,6 +173,7 @@ export default function QueryInterface() {
         <ChatMessages
           messages={messages}
           isTyping={isTyping && executingChatId === chatId}
+          progressMessage={progressMessage}
           messagesEndRef={messagesEndRef}
           onMessageClick={handleMessageClick}
           onRetry={sendQuery}

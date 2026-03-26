@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Message, QueryResult } from '../types';
-import { executeQuery, isErrorPayload } from '../../../../lib/queryService';
+import { executeQueryStream, isErrorPayload } from '../../../../lib/queryService';
 import { MessageOut } from '../../../../lib/chatService';
 
 const INITIAL_MESSAGE: Message = {
@@ -34,8 +34,9 @@ export function useQueryExecution(selectedConnectionId: string) {
   const [executingChatId, setExecutingChatId] = useState<string | null | undefined>(undefined);
   const [currentResult,   setCurrentResult]   = useState<QueryResult | null>(null);
   const [chartType,       setChartType]       = useState<'bar' | 'pie'>('bar');
-  const [chatId,          setChatId]          = useState<string | null>(null);
-  const [refreshTrigger,  setRefreshTrigger]  = useState(0);
+  const [chatId,           setChatId]           = useState<string | null>(null);
+  const [refreshTrigger,   setRefreshTrigger]   = useState(0);
+  const [progressMessage,  setProgressMessage]  = useState<string | null>(null);
   const messagesEndRef  = useRef<HTMLDivElement | null>(null);
   // Increments each time the connection changes; used to discard stale responses
   const generationRef   = useRef(0);
@@ -109,59 +110,90 @@ export function useQueryExecution(selectedConnectionId: string) {
 
     try {
       const startTime = Date.now();
-      const response = await executeQuery({
-        connection_id: selectedConnectionId,
-        chat_input:    queryText,
-        chat_id:       chatId,
-      });
-      const executionTime = Date.now() - startTime;
+      let executionTime = 0;
 
-      // Connection was switched while request was in-flight — discard response
-      if (generationRef.current !== generation) return;
+      await executeQueryStream(
+        {
+          connection_id: selectedConnectionId,
+          chat_input:    queryText,
+          chat_id:       chatId,
+        },
+        {
+          onProgress: ({ message }) => {
+            if (generationRef.current === generation) {
+              setProgressMessage(message);
+            }
+          },
+          onResult: (response) => {
+            executionTime = Date.now() - startTime;
+            if (generationRef.current !== generation) return;
 
-      setChatId(response.chat_id);
+            setChatId(response.chat_id);
 
-      const payload = response.data?.[0];
-      if (!payload) throw new Error('Empty response from server.');
+            const payload = response.data?.[0];
+            if (!payload) {
+              setMessages(prev => [...prev, {
+                id:         (Date.now() + 1).toString(),
+                role:       'assistant',
+                content:    'Empty response from server.',
+                timestamp:  new Date(),
+                isError:    true,
+                retryInput: queryText,
+              }]);
+              return;
+            }
 
-      if (isErrorPayload(payload)) {
-        setMessages(prev => [...prev, {
-          id:        (Date.now() + 1).toString(),
-          role:      'assistant',
-          content:   payload.error_message,
-          timestamp: new Date(),
-        }]);
-        return;
-      }
+            if (isErrorPayload(payload)) {
+              setMessages(prev => [...prev, {
+                id:        (Date.now() + 1).toString(),
+                role:      'assistant',
+                content:   payload.error_message,
+                timestamp: new Date(),
+              }]);
+              return;
+            }
 
-      const result: QueryResult = {
-        id:            Date.now().toString(),
-        sql:           payload.sql_query   || '-- No SQL generated',
-        data:          payload.data        || [],
-        columns:       payload.data?.length > 0 ? Object.keys(payload.data[0]) : [],
-        executionTime,
-        rowCount:      payload.total_records ?? payload.data?.length ?? 0,
-        question:          queryText,
-        summary:           payload.summary,
-        insights:          (payload as any).numerical_insights  ?? undefined,
-        narrativeInsights: (payload as any).narrative_insights  ?? undefined,
-        chartData:     (payload.data || []).slice(0, 10).map(item => {
-          const keys = Object.keys(item);
-          return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
-        }),
-      };
+            const result: QueryResult = {
+              id:            Date.now().toString(),
+              sql:           payload.sql_query   || '-- No SQL generated',
+              data:          payload.data        || [],
+              columns:       payload.data?.length > 0 ? Object.keys(payload.data[0]) : [],
+              executionTime,
+              rowCount:      payload.total_records ?? payload.data?.length ?? 0,
+              question:          queryText,
+              summary:           payload.summary,
+              insights:          (payload as any).numerical_insights  ?? undefined,
+              narrativeInsights: (payload as any).narrative_insights  ?? undefined,
+              chartData:     (payload.data || []).slice(0, 10).map(item => {
+                const keys = Object.keys(item);
+                return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
+              }),
+            };
 
-      setCurrentResult(result);
-      setMessages(prev => [...prev, {
-        id:          (Date.now() + 1).toString(),
-        role:        'assistant',
-        content:     payload.summary || 'Query executed.',
-        timestamp:   new Date(),
-        queryResult: result,
-      }]);
+            setCurrentResult(result);
+            setMessages(prev => [...prev, {
+              id:          (Date.now() + 1).toString(),
+              role:        'assistant',
+              content:     payload.summary || 'Query executed.',
+              timestamp:   new Date(),
+              queryResult: result,
+            }]);
 
-      setRefreshTrigger(n => n + 1);
-
+            setRefreshTrigger(n => n + 1);
+          },
+          onError: (msg) => {
+            if (generationRef.current !== generation) return;
+            setMessages(prev => [...prev, {
+              id:         (Date.now() + 1).toString(),
+              role:       'assistant',
+              content:    `Error: ${msg}`,
+              timestamp:  new Date(),
+              isError:    true,
+              retryInput: queryText,
+            }]);
+          },
+        },
+      );
     } catch (error) {
       if (generationRef.current !== generation) return;
       const msg = error instanceof Error ? error.message : 'Query failed. Please try again.';
@@ -175,6 +207,7 @@ export function useQueryExecution(selectedConnectionId: string) {
       }]);
     } finally {
       if (generationRef.current === generation) {
+        setProgressMessage(null);
         setIsTyping(false);
         setExecutingChatId(undefined);
       }
@@ -223,6 +256,6 @@ export function useQueryExecution(selectedConnectionId: string) {
     messagesEndRef, handleSend, handleKeyDown, handleMessageClick,
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
-    updateCurrentResultInsights,
+    updateCurrentResultInsights, progressMessage,
   };
 }
