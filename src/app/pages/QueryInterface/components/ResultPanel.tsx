@@ -19,7 +19,7 @@ interface ResultPanelProps {
   onInsightsGenerated: (insights: QueryResult['insights'], narrativeInsights: QueryResult['narrativeInsights']) => void;
 }
 
-export function ResultPanel({
+export const ResultPanel = React.memo(function ResultPanel({
   result, chartType, setChartType, onCopy, onDownload, onSave, isFavourited, onInsightsGenerated,
 }: ResultPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('table');
@@ -56,4 +56,4 @@ export function ResultPanel({
       />
     </>
   );
-}
+});

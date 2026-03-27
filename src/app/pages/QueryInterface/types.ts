@@ -6,6 +6,8 @@ export interface Message {
   content:      string;
   timestamp:    Date;
   queryResult?: QueryResult;
+  isError?:     boolean;
+  retryInput?:  string;
 }
 
 // ─── Insights ─────────────────────────────────────────────────────────────────

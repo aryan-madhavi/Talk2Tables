@@ -80,6 +80,74 @@ export async function executeQuery(payload: QueryRequest): Promise<QueryResponse
   return res.json() as Promise<QueryResponse>;
 }
 
+// ── Streaming query (SSE) ─────────────────────────────────────────────────────
+
+export interface QueryProgressEvent {
+  stage:   string;
+  message: string;
+}
+
+export interface StreamingQueryCallbacks {
+  onProgress: (event: QueryProgressEvent) => void;
+  onResult:   (response: QueryResponse & { chat_id: string }) => void;
+  onError:    (message: string) => void;
+}
+
+export async function executeQueryStream(
+  payload:   QueryRequest,
+  callbacks: StreamingQueryCallbacks,
+): Promise<void> {
+  const token = await getIdToken();
+
+  const res = await fetch(`${API_BASE}/query/stream`, {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization:  `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { detail?: string };
+    callbacks.onError(body.detail ?? `Query failed: ${res.status}`);
+    return;
+  }
+
+  const reader  = res.body?.getReader();
+  if (!reader) { callbacks.onError('No response body'); return; }
+
+  const decoder = new TextDecoder();
+  let   buffer  = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop() ?? '';
+
+    for (const block of lines) {
+      const eventMatch = block.match(/^event:\s*(\w+)/m);
+      const dataMatch  = block.match(/^data:\s*(.+)/ms);
+      if (!eventMatch || !dataMatch) continue;
+
+      const eventType = eventMatch[1];
+      let   data: unknown;
+      try { data = JSON.parse(dataMatch[1].trim()); } catch { continue; }
+
+      if (eventType === 'progress') {
+        callbacks.onProgress(data as QueryProgressEvent);
+      } else if (eventType === 'result') {
+        callbacks.onResult(data as QueryResponse & { chat_id: string });
+      } else if (eventType === 'error') {
+        callbacks.onError((data as { message: string }).message ?? 'Unknown error');
+      }
+    }
+  }
+}
+
 // ── Query Suggestions ─────────────────────────────────────────────────────────
 
 export interface SuggestionsResponse {

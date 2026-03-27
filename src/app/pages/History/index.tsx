@@ -6,31 +6,69 @@ import { cn } from '../../../lib/utils';
 import { HistoryTab } from './types';
 import { HistoryCard }      from './components/HistoryCard';
 
+const PAGE_SIZE = 20;
+
 export default function History() {
   const navigate = useNavigate();
   const [tab,        setTab]        = useState<HistoryTab>('history');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const [historyItems, setHistoryItems] = useState<QueryHistoryItem[]>([]);
-  const [savedItems,   setSavedItems]   = useState<QueryHistoryItem[]>([]);
-  const [histLoading,  setHistLoading]  = useState(true);
-  const [savedLoading, setSavedLoading] = useState(true);
+  const [historyItems,     setHistoryItems]     = useState<QueryHistoryItem[]>([]);
+  const [savedItems,       setSavedItems]       = useState<QueryHistoryItem[]>([]);
+  const [histLoading,      setHistLoading]      = useState(true);
+  const [savedLoading,     setSavedLoading]     = useState(true);
+  const [histLoadingMore,  setHistLoadingMore]  = useState(false);
+  const [savedLoadingMore, setSavedLoadingMore] = useState(false);
+  const [histHasMore,      setHistHasMore]      = useState(false);
+  const [savedHasMore,     setSavedHasMore]     = useState(false);
 
   const loadHistory = useCallback(() => {
     setHistLoading(true);
-    getQueryHistory({ limit: 100 })
-      .then(res => setHistoryItems(res.history ?? []))
+    getQueryHistory({ limit: PAGE_SIZE, offset: 0 })
+      .then(res => {
+        const items = res.history ?? [];
+        setHistoryItems(items);
+        setHistHasMore(items.length === PAGE_SIZE);
+      })
       .catch(console.error)
       .finally(() => setHistLoading(false));
   }, []);
 
   const loadSaved = useCallback(() => {
     setSavedLoading(true);
-    getQueryHistory({ limit: 100, favouritesOnly: true })
-      .then(res => setSavedItems(res.history ?? []))
+    getQueryHistory({ limit: PAGE_SIZE, offset: 0, favouritesOnly: true })
+      .then(res => {
+        const items = res.history ?? [];
+        setSavedItems(items);
+        setSavedHasMore(items.length === PAGE_SIZE);
+      })
       .catch(console.error)
       .finally(() => setSavedLoading(false));
   }, []);
+
+  const loadMoreHistory = useCallback(() => {
+    setHistLoadingMore(true);
+    getQueryHistory({ limit: PAGE_SIZE, offset: historyItems.length })
+      .then(res => {
+        const items = res.history ?? [];
+        setHistoryItems(prev => [...prev, ...items]);
+        setHistHasMore(items.length === PAGE_SIZE);
+      })
+      .catch(console.error)
+      .finally(() => setHistLoadingMore(false));
+  }, [historyItems.length]);
+
+  const loadMoreSaved = useCallback(() => {
+    setSavedLoadingMore(true);
+    getQueryHistory({ limit: PAGE_SIZE, offset: savedItems.length, favouritesOnly: true })
+      .then(res => {
+        const items = res.history ?? [];
+        setSavedItems(prev => [...prev, ...items]);
+        setSavedHasMore(items.length === PAGE_SIZE);
+      })
+      .catch(console.error)
+      .finally(() => setSavedLoadingMore(false));
+  }, [savedItems.length]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
   useEffect(() => { loadSaved();   }, [loadSaved]);
@@ -76,8 +114,11 @@ export default function History() {
     { value: 'saved'   as HistoryTab, label: 'Saved',   icon: <Heart className="w-4 h-4" />,       count: savedItems.length  },
   ];
 
-  const active     = tab === 'history' ? filteredHistory : filteredSaved;
-  const isLoading  = tab === 'history' ? histLoading     : savedLoading;
+  const active          = tab === 'history' ? filteredHistory  : filteredSaved;
+  const isLoading       = tab === 'history' ? histLoading      : savedLoading;
+  const hasMore         = tab === 'history' ? histHasMore      : savedHasMore;
+  const isLoadingMore   = tab === 'history' ? histLoadingMore  : savedLoadingMore;
+  const handleLoadMore  = tab === 'history' ? loadMoreHistory  : loadMoreSaved;
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -137,15 +178,35 @@ export default function History() {
             <span className="text-sm">Loading…</span>
           </div>
         ) : active.length > 0 ? (
-          active.map(item => (
-            <HistoryCard
-              key={item.msg_id}
-              item={item}
-              onOpen={handleOpen}
-              onRun={handleRun}
-              onToggleFavourite={handleToggleFavourite}
-            />
-          ))
+          <>
+            {active.map(item => (
+              <HistoryCard
+                key={item.msg_id}
+                item={item}
+                onOpen={handleOpen}
+                onRun={handleRun}
+                onToggleFavourite={handleToggleFavourite}
+              />
+            ))}
+            {hasMore && !searchTerm && (
+              <div className="flex justify-center pt-2 pb-4">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore}
+                  className={cn(
+                    'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all border',
+                    'border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300',
+                    isLoadingMore && 'opacity-60 cursor-not-allowed',
+                  )}
+                >
+                  {isLoadingMore
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /><span>Loading…</span></>
+                    : <span>Load more</span>
+                  }
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="text-center py-16 text-gray-400">
             {tab === 'history'

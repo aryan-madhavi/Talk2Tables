@@ -4,6 +4,10 @@ import { MessageSquarePlus, MessageSquare, Loader2, ChevronLeft, ChevronRight } 
 import { cn } from '../../../../lib/utils';
 import { listChats, getMessages, ChatOut, MessageOut } from '../../../../lib/chatService';
 
+// Note: listChats does not currently support server-side pagination (no limit/offset params).
+// Client-side pagination is used here: all chats are fetched, then shown in increments of CHAT_PAGE_SIZE.
+const CHAT_PAGE_SIZE = 30;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string): string {
@@ -39,14 +43,16 @@ export function ChatSidebar({
   onNewChat,
   onSelectChat,
 }: ChatSidebarProps) {
-  const [chats,     setChats]     = useState<ChatOut[]>([]);
-  const [loading,   setLoading]   = useState(false);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [chats,        setChats]        = useState<ChatOut[]>([]);
+  const [loading,      setLoading]      = useState(false);
+  const [loadingId,    setLoadingId]    = useState<string | null>(null);
+  const [collapsed,    setCollapsed]    = useState(false);
+  const [visibleCount, setVisibleCount] = useState(CHAT_PAGE_SIZE);
 
   const fetchChats = useCallback(async () => {
     if (!connectionId) return;
     setLoading(true);
+    setVisibleCount(CHAT_PAGE_SIZE);
     try {
       const res = await listChats(connectionId);
       setChats(res.chats);
@@ -57,8 +63,26 @@ export function ChatSidebar({
     }
   }, [connectionId]);
 
-  // Reload when connection changes or after a successful query
-  useEffect(() => { fetchChats(); }, [fetchChats, refreshTrigger]);
+  // Reload when connection changes
+  useEffect(() => { fetchChats(); }, [fetchChats]);
+
+  // After a successful query: optimistic update for existing chats, refetch for new ones
+  useEffect(() => {
+    if (refreshTrigger === 0) return;
+    const isExisting = activeChatId ? chats.some(c => c.chat_id === activeChatId) : false;
+    if (isExisting && activeChatId) {
+      setChats(prev =>
+        prev
+          .map(c => c.chat_id === activeChatId
+            ? { ...c, updated_at: new Date().toISOString(), msg_count: c.msg_count + 2 }
+            : c
+          )
+          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      );
+    } else {
+      fetchChats();
+    }
+  }, [refreshTrigger]);
 
   const handleSelectChat = async (chat: ChatOut) => {
     if (loadingId) return;
@@ -156,7 +180,7 @@ export function ChatSidebar({
           </div>
         )}
 
-        {!loading && chats.map(chat => {
+        {!loading && chats.slice(0, visibleCount).map(chat => {
           const isActive    = activeChatId  === chat.chat_id;
           const isLoading   = loadingId     === chat.chat_id;
           const isExecuting = executingChatId === chat.chat_id && !isActive;
@@ -201,6 +225,15 @@ export function ChatSidebar({
             </button>
           );
         })}
+
+        {!loading && chats.length > visibleCount && (
+          <button
+            onClick={() => setVisibleCount(n => n + CHAT_PAGE_SIZE)}
+            className="w-full py-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors text-center"
+          >
+            Load more
+          </button>
+        )}
       </div>
     </div>
   );

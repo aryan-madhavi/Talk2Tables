@@ -20,6 +20,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   ReactNode,
 } from 'react';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
@@ -121,19 +122,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearError = useCallback(() => setError(null), []);
 
+  const value = useMemo(() => ({
+    user,
+    loading,
+    error,
+    login,
+    logout,
+    clearError,
+    isAdmin:     user?.role === 'admin',
+    isDbManager: user?.role === 'admin' || user?.role === 'db_manager',
+    isPowerUser: user?.role === 'admin' || user?.role === 'db_manager' || user?.role === 'power_user',
+    isAnalyst:   !!user,
+  }), [user, loading, error, login, logout, clearError]);
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      loading,
-      error,
-      login,
-      logout,
-      clearError,
-      isAdmin:     user?.role === 'admin',
-      isDbManager: user?.role === 'admin' || user?.role === 'db_manager',
-      isPowerUser: user?.role === 'admin' || user?.role === 'db_manager' || user?.role === 'power_user',
-      isAnalyst:   !!user,
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
