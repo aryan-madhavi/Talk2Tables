@@ -3,7 +3,8 @@
 // AdminPanel additionally requires role = "admin".
 
 import React from 'react';
-import { createBrowserRouter } from 'react-router';
+// import { createBrowserRouter } from 'react-router';
+import { createHashRouter } from 'react-router';
 import { AppLayout }      from './components/layout/AppLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import Login              from './pages/Login';
@@ -23,8 +24,8 @@ export const ComingSoon = () => (
   <div className="p-8 text-2xl font-bold text-gray-900 text-center">Coming Soon</div>
 );
 
-export const router = createBrowserRouter([
-
+// export const router = createBrowserRouter([
+  export const router = createHashRouter([
   // ── Public ─────────────────────────────────────────────────────────────────
   {
     path: '/login',

@@ -92,3 +92,15 @@ export interface AuditLogEntry {
   details:   string;
   severity:  'info' | 'warning' | 'critical';
 }
+
+// --------- ELECTRON --------------
+export interface IElectronAPI {
+  sendMessageToMain: (message: string) => void;
+  onReplyFromMain: (callback: (event: any, response: string) => void) => void;
+}
+
+declare global {
+  interface Window {
+    electronAPI: IElectronAPI;
+  }
+}
