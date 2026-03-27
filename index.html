@@ -801,6 +801,75 @@
       gap: 16px;
       margin-top: 56px;
     }
+
+    /* ── carousel (mobile only, toggled by JS) ── */
+    .team-carousel-wrap {
+      position: relative;
+      margin-top: 56px;
+      display: none; /* hidden on desktop */
+    }
+    .team-carousel {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 4px;
+      /* hide scrollbar */
+      scrollbar-width: none;
+    }
+    .team-carousel::-webkit-scrollbar { display: none; }
+    .team-carousel .tc {
+      flex: 0 0 82%;
+      scroll-snap-align: center;
+      /* remove hover lift on touch */
+    }
+    @media (hover: none) { .team-carousel .tc:hover { transform: none; } }
+
+    /* dots */
+    .carousel-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .carousel-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--border-hov);
+      cursor: pointer;
+      transition: background .2s, transform .2s, width .2s;
+      border: none;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .carousel-dot.active {
+      background: var(--grad-a);
+      width: 20px;
+      border-radius: 3px;
+    }
+
+    /* carousel arrows */
+    .carousel-arrows {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .carousel-arrow {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-2);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color .18s, color .18s, background .18s;
+    }
+    .carousel-arrow:hover { border-color: var(--border-hov); color: var(--text); background: var(--surface-hov); }
+    .carousel-arrow:disabled { opacity: .3; cursor: default; }
     .tc {
       border: 1px solid var(--border);
       border-radius: var(--r-lg);
@@ -815,8 +884,9 @@
       border-radius: 50%;
       margin: 0 auto 18px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 22px;
+      font-size: 16px;
       font-weight: 800;
+      letter-spacing: -.02em;
       background: linear-gradient(135deg, rgba(45,212,191,.18), rgba(59,130,246,.18));
       border: 1.5px solid var(--border);
       color: var(--grad-a);
@@ -889,22 +959,201 @@
     .reveal-d3 { transition-delay: .3s; }
 
     /* ─────────────────────────────────────────
-       RESPONSIVE
+       HAMBURGER / MOBILE NAV
+    ───────────────────────────────────────── */
+    .nav-hamburger {
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+      width: 36px; height: 36px;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      background: var(--surface);
+      cursor: pointer;
+      padding: 8px;
+      flex-shrink: 0;
+    }
+    .nav-hamburger span {
+      display: block;
+      height: 1.5px;
+      background: var(--text-2);
+      border-radius: 2px;
+      transition: transform .25s, opacity .25s;
+    }
+    .nav-hamburger.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+    .nav-hamburger.open span:nth-child(2) { opacity: 0; }
+    .nav-hamburger.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+    .mobile-nav {
+      position: fixed;
+      top: 64px; left: 0; right: 0;
+      background: rgba(7,7,15,.97);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      z-index: 99;
+      padding: 20px max(24px, 5vw);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transform: translateY(-12px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform .24s ease, opacity .24s ease;
+    }
+    @media (prefers-color-scheme: light) {
+      .mobile-nav { background: rgba(255,255,255,.97); }
+    }
+    .mobile-nav.open {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: all;
+    }
+    .mobile-nav a {
+      padding: 13px 16px;
+      border-radius: var(--r);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-2);
+      transition: background .18s, color .18s;
+    }
+    .mobile-nav a:hover { background: var(--surface); color: var(--text); }
+    .mobile-nav .mobile-demo {
+      margin-top: 12px;
+      padding: 13px 16px;
+      background: var(--grad);
+      color: #fff;
+      border-radius: var(--r-lg);
+      text-align: center;
+      font-weight: 700;
+    }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE — TABLET  ≤ 1024px
+    ───────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      .hero-inner  { gap: 48px; }
+      .safety-layout { gap: 56px; }
+    }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE — TABLET  ≤ 920px
     ───────────────────────────────────────── */
     @media (max-width: 920px) {
-      .hero-inner { grid-template-columns: 1fr; gap: 48px; }
-      .chat-card  { display: none; }
-      .feat-grid  { grid-template-columns: 1fr 1fr; }
-      .safety-layout { grid-template-columns: 1fr; gap: 40px; }
-      .pipe-branches { grid-template-columns: 1fr; }
-      .team-grid  { grid-template-columns: 1fr; }
-      .stack-grid { grid-template-columns: 1fr; }
-      .nav-links  { display: none; }
-      .cta-wrap   { padding: 48px 32px; }
+      /* nav */
+      .nav-links    { display: none; }
+      .nav-demo     { display: none; }
+      .nav-hamburger{ display: flex; }
+
+      /* hero */
+      .hero-inner   { grid-template-columns: 1fr; gap: 36px; padding: 56px 0 72px; }
+      .hero-sub     { max-width: 100%; }
+      /* chat card: show below copy, stop float anim */
+      .chat-card    { animation: none; }
+      @keyframes cardFloat { 0%,100% { transform: none; } }
+
+      /* section spacing */
+      .section      { padding: 80px 0; }
+
+      /* grids */
+      .feat-grid    { grid-template-columns: 1fr 1fr; }
+      .pipe-branches{ grid-template-columns: 1fr 1fr; }
+      .stack-grid   { grid-template-columns: 1fr; }
+      .team-grid    { grid-template-columns: 1fr 1fr; gap: 14px; }
+      .team-carousel-wrap { display: none; }
+
+      /* safety */
+      .safety-layout{ grid-template-columns: 1fr; gap: 40px; }
+      .safety-layout > div:last-child { position: static; }
+
+      /* cta */
+      .cta-wrap     { padding: 56px 40px; margin-bottom: 80px; }
     }
-    @media (max-width: 580px) {
-      .feat-grid  { grid-template-columns: 1fr; }
-      .hstat-val  { font-size: 20px; }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE — PHONE  ≤ 640px
+    ───────────────────────────────────────── */
+    @media (max-width: 640px) {
+      /* section spacing */
+      .section      { padding: 64px 0; }
+
+      /* grids → single col */
+      .feat-grid    { grid-template-columns: 1fr; }
+      .pipe-branches{ grid-template-columns: 1fr; }
+      /* team: hide grid, show carousel */
+      .team-grid         { display: none; }
+      .team-carousel-wrap{ display: block; }
+
+      /* hero stats — 2×2 grid */
+      .hero-stats   { display: grid; grid-template-columns: 1fr 1fr; }
+      .hstat        { border-right: none; border-bottom: 1px solid var(--border); }
+      .hstat:nth-child(odd) { border-right: 1px solid var(--border); }
+      .hstat:nth-last-child(-n+2) { border-bottom: none; }
+      .hstat-val    { font-size: 22px; }
+      .hstat        { padding: 16px 18px; }
+
+      /* hero copy */
+      h1            { letter-spacing: -.03em; }
+      .hero-sub     { font-size: 15px; }
+      .hero-actions { flex-direction: column; }
+      .btn-primary,
+      .btn-outline  { width: 100%; text-align: center; justify-content: center; }
+
+      /* section sub */
+      .section-sub  { font-size: 14.5px; }
+
+      /* feat cards */
+      .feat-card    { padding: 24px 22px; }
+
+      /* pipeline */
+      .pipe-head    { margin-bottom: 36px; }
+
+      /* safety stages */
+      .stage        { padding: 13px 16px; gap: 12px; }
+      .sact         { display: none; }
+
+      /* write preview */
+      .wp-body      { padding: 16px; }
+      .wp-body pre  { font-size: 11px; padding: 12px; }
+
+      /* cta */
+      .cta-wrap     { padding: 44px 24px; margin: 0 16px 64px; }
+      .cta-wrap p   { font-size: 14.5px; }
+
+      /* footer */
+      .foot-inner   { flex-direction: column; align-items: flex-start; gap: 16px; }
+      .foot-meta    { text-align: left; }
+
+      /* stack rows — allow val to wrap below name */
+      .si           { flex-wrap: wrap; gap: 4px; }
+      .si-val       { width: 100%; padding-top: 0; }
+    }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE — SMALL PHONE  ≤ 420px
+    ───────────────────────────────────────── */
+    @media (max-width: 420px) {
+      nav           { padding: 0 18px; }
+      .container    { padding: 0 18px; }
+      .section      { padding: 52px 0; }
+
+      h1            { font-size: clamp(30px, 9vw, 42px); }
+      h2            { font-size: clamp(22px, 7vw, 34px); }
+
+      .hero-inner   { padding: 44px 0 60px; }
+      .hero-badge   { font-size: 11.5px; }
+
+      .hstat-val    { font-size: 20px; }
+      .hstat-lbl    { font-size: 10.5px; }
+
+      .cta-wrap     { margin: 0 0 52px; border-radius: var(--r-lg); }
+
+      /* pipeline boxes smaller */
+      .pn-box       { width: 108px; padding: 14px 10px; }
+      .pn-ico       { font-size: 20px; }
+      .pn-name      { font-size: 10px; }
+      .pn-sub       { font-size: 9px; }
     }
   </style>
 </head>
@@ -929,7 +1178,20 @@
       <li><a href="#team">Team</a></li>
     </ul>
     <a href="https://talk2tables.netlify.app/" target="_blank" rel="noopener" class="nav-demo">Live Demo ↗</a>
+    <button class="nav-hamburger" id="hamburger" aria-label="Toggle menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
   </nav>
+
+  <!-- MOBILE NAV DRAWER -->
+  <div class="mobile-nav" id="mobileNav" role="navigation">
+    <a href="#features" class="mobile-link">Features</a>
+    <a href="#pipeline" class="mobile-link">How It Works</a>
+    <a href="#stack" class="mobile-link">Stack</a>
+    <a href="#safety" class="mobile-link">Safety</a>
+    <a href="#team" class="mobile-link">Team</a>
+    <a href="https://talk2tables.netlify.app/" target="_blank" rel="noopener" class="mobile-demo">Live Demo ↗</a>
+  </div>
 
   <!-- HERO -->
   <section id="hero">
@@ -1286,24 +1548,54 @@ WHERE zone = 'B'
         <h2>Built by three<br /><span class="gtext">engineers</span></h2>
         <p class="section-sub" style="margin:0 auto; text-align:center;">Diploma Final Year Project · 3rd Year Computer Engineering · Mumbai, 2025–26</p>
       </div>
+      <!-- desktop grid -->
       <div class="team-grid reveal">
         <div class="tc">
-          <div class="tc-av">A</div>
-          <div class="tc-name">Aryan</div>
-          <div class="tc-role">Backend Lead &amp; AI Agent</div>
-          <div class="tc-desc">LangGraph pipeline, LLM provider abstraction, SQL safety validation, FastAPI architecture, Firebase + Firestore integration, and system design.</div>
+          <div class="tc-av">SG</div>
+          <div class="tc-name">Sahil Gangani</div>
+          <div class="tc-role">Frontend &amp; UI Lead</div>
+          <div class="tc-desc">Conversational chat interface, Login/Signup pages, Schema Browser, History &amp; Settings pages, advanced data visualization (7 chart types), AI-driven chart selection, Insights feature, and prompt engineering &amp; security fixes.</div>
         </div>
         <div class="tc">
-          <div class="tc-av">M</div>
-          <div class="tc-name">Member 2</div>
-          <div class="tc-role">Frontend &amp; UX</div>
-          <div class="tc-desc">React.js application, UX4G Design System integration, chat interface, SQL viewer, data visualization components, and export features.</div>
+          <div class="tc-av">AM</div>
+          <div class="tc-name">Aryan Madhavi</div>
+          <div class="tc-role">AI Agent &amp; Infrastructure Lead</div>
+          <div class="tc-desc">LangGraph state machine, LLM Provider Factory (OpenRouter → Groq → Gemini → Ollama fallback), system prompts, n8n workflow, GCP deployment, Firestore optimisation &amp; indices, and full-stack deployment on Netlify + Railway + Upstash.</div>
         </div>
         <div class="tc">
-          <div class="tc-av">M</div>
-          <div class="tc-name">Member 3</div>
-          <div class="tc-role">Database &amp; DevOps</div>
-          <div class="tc-desc">Database connection management, schema documentation pipeline, deployment configuration, testing, and integration across all layers.</div>
+          <div class="tc-av">SD</div>
+          <div class="tc-name">Sankalp Dawada</div>
+          <div class="tc-role">Backend, Database &amp; Security Lead</div>
+          <div class="tc-desc">FastAPI backend, Firebase Admin SDK auth, RBAC middleware, session management, Firestore schema redesign for multi-chat workspaces, security red-teaming (prompt injection, pg_sleep, CROSS JOIN), and system hardening.</div>
+        </div>
+      </div>
+
+      <!-- mobile carousel -->
+      <div class="team-carousel-wrap">
+        <div class="team-carousel" id="teamCarousel">
+          <div class="tc">
+            <div class="tc-av">SG</div>
+            <div class="tc-name">Sahil Gangani</div>
+            <div class="tc-role">Frontend &amp; UI Lead</div>
+            <div class="tc-desc">Conversational chat interface, Login/Signup pages, Schema Browser, History &amp; Settings pages, advanced data visualization (7 chart types), AI-driven chart selection, Insights feature, and prompt engineering &amp; security fixes.</div>
+          </div>
+          <div class="tc">
+            <div class="tc-av">AM</div>
+            <div class="tc-name">Aryan Madhavi</div>
+            <div class="tc-role">AI Agent &amp; Infrastructure Lead</div>
+            <div class="tc-desc">LangGraph state machine, LLM Provider Factory (OpenRouter → Groq → Gemini → Ollama fallback), system prompts, n8n workflow, GCP deployment, Firestore optimisation &amp; indices, and full-stack deployment on Netlify + Railway + Upstash.</div>
+          </div>
+          <div class="tc">
+            <div class="tc-av">SD</div>
+            <div class="tc-name">Sankalp Dawada</div>
+            <div class="tc-role">Backend, Database &amp; Security Lead</div>
+            <div class="tc-desc">FastAPI backend, Firebase Admin SDK auth, RBAC middleware, session management, Firestore schema redesign for multi-chat workspaces, security red-teaming (prompt injection, pg_sleep, CROSS JOIN), and system hardening.</div>
+          </div>
+        </div>
+        <div class="carousel-dots" id="carouselDots"></div>
+        <div class="carousel-arrows">
+          <button class="carousel-arrow" id="carouselPrev" aria-label="Previous">&#8592;</button>
+          <button class="carousel-arrow" id="carouselNext" aria-label="Next">&#8594;</button>
         </div>
       </div>
     </div>
@@ -1337,6 +1629,30 @@ WHERE zone = 'B'
   </footer>
 
   <script>
+    /* hamburger menu */
+    const hamburger = document.getElementById('hamburger');
+    const mobileNav = document.getElementById('mobileNav');
+    function closeMenu() {
+      hamburger.classList.remove('open');
+      mobileNav.classList.remove('open');
+      hamburger.setAttribute('aria-expanded', 'false');
+    }
+    hamburger.addEventListener('click', () => {
+      const isOpen = mobileNav.classList.toggle('open');
+      hamburger.classList.toggle('open', isOpen);
+      hamburger.setAttribute('aria-expanded', String(isOpen));
+    });
+    // close when any mobile nav link is clicked
+    document.querySelectorAll('.mobile-link, .mobile-demo').forEach(el => {
+      el.addEventListener('click', closeMenu);
+    });
+    // close on outside click
+    document.addEventListener('click', e => {
+      if (!hamburger.contains(e.target) && !mobileNav.contains(e.target)) closeMenu();
+    });
+    // close on resize past breakpoint
+    window.addEventListener('resize', () => { if (window.innerWidth > 920) closeMenu(); });
+
     /* scroll reveal */
     const observer = new IntersectionObserver(entries => {
       entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
@@ -1421,6 +1737,72 @@ WHERE zone = 'B'
     }
 
     document.getElementById('demoInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendDemo(); });
+
+    /* ── team carousel ── */
+    (function () {
+      const carousel = document.getElementById('teamCarousel');
+      const dotsWrap = document.getElementById('carouselDots');
+      const prevBtn  = document.getElementById('carouselPrev');
+      const nextBtn  = document.getElementById('carouselNext');
+      if (!carousel) return;
+
+      const cards = Array.from(carousel.querySelectorAll('.tc'));
+      const total = cards.length;
+      let current = 0;
+
+      // build dots
+      cards.forEach((_, i) => {
+        const d = document.createElement('button');
+        d.className = 'carousel-dot' + (i === 0 ? ' active' : '');
+        d.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+        d.addEventListener('click', () => goTo(i));
+        dotsWrap.appendChild(d);
+      });
+
+      function getDots() { return dotsWrap.querySelectorAll('.carousel-dot'); }
+
+      function updateDots(idx) {
+        getDots().forEach((d, i) => d.classList.toggle('active', i === idx));
+      }
+
+      function updateArrows() {
+        prevBtn.disabled = current === 0;
+        nextBtn.disabled = current === total - 1;
+      }
+
+      function goTo(idx) {
+        current = Math.max(0, Math.min(idx, total - 1));
+        const card = cards[current];
+        // center the card inside the scroll container
+        const offset = card.offsetLeft - (carousel.offsetWidth - card.offsetWidth) / 2;
+        carousel.scrollTo({ left: offset, behavior: 'smooth' });
+        updateDots(current);
+        updateArrows();
+      }
+
+      prevBtn.addEventListener('click', () => goTo(current - 1));
+      nextBtn.addEventListener('click', () => goTo(current + 1));
+
+      // sync dot when user manually swipes
+      let scrollTimer;
+      carousel.addEventListener('scroll', () => {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(() => {
+          const center = carousel.scrollLeft + carousel.offsetWidth / 2;
+          let closest = 0;
+          let minDist = Infinity;
+          cards.forEach((c, i) => {
+            const dist = Math.abs(c.offsetLeft + c.offsetWidth / 2 - center);
+            if (dist < minDist) { minDist = dist; closest = i; }
+          });
+          current = closest;
+          updateDots(current);
+          updateArrows();
+        }, 80);
+      });
+
+      updateArrows();
+    })();
   </script>
 </body>
 </html>
