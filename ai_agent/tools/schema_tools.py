@@ -160,12 +160,14 @@ def invalidate_schema_cache(connection_id: str) -> None:
 # ── Redis helpers (sync wrappers for use inside sync @tool functions) ─────────
 
 def _redis_get_sync(key: str) -> Any | None:
-    """Synchronous Redis GET that runs the async helper in the current loop."""
+    """Synchronous Redis GET — runs the async helper in a fresh thread to avoid
+    'This event loop is already running' when called from within FastAPI/LangGraph."""
     try:
         import asyncio
+        from concurrent.futures import ThreadPoolExecutor
         from core.redis_client import redis_get
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(redis_get(key))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, redis_get(key)).result(timeout=4)
     except Exception:
         return None
 
@@ -173,9 +175,10 @@ def _redis_get_sync(key: str) -> Any | None:
 def _redis_set_sync(key: str, value: Any, ttl: int) -> None:
     try:
         import asyncio
+        from concurrent.futures import ThreadPoolExecutor
         from core.redis_client import redis_set
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(redis_set(key, value, ttl))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, redis_set(key, value, ttl)).result(timeout=4)
     except Exception:
         pass
 
