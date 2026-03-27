@@ -240,15 +240,19 @@ async def query_stream(
                 chat_id                = chat_id,
                 chat_history           = chat_history,
             ):
-                # Inject chat_id into the result event
+                # Normalise result to same shape as POST /api/v1/query
                 if sse_line.startswith("event: result\n"):
                     import json as _json
                     data_part = sse_line.split("data: ", 1)[1].rstrip()
                     parsed = _json.loads(data_part)
-                    parsed["chat_id"] = chat_id
                     response_type  = parsed.get("response_type", "error")
                     final_response = parsed.get("final_response", {})
-                    yield f"event: result\ndata: {_json.dumps(parsed)}\n\n"
+                    envelope = {
+                        "response_type": response_type,
+                        "chat_id":       chat_id,
+                        "data":          [final_response],
+                    }
+                    yield f"event: result\ndata: {_json.dumps(envelope)}\n\n"
                 else:
                     yield sse_line
         except Exception as exc:
