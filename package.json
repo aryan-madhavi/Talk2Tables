@@ -8,7 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "compile:bytecode": "tsx src/scripts/compile-bytecode.ts",
-    "build:desktop": "npm run build && electron-builder"
+    "build:desktop": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win",
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:all": "npm run build && electron-builder --win --linux"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -104,7 +107,7 @@
     }
   },
   "build": {
-    "appId": "com.talk2tables.app",
+    "appId": "com.carbonari.talk2tables",
     "productName": "Talk2Tables",
     "directories": {
       "output": "release"
@@ -114,10 +117,19 @@
       "dist-electron/**/*"
     ],
     "linux": {
-      "target": "AppImage"
+      "target": ["AppImage", "deb", "rpm"],
+      "category": "Utility",
+      "icon": "build/icons"
     },
     "win": {
-      "target": "nsis"
+      "target": [ 
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        },
+        "portable"
+      ],
+      "icon": "build/icons/icon.ico"
     },
     "mac": {
       "target": "dmg"
