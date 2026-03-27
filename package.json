@@ -2,6 +2,11 @@
   "name": "talk2tables",
   "private": true,
   "version": "0.0.1",
+  "description": "Talk2Tables Desktop App",
+  "author": {
+    "name": "Carbonari",
+    "email": "carbonari.solutions0.com"
+  },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -104,7 +109,7 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "6.3.5"
+      "vite": "6.4.1"
     }
   },
   "build": {
@@ -134,6 +139,7 @@
     },
     "mac": {
       "target": "dmg"
-    }
+    },
+    "asar": true
   }
 }
