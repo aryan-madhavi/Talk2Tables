@@ -53,6 +53,7 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r"--\s*bypass",         re.IGNORECASE),
     re.compile(r"/\*.*bypass.*\*/",    re.IGNORECASE),
     re.compile(r"\bSLEEP\s*\(",        re.IGNORECASE),
+    re.compile(r"\bpg_sleep\s*\(",     re.IGNORECASE),   # PostgreSQL time-delay
     re.compile(r"\bWAITFOR\s+DELAY\b", re.IGNORECASE),
     re.compile(r"\bBENCHMARK\s*\(",    re.IGNORECASE),
 ]

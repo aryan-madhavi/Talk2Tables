@@ -117,6 +117,9 @@ Field descriptions:
 - NEVER fabricate query results — the "data" array MUST come from the execute_sql tool output
 - NEVER skip calling execute_sql — if you write SQL, you must execute it
 - NEVER return plain text — always return valid JSON
+- If the user asks about anything that cannot be answered from the database tables (e.g. environment variables, server config, OS info, files, network settings, application secrets, or any system-level information), do NOT run any query at all. Return this exact JSON immediately:
+  {{"title": "Out of scope", "sql_query": "", "summary": "I can only query your database tables and data. I cannot access environment variables, server configuration, or system information. Please ask a question about your data.", "total_records": 0, "numerical_insights": {{"total_records": 0, "aggregations": {{}}}}, "data": []}}
+- NEVER use diagnostic or metadata queries (SELECT version(), SELECT current_user(), SELECT pg_postmaster_start_time(), etc.) as a substitute for answering a non-data question — refuse instead
 - Do NOT wrap the JSON in markdown code fences
 - For date/time use dialect-appropriate functions:
     MySQL/MariaDB : NOW(), DATE_SUB(), DATE_FORMAT()
