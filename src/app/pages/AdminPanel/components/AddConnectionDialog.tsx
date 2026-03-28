@@ -1,9 +1,8 @@
 // src/app/pages/AdminPanel/components/AddConnectionDialog.tsx
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Database, X, Eye, EyeOff, Loader2, Wifi,
-  Lock, Server, CheckCircle, XCircle,
-  Upload, FileText, FolderOpen, Trash2, ChevronDown,
+  Lock, Server, CheckCircle, XCircle, ChevronDown,
 } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import {
@@ -50,7 +49,6 @@ export function AddConnectionDialog({
   const [testStatus,   setTestStatus]   = useState<TestStatus>('idle');
   const [testMessage,  setTestMessage]  = useState('');
   const [errors,       setErrors]       = useState<ConnectionFormErrors>({});
-  const fileInputRef                    = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -65,38 +63,20 @@ export function AddConnectionDialog({
     setForm(prev => ({
       ...prev,
       type,
-      port:       DB_DEFAULTS[type].port,
-      sqliteFile: null,
+      port: DB_DEFAULTS[type].port,
     }));
     // Clear test result when type changes
     setTestStatus('idle');
     setTestMessage('');
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (!file) return;
-    setForm(prev => ({ ...prev, sqliteFile: file, database: file.name }));
-    if (errors.database) setErrors(prev => ({ ...prev, database: '' }));
-  };
-
-  const handleRemoveFile = () => {
-    setForm(prev => ({ ...prev, sqliteFile: null, database: '' }));
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
   const validate = (): boolean => {
     const e: ConnectionFormErrors = {};
-    if (!form.name.trim()) e.name = 'Connection name is required';
-
-    if (form.type === 'SQLite') {
-      if (!form.sqliteFile) e.database = 'Please upload a .db file';
-    } else {
-      if (!form.database.trim()) e.database  = 'Database name is required';
-      if (!form.host.trim())     e.host      = 'Host is required';
-      if (!form.username.trim()) e.username  = 'Username is required';
-      if (!isEditMode && !form.password) e.password = 'Password is required';
-    }
+    if (!form.name.trim())     e.name     = 'Connection name is required';
+    if (!form.database.trim()) e.database = 'Database name is required';
+    if (!form.host.trim())     e.host     = 'Host is required';
+    if (!form.username.trim()) e.username = 'Username is required';
+    if (!isEditMode && !form.password) e.password = 'Password is required';
 
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -125,8 +105,7 @@ export function AddConnectionDialog({
     onSave(form);
   };
 
-  const isSQLite = form.type === 'SQLite';
-  const dbTypes  = Object.keys(DB_DEFAULTS) as DbType[];
+  const dbTypes = Object.keys(DB_DEFAULTS) as DbType[];
 
   // ── Render ────────────────────────────────────────────────────────────────────
 
@@ -217,179 +196,106 @@ export function AddConnectionDialog({
               />
             </Field>
 
-            {/* Host & Port — hidden for SQLite */}
-            {!isSQLite && (
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2">
-                  <Field label="Host" error={errors.host} required>
-                    <div className="relative">
-                      <Server className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="localhost or IP"
-                        value={form.host}
-                        onChange={e => setField('host', e.target.value)}
-                        className={cn(inputCls(!!errors.host), 'pl-8')}
-                      />
-                    </div>
-                  </Field>
-                </div>
-                <Field label="Port">
-                  <input
-                    type="text"
-                    placeholder={DB_DEFAULTS[form.type]?.port ?? ''}
-                    value={form.port}
-                    onChange={e => setField('port', e.target.value)}
-                    className={inputCls(false)}
-                  />
-                </Field>
-              </div>
-            )}
-
-            {/* SQLite: Upload only */}
-            {isSQLite && (
-              <Field label="Upload .db File" error={errors.database} required>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".db,.sqlite,.sqlite3"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-                {!form.sqliteFile ? (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className={cn(
-                      'w-full flex flex-col items-center justify-center gap-2 py-6 px-4',
-                      'rounded-xl border-2 border-dashed transition-all',
-                      errors.database
-                        ? 'border-red-300 bg-red-50 hover:border-red-400'
-                        : 'border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/40',
-                    )}
-                  >
-                    <div className={cn(
-                      'w-10 h-10 rounded-xl flex items-center justify-center',
-                      errors.database
-                        ? 'bg-red-100 text-red-500'
-                        : 'bg-white text-blue-600 shadow-sm border border-gray-200',
-                    )}>
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-semibold text-gray-700">Click to upload</p>
-                      <p className="text-xs text-gray-400 mt-0.5">.db · .sqlite · .sqlite3</p>
-                    </div>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
-                    <div className="w-9 h-9 rounded-lg bg-white border border-blue-200 shadow-sm
-                                    flex items-center justify-center text-blue-600 shrink-0">
-                      <FileText className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 truncate">{form.sqliteFile.name}</p>
-                      <p className="text-xs text-gray-500">{(form.sqliteFile.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="p-1.5 rounded-lg text-gray-400 hover:bg-blue-100 hover:text-blue-600 transition-colors"
-                        title="Replace file"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={handleRemoveFile}
-                        className="p-1.5 rounded-lg text-gray-400 hover:bg-red-100 hover:text-red-600 transition-colors"
-                        title="Remove file"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </Field>
-            )}
-
-            {/* Database Name — non-SQLite only */}
-            {!isSQLite && (
-              <Field label="Database Name" error={errors.database} required>
-                <div className="relative">
-                  <Database className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="my_database"
-                    value={form.database}
-                    onChange={e => setField('database', e.target.value)}
-                    className={cn(inputCls(!!errors.database), 'pl-8')}
-                  />
-                </div>
-              </Field>
-            )}
-
-            {/* Username & Password — hidden for SQLite */}
-            {!isSQLite && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Username" error={errors.username} required>
-                  <input
-                    type="text"
-                    placeholder="db_user"
-                    value={form.username}
-                    onChange={e => setField('username', e.target.value)}
-                    className={inputCls(!!errors.username)}
-                  />
-                </Field>
-                <Field label={isEditMode ? 'New Password' : 'Password'} error={errors.password} required={!isEditMode}>
+            {/* Host & Port */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <Field label="Host" error={errors.host} required>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                    <Server className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder={isEditMode ? 'Leave blank to keep current' : '••••••••'}
-                      value={form.password}
-                      onChange={e => setField('password', e.target.value)}
-                      className={cn(inputCls(!!errors.password), 'pl-8 pr-9')}
+                      type="text"
+                      placeholder="localhost or IP"
+                      value={form.host}
+                      onChange={e => setField('host', e.target.value)}
+                      className={cn(inputCls(!!errors.host), 'pl-8')}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(s => !s)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
                   </div>
                 </Field>
               </div>
-            )}
+              <Field label="Port">
+                <input
+                  type="text"
+                  placeholder={DB_DEFAULTS[form.type]?.port ?? ''}
+                  value={form.port}
+                  onChange={e => setField('port', e.target.value)}
+                  className={inputCls(false)}
+                />
+              </Field>
+            </div>
 
-            {/* SSL Toggle — hidden for SQLite */}
-            {!isSQLite && (
-              <div className="flex items-center justify-between py-3 px-4 rounded-xl bg-gray-50 border border-gray-200">
-                <div className="flex items-center gap-2.5">
-                  <div className={cn(
-                    'w-7 h-7 rounded-lg flex items-center justify-center',
-                    form.ssl ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500',
-                  )}>
-                    <Lock className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-800">SSL / TLS Encryption</div>
-                    <div className="text-xs text-gray-500">Encrypt the connection with SSL</div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setField('ssl', !form.ssl)}
-                  className={cn(
-                    'relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none',
-                    form.ssl ? 'bg-blue-600' : 'bg-gray-300',
-                  )}
-                >
-                  <span className={cn(
-                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-200',
-                    form.ssl ? 'translate-x-4.5' : 'translate-x-0.5',
-                  )} />
-                </button>
+            {/* Database Name */}
+            <Field label="Database Name" error={errors.database} required>
+              <div className="relative">
+                <Database className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="my_database"
+                  value={form.database}
+                  onChange={e => setField('database', e.target.value)}
+                  className={cn(inputCls(!!errors.database), 'pl-8')}
+                />
               </div>
-            )}
+            </Field>
+
+            {/* Username & Password */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Username" error={errors.username} required>
+                <input
+                  type="text"
+                  placeholder="db_user"
+                  value={form.username}
+                  onChange={e => setField('username', e.target.value)}
+                  className={inputCls(!!errors.username)}
+                />
+              </Field>
+              <Field label={isEditMode ? 'New Password' : 'Password'} error={errors.password} required={!isEditMode}>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={isEditMode ? 'Leave blank to keep current' : '••••••••'}
+                    value={form.password}
+                    onChange={e => setField('password', e.target.value)}
+                    className={cn(inputCls(!!errors.password), 'pl-8 pr-9')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </Field>
+            </div>
+
+            {/* SSL Toggle */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl bg-gray-50 border border-gray-200">
+              <div className="flex items-center gap-2.5">
+                <div className={cn(
+                  'w-7 h-7 rounded-lg flex items-center justify-center',
+                  form.ssl ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500',
+                )}>
+                  <Lock className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">SSL / TLS Encryption</div>
+                  <div className="text-xs text-gray-500">Encrypt the connection with SSL</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setField('ssl', !form.ssl)}
+                className={cn(
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none',
+                  form.ssl ? 'bg-blue-600' : 'bg-gray-300',
+                )}
+              >
+                <span className={cn(
+                  'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-200',
+                  form.ssl ? 'translate-x-4.5' : 'translate-x-0.5',
+                )} />
+              </button>
+            </div>
 
             {/* Test Status Banners */}
             {testStatus === 'success' && (

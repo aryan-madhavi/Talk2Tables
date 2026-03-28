@@ -15,7 +15,7 @@ const API_BASE =
 export interface ConnectionOut {
   connection_id:  string;
   name:           string;
-  db_type:        string;           // 'postgresql' | 'mysql' | 'oracle' | 'mssql' | 'sqlite'
+  db_type:        string;           // 'postgresql' | 'mysql' | 'oracle' | 'mssql'
   host:           string;
   port:           number;
   database_name:  string;

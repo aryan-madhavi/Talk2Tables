@@ -2,7 +2,7 @@
 
 // ─── DB Types ─────────────────────────────────────────────────────────────────
 
-export type DbType = 'PostgreSQL' | 'MySQL' | 'Oracle' | 'SQLite' | 'MSSQL';
+export type DbType = 'PostgreSQL' | 'MySQL' | 'Oracle' | 'MSSQL';
 
 export interface DbTypeConfig {
   port:  string;
@@ -14,35 +14,31 @@ export const DB_DEFAULTS: Record<DbType, DbTypeConfig> = {
   PostgreSQL: { port: '5432', icon: '🐘', color: 'bg-blue-50 text-blue-700 border-blue-200'   },
   MySQL:      { port: '3306', icon: '🐬', color: 'bg-orange-50 text-orange-700 border-orange-200' },
   Oracle:     { port: '1521', icon: '🔴', color: 'bg-red-50 text-red-700 border-red-200'      },
-  SQLite:     { port: '',     icon: '📦', color: 'bg-gray-50 text-gray-700 border-gray-200'   },
   MSSQL:      { port: '1433', icon: '🔷', color: 'bg-sky-50 text-sky-700 border-sky-200'      },
 };
 
 // ─── Connection Form ───────────────────────────────────────────────────────────
 
 export interface ConnectionForm {
-  name:       string;
-  type:       DbType;
-  host:       string;
-  port:       string;
-  database:   string;
-  username:   string;
-  password:   string;
-  ssl:        boolean;
-  // SQLite-specific
-  sqliteFile: File | null;
+  name:     string;
+  type:     DbType;
+  host:     string;
+  port:     string;
+  database: string;
+  username: string;
+  password: string;
+  ssl:      boolean;
 }
 
 export const EMPTY_CONNECTION_FORM: ConnectionForm = {
-  name:       '',
-  type:       'PostgreSQL',
-  host:       '',
-  port:       '5432',
-  database:   '',
-  username:   '',
-  password:   '',
-  ssl:        false,
-  sqliteFile: null,
+  name:     '',
+  type:     'PostgreSQL',
+  host:     '',
+  port:     '5432',
+  database: '',
+  username: '',
+  password: '',
+  ssl:      false,
 };
 
 export type ConnectionFormErrors = Partial<Record<keyof ConnectionForm, string>>;
@@ -56,7 +52,6 @@ const BACKEND_TYPE_TO_FORM: Record<string, DbType> = {
   postgresql: 'PostgreSQL',
   mysql:      'MySQL',
   oracle:     'Oracle',
-  sqlite:     'SQLite',
   mssql:      'MSSQL',
 };
 
@@ -67,15 +62,14 @@ export function dbConnectionToForm(db: DatabaseConnection): ConnectionForm {
     'PostgreSQL';
 
   return {
-    name:       db.name,
-    type:       formType,
-    host:       db.host,
-    port:       String(db.port) || DB_DEFAULTS[formType]?.port || '',
-    database:   db.database_name,
-    username:   db.username,
-    password:   '',
-    ssl:        db.ssl_enabled,
-    sqliteFile: null,
+    name:     db.name,
+    type:     formType,
+    host:     db.host,
+    port:     String(db.port) || DB_DEFAULTS[formType]?.port || '',
+    database: db.database_name,
+    username: db.username,
+    password: '',
+    ssl:      db.ssl_enabled,
   };
 }
 

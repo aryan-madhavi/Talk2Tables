@@ -24,7 +24,6 @@ const DB_TYPE_LABEL: Record<string, string> = {
   mysql:      'MySQL',
   oracle:     'Oracle',
   mssql:      'MSSQL',
-  sqlite:     'SQLite',
 };
 
 /** Map frontend form DbType → backend db_type string */
@@ -32,7 +31,6 @@ const FORM_TYPE_TO_BACKEND: Record<string, string> = {
   PostgreSQL: 'postgresql',
   MySQL:      'mysql',
   Oracle:     'oracle',
-  SQLite:     'sqlite',
   MSSQL:      'mssql',
 };
 

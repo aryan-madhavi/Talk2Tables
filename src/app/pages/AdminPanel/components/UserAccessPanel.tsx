@@ -15,7 +15,7 @@ import { GrantAccessDialog, GrantPayload } from './GrantAccessDialog';
 
 const DB_TYPE_LABEL: Record<string, string> = {
   postgresql: 'PostgreSQL', mysql: 'MySQL',
-  oracle: 'Oracle', sqlite: 'SQLite', mssql: 'MSSQL',
+  oracle: 'Oracle', mssql: 'MSSQL',
 };
 
 function formatDate(iso: string | null): string {

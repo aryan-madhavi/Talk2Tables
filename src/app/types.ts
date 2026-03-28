@@ -50,7 +50,7 @@ export interface DatabaseConnection {
   // ── Backend fields (ConnectionOut) ──
   connection_id:  string;
   name:           string;
-  db_type:        string;         // raw backend: 'postgresql' | 'mysql' | 'oracle' | 'sqlite'
+  db_type:        string;         // raw backend: 'postgresql' | 'mysql' | 'oracle' | 'mssql'
   host:           string;
   port:           number;
   database_name:  string;
