@@ -34,7 +34,6 @@ def _build_connection_string(conn: dict) -> str:
         "mariadb":    f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
         "postgresql": f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
         "postgres":   f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
-        "sqlite":     f"sqlite:///{database}",
         "mssql":      f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server",
         "oracle":     f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}",
     }

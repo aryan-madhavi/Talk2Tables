@@ -129,7 +129,7 @@ Written atomically via Firestore transaction; `turn_count` on the parent chat do
 |---|---|---|
 | `connection_id` | string | UUID — same as document ID |
 | `name` | string | Human-readable label (e.g. `"Production PostgreSQL"`) |
-| `db_type` | string | `postgresql` \| `mysql` \| `mssql` \| `oracle` \| `sqlite` |
+| `db_type` | string | `postgresql` \| `mysql` \| `mssql` \| `oracle` |
 | `host` | string | Hostname or IP of the database server |
 | `port` | integer | Port number |
 | `database_name` | string | Target schema/database name |

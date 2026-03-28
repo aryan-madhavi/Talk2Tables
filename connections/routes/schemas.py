@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 # ── Enum types ────────────────────────────────────────────────────────────────
 
-DbType = Literal["postgresql", "mysql", "oracle", "mssql", "sqlite"]
+DbType = Literal["postgresql", "mysql", "oracle", "mssql"]
 
 
 # ── Request schemas ───────────────────────────────────────────────────────────

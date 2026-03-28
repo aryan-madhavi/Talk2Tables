@@ -19,7 +19,6 @@ _DIALECT_LABELS: dict[str, str] = {
     "mariadb":    "MariaDB",
     "postgresql": "PostgreSQL",
     "postgres":   "PostgreSQL",
-    "sqlite":     "SQLite",
     "mssql":      "SQL Server",
     "oracle":     "Oracle",
 }
@@ -119,7 +118,6 @@ Field descriptions:
     PostgreSQL    : NOW(), INTERVAL, TO_CHAR()
     SQL Server    : GETDATE(), DATEADD(), FORMAT()
     Oracle        : SYSDATE, ADD_MONTHS(), TO_DATE()
-    SQLite        : datetime('now'), strftime()
 - The sql_query field must be a single-line string with no newlines or line breaks
 """
 
@@ -148,7 +146,7 @@ def build_system_prompt(dialect: str, user_role: str = "analyst") -> str:
     Build the full system prompt for a given database dialect and user role.
 
     Args:
-        dialect:   Detected dialect string (mysql | postgresql | sqlite | mssql | oracle)
+        dialect:   Detected dialect string (mysql | postgresql | mssql | oracle)
         user_role: RBAC role — controls which operations the LLM may attempt
 
     Returns:

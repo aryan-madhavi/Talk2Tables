@@ -46,7 +46,7 @@ class AgentState(TypedDict):
     """SQLAlchemy URL built from decrypted Firestore credentials."""
 
     db_dialect: Optional[str]
-    """Detected dialect: mysql | postgresql | sqlite | mssql | oracle | mariadb."""
+    """Detected dialect: mysql | postgresql | mssql | oracle | mariadb."""
 
     db_type: Optional[str]
     """Raw db_type field from Firestore document (e.g. 'mysql', 'postgres')."""

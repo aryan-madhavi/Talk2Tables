@@ -52,7 +52,6 @@ _DIALECT_HINTS: dict[str, str] = {
     "mariadb":    "mariadb",
     "postgresql": "postgresql",
     "postgres":   "postgresql",
-    "sqlite":     "sqlite",
     "mssql":      "mssql",
     "oracle":     "oracle",
 }
@@ -79,8 +78,7 @@ def _get_engine(connection_string: str):
     if connection_string in _engine_cache:
         return _engine_cache[connection_string]
     kwargs: dict = {"pool_pre_ping": True, "echo": False, "pool_recycle": 3600}
-    if not connection_string.lower().startswith("sqlite"):
-        kwargs["connect_args"] = {"connect_timeout": 10}
+    kwargs["connect_args"] = {"connect_timeout": 10}
     engine = create_engine(connection_string, **kwargs)
     _engine_cache[connection_string] = engine
     logger.debug(f"[SchemaTools] New engine cached (total={len(_engine_cache)})")
