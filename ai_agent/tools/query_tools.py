@@ -38,7 +38,7 @@ _full_result_lock  = threading.Lock()
 # ── Safety constants (from original sql_validator.py) ─────────────────────────
 
 _MAX_ROWS = 10_000
-_PREVIEW_ROWS = 5  # rows sent back to LLM to keep context small
+_PREVIEW_ROWS = 3  # rows sent back to LLM to keep context small
 
 _INJECTION_PATTERNS: list[re.Pattern] = [
     re.compile(r";\s*\S",              re.IGNORECASE),

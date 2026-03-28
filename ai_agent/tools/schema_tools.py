@@ -214,7 +214,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         cached = _redis_get_sync(redis_key)
         if cached is not None:
             logger.info(f"[SchemaCache] Redis HIT tables | conn={connection_id}")
-            return json.dumps(cached, indent=2)
+            return json.dumps(cached)
 
         # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
@@ -228,7 +228,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                     tables = data["tables"]
                     logger.info(f"[SchemaCache] Firestore HIT tables | conn={connection_id}")
                     _redis_set_sync(redis_key, tables, TTL_SCHEMA)
-                    return json.dumps(tables, indent=2)
+                    return json.dumps(tables)
                 logger.info(f"[SchemaCache] STALE tables | conn={connection_id}")
         except Exception as exc:
             logger.warning(f"[SchemaCache] Firestore read failed (non-fatal): {exc}")
@@ -289,7 +289,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             except Exception as exc:
                 logger.warning(f"[SchemaCache] Firestore write failed (non-fatal): {exc}")
 
-            return json.dumps(results, indent=2)
+            return json.dumps(results)
 
         except Exception as exc:
             logger.error(f"[get_schema_list] Failed: {exc}")
@@ -315,7 +315,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         cached = _redis_get_sync(redis_key)
         if cached is not None:
             logger.info(f"[SchemaCache] Redis HIT {schema_name}.{table_name} | conn={connection_id}")
-            return json.dumps(cached, indent=2)
+            return json.dumps(cached)
 
         # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
@@ -380,14 +380,18 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             result_rows = []
             for col in columns:
                 col_name = col["name"]
-                result_rows.append({
-                    "column_name":      col_name,
-                    "data_type":        str(col.get("type", "UNKNOWN")),
-                    "is_nullable":      "YES" if col.get("nullable", True) else "NO",
-                    "column_default":   str(col.get("default", "")) if col.get("default") is not None else None,
-                    "constraint_type":  "PRIMARY KEY" if col_name in pk_cols else None,
-                    "referenced_table": fk_map.get(col_name),
-                })
+                entry: dict = {
+                    "column_name": col_name,
+                    "data_type":   str(col.get("type", "UNKNOWN")),
+                    "nullable":    col.get("nullable", True),
+                }
+                if col_name in pk_cols:
+                    entry["primary_key"] = True
+                if col.get("default") is not None:
+                    entry["default"] = str(col["default"])
+                if col_name in fk_map:
+                    entry["references"] = fk_map[col_name]
+                result_rows.append(entry)
 
             if not result_rows:
                 return f"No columns found for table {schema_name}.{table_name}"

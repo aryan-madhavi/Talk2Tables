@@ -8,11 +8,13 @@ if parsing fails (mirrors n8n's retryOnFail + maxTries behaviour).
 
 Expected agent output format (from prompts.py):
 {
+  "title": "...",
   "sql_query": "SELECT ...",
   "summary": "...",
-  "numerical_insights": { "total_records": N, "aggregations": {} },
+  "total_records": N,
   "data": [...]
 }
+numerical_insights and narrative_insights are populated by Phase 2 (parallel Gemini calls in graph.py).
 """
 from __future__ import annotations
 
@@ -22,7 +24,6 @@ import decimal
 import json
 import logging
 import re
-from typing import Any
 
 from ai_agent.config import agent_config
 from ai_agent.state import AgentState
@@ -120,43 +121,20 @@ def _generate_rich_summary(
 async def _generate_narrative_insights(
     question: str,
     data: list[dict],
-    computed: dict,
 ) -> dict | None:
     """
-    Use the LLM to turn computed stats + original question into 3 plain-English insight cards.
+    Use the LLM to turn raw data + original question into 3 plain-English insight cards.
     Returns None on any failure — caller treats it as optional enrichment.
     """
-    total = computed.get("total_records", 0)
+    total = len(data)
     if total == 0 or not data:
         return None
 
-    # Build a compact stats summary (top 3 most interesting columns only)
-    aggs = computed.get("aggregations", {})
-    stat_lines: list[str] = []
-    _METRIC_HINTS = {"amount","total","count","revenue","price","cost","salary","age","score","qty","quantity","value","sales"}
-    sorted_cols = sorted(
-        aggs.items(),
-        key=lambda kv: 0 if any(h in kv[0].lower() for h in _METRIC_HINTS) else 1
-    )
-    for col, s in sorted_cols[:4]:
-        label = col.replace("_", " ")
-        if s.get("type") == "numeric":
-            stat_lines.append(
-                f"{label}: min={_fmt(s['min'])}, max={_fmt(s['max'])}, avg={_fmt(s['avg'])}, sum={_fmt(s['sum'])}"
-            )
-        else:
-            top = ", ".join(f"{e['value']} ({e['count']})" for e in s.get("most_common", [])[:3])
-            stat_lines.append(f"{label}: {s['unique_count']} unique — top: {top}")
-
-    stats_text = "\n".join(stat_lines) if stat_lines else "No aggregatable columns."
-
-    # Sample rows (first 5, values only — keep prompt short)
     sample_rows = json.dumps(data[:5], default=str)
 
     prompt = (
         f'A user asked: "{question}"\n'
         f"The database returned {total:,} record{'s' if total != 1 else ''}.\n\n"
-        f"Key statistics:\n{stats_text}\n\n"
         f"Sample data ({min(5, total)} rows):\n{sample_rows}\n\n"
         f"You are a senior data analyst presenting to a business stakeholder.\n"
         f"Write three insights using SPECIFIC numbers from the data. Plain English only — no SQL, no column names.\n"
@@ -167,8 +145,8 @@ async def _generate_narrative_insights(
     )
 
     try:
-        from ai_agent.providers import get_llm
-        llm      = get_llm()
+        from ai_agent.providers.gemini import GeminiProvider
+        llm      = GeminiProvider().get_model()
         response = await llm.ainvoke(prompt)
         text     = response.content.strip()
         start    = text.find("{")
@@ -179,64 +157,62 @@ async def _generate_narrative_insights(
         if not isinstance(result, dict):
             return None
         return {
-            "key_finding":     str(result.get("key_finding", "")),
+            "key_finding":      str(result.get("key_finding", "")),
             "business_insight": str(result.get("business_insight", "")),
-            "analyst_note":    str(result.get("analyst_note", "")),
+            "analyst_note":     str(result.get("analyst_note", "")),
         }
     except Exception as exc:
-        logger.warning(f"[NarrativeInsights] LLM call failed (non-fatal): {exc}")
+        logger.warning(f"[NarrativeInsights] Gemini call failed (non-fatal): {exc}")
         return None
 
 
-def _compute_insights(data: list[dict]) -> dict:
+async def _generate_numerical_insights(question: str, data: list[dict]) -> dict:
     """
-    Compute rich column-level statistics programmatically from the result data.
-    Far more reliable than asking the LLM to do it.
+    Gemini-powered numerical stats — returns the NumericalInsights schema consumed by the frontend.
+    Falls back to pure-Python computation if Gemini fails.
     """
     if not data:
         return {"total_records": 0, "aggregations": {}}
 
-    from collections import Counter
+    total   = len(data)
+    columns = list(data[0].keys())
+    sample  = json.dumps(data[:30], default=str)
 
-    total      = len(data)
-    columns    = list(data[0].keys())
-    aggregations: dict[str, Any] = {}
+    prompt = (
+        f'Question: "{question}"\n'
+        f"Total rows: {total:,}. Columns: {', '.join(columns)}\n"
+        f"Sample data ({min(30, total)} rows):\n{sample}\n\n"
+        "Analyze EVERY column and return ONLY valid JSON (no markdown, no explanation):\n"
+        '{"total_records": <exact int>, "aggregations": {\n'
+        '  "<col>": {"type": "numeric", "min": <n>, "max": <n>, "avg": <n>, "sum": <n>, "null_count": <n>}\n'
+        "  OR\n"
+        '  "<col>": {"type": "categorical", "unique_count": <n>, "null_count": <n>, '
+        '"most_common": [{"value": "<v>", "count": <n>}, ...]}\n'
+        "}}\n"
+        "Rules:\n"
+        "- 'categorical': IDs, codes, names, emails, dates, years, status fields, booleans, phone numbers\n"
+        "- 'numeric': true continuous measures only — amounts, prices, ages, scores, quantities\n"
+        "- most_common: top 3 values only\n"
+        "- Estimate stats from the sample; use the exact total_records value provided above"
+    )
 
-    for col in columns:
-        values   = [row.get(col) for row in data]
-        non_null = [v for v in values if v is not None and v != ""]
-        null_count = total - len(non_null)
-
-        # Try to parse as numeric (handle ints, floats, Decimal-as-string)
-        numeric_vals: list[float] = []
-        for v in non_null:
-            try:
-                numeric_vals.append(float(v))
-            except (TypeError, ValueError):
-                pass
-
-        if numeric_vals and len(numeric_vals) >= len(non_null) * 0.8:
-            total_sum = sum(numeric_vals)
-            aggregations[col] = {
-                "type":       "numeric",
-                "min":        round(min(numeric_vals), 4),
-                "max":        round(max(numeric_vals), 4),
-                "avg":        round(total_sum / len(numeric_vals), 4),
-                "sum":        round(total_sum, 4),
-                "null_count": null_count,
-            }
-        else:
-            str_vals   = [str(v) for v in non_null]
-            counts     = Counter(str_vals)
-            most_common = [{"value": v, "count": c} for v, c in counts.most_common(3)]
-            aggregations[col] = {
-                "type":         "categorical",
-                "unique_count": len(counts),
-                "null_count":   null_count,
-                "most_common":  most_common,
-            }
-
-    return {"total_records": total, "aggregations": aggregations}
+    try:
+        from ai_agent.providers.gemini import GeminiProvider
+        llm      = GeminiProvider().get_model()
+        response = await llm.ainvoke(prompt)
+        text     = response.content.strip()
+        start    = text.find("{"); end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("no JSON object found")
+        result = json.loads(text[start:end])
+        if "total_records" not in result or "aggregations" not in result:
+            raise ValueError("missing required keys")
+        result["total_records"] = total  # always use exact count
+        logger.info(f"[NumericalInsights] Gemini OK | cols={len(result['aggregations'])}")
+        return result
+    except Exception as exc:
+        logger.warning(f"[NumericalInsights] Gemini failed: {exc}")
+        return {"total_records": total, "aggregations": {}}
 
 
 def _serialize(value: Any) -> Any:
@@ -265,7 +241,7 @@ def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_KEYS = {"sql_query", "summary", "numerical_insights", "data"}
+_REQUIRED_KEYS = {"sql_query", "summary", "data"}
 
 
 def _extract_json(text: str) -> str:
@@ -308,7 +284,7 @@ async def node_output_parser(state: AgentState) -> AgentState:
         if isinstance(parsed, list):
             parsed = {
                 "sql_query": "",
-                "summary":   "",   # will be overwritten by _generate_rich_summary below
+                "summary":   "",
                 "numerical_insights": {},
                 "data": parsed,
             }
@@ -339,19 +315,10 @@ async def node_output_parser(state: AgentState) -> AgentState:
                 logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
                 # Fall back to whatever preview the LLM put in data
 
-        # Compute rich insights programmatically — much more reliable than LLM-generated ones
-        insights = _compute_insights(parsed.get("data", []))
-        parsed["numerical_insights"] = insights
-        parsed["total_records"]      = insights["total_records"]
-
-        # Replace LLM summary with a data-driven narrative
-        parsed["summary"] = _generate_rich_summary(
-            parsed.get("data", []),
-            insights,
-            parsed.get("summary", ""),
-        )
-
-        # Narrative insights deferred — use POST /query/insights endpoint on demand
+        # Phase 2 (graph.py) fills numerical_insights + narrative_insights via parallel LLM calls
+        total = len(parsed.get("data", []))
+        parsed["total_records"]      = total
+        parsed["numerical_insights"] = None
         parsed["narrative_insights"] = None
 
         # Auto-generate title if LLM omitted it
@@ -360,7 +327,7 @@ async def node_output_parser(state: AgentState) -> AgentState:
 
         logger.info(
             f"[node_output_parser] Parse OK | "
-            f"rows={insights['total_records']} | "
+            f"rows={total} | "
             f"sql={parsed.get('sql_query', '')[:80]!r}"
         )
 

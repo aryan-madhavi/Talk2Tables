@@ -1,5 +1,5 @@
 # Talk2Tables — Firestore Schema v3
-**Last updated:** 2026-03-18
+**Last updated:** 2026-03-28
 **Project:** Talk2Tables Backend (FastAPI + LangGraph)
 **Breaking changes from v2:** query_audit moved inside database_connections; schema_cache sub-collection added; message IDs changed from UUID to role-prefixed turn IDs; messages now store flat AI fields including title, query_type, status, favourited, firebase_uid, connection_id, chat_id.
 
@@ -101,7 +101,8 @@ Written atomically via Firestore transaction; `turn_count` on the parent chat do
 | `status` | string | `"success"` \| `"error"` |
 | `summary` | string | 1–2 line plain English explanation of the result |
 | `total_records` | integer | Number of rows returned |
-| `numerical_insights` | map | `{ total_records: N, aggregations: { key: value } }` |
+| `numerical_insights` | map \| null | Column-level stats: `{ total_records: N, aggregations: { col: { type, min, max, avg, sum, null_count } \| { type, unique_count, null_count, most_common } } }`. Populated by Phase 2 Gemini LLM call. `null` if Phase 2 did not run. |
+| `narrative_insights` | map \| null | Three plain-English AI insight cards: `{ key_finding, business_insight, analyst_note }`. Populated by Phase 2 Gemini LLM call. `null` if Phase 2 did not run. |
 | `data` | array of maps | Full query result rows (up to 10,000) |
 | `error_message` | string \| null | Set when status is `error`; null on success |
 | `favourited` | boolean | Whether user has starred this query; default `false` |
@@ -204,10 +205,10 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 |---|---|---|
 | `column_name` | string | Column name |
 | `data_type` | string | SQLAlchemy type string (e.g. `VARCHAR(100)`, `INTEGER`) |
-| `is_nullable` | string | `"YES"` or `"NO"` |
-| `column_default` | string \| null | Default value expression |
-| `constraint_type` | string \| null | `"PRIMARY KEY"` or null |
-| `referenced_table` | string \| null | FK target: `schema.table.column` or null |
+| `nullable` | boolean | `true` if nullable, `false` if NOT NULL |
+| `primary_key` | boolean | Present and `true` only if the column is a primary key (omitted otherwise) |
+| `default` | string | Default value expression — omitted if no default |
+| `references` | string | FK target in `schema.table.column` format — omitted if not a FK |
 
 > Cache is invalidated by `POST /api/v1/connections/{id}/schema/refresh` (db_manager+).
 > Next request after invalidation re-fetches from live DB and re-caches.
@@ -309,7 +310,10 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 ### Query — `/api/v1/*`
 | Method | Path | Role | Description |
 |---|---|---|---|
-| POST | `/query` | analyst+ | NL → SQL → results |
+| POST | `/query` | analyst+ | NL → SQL → results (blocking JSON response) |
+| POST | `/query/stream` | analyst+ | NL → SQL → results via SSE. Emits `event: progress`, `event: result`, then `event: insights` (Phase 2 parallel Gemini calls ~3s later) |
+| POST | `/query/insights` | analyst+ | Re-generate insights for a result set (`{ data, question }` → `{ numerical_insights, narrative_insights }`) |
+| GET | `/query/suggestions` | analyst+ | LLM-generated query suggestions for a connection (Redis cached 24h) |
 | GET | `/schema/{conn_id}` | analyst+ | Table list grouped by schema (stale-while-revalidate) |
 | GET | `/schema/{conn_id}/{schema}/{table}` | analyst+ | Column definitions (cache-aware) |
 | GET | `/query/history` | analyst+ | AI message history (`?limit&offset&favourites_only`) |
@@ -355,3 +359,4 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | v3.1 | 2026-03-16 | • Message IDs changed from plain hex to role-prefixed turn IDs: `u_0001`/`a_0001` <br> • `msg_count` renamed to `turn_count` on chat docs (increments +1 per turn, not +2) <br> • `title` field added to assistant messages (LLM-generated, 5–8 words) <br> • `query_type` (`SELECT`/`INSERT`/…), `status` (`success`/`error`), `favourited` fields added to assistant messages <br> • `firebase_uid`, `connection_id`, `connection_name`, `chat_id` stored on every message doc for collection group queries <br> • Schema cache served with stale-while-revalidate (instant response + background refresh) <br> • New endpoints: `POST/DELETE .../favourite`, `GET /query/history`, `GET /query/audits`, `GET /connections/{id}/stats`, `POST /auth/admin/logout/{uid}` <br> • All Firestore `.where()` calls updated to `FieldFilter` API |
 | v3.2 | 2026-03-17 | • `DELETE /users/{uid}` changed from hard-delete to soft-delete (sets `is_active=False`, preserves all Firestore data and audit history) <br> • `POST /auth/logout-all` (self logout-all) removed — use `POST /auth/logout` with no session_id <br> • `GET /query/audits` now accepts `?uid=` for admin/db_manager to view any user's logs <br> • `_tables` schema cache doc now stores `column_count` per table entry <br> • `GET /api/v1/schema/{conn_id}` response includes `columns` count on each `SchemaTable` |
 | v3.3 | 2026-03-18 | • Fixed `GET /query/audits` crash: `status` query param renamed to `status_filter` internally (URL stays `?status=`) — parameter was shadowing the `fastapi.status` module causing `AttributeError` on 500 errors <br> • Redis app-level timeout increased from 0.5s → 1.0s to reduce false-positive timeout warnings on local Redis <br> • Firestore composite index confirmed required: `audits` collection group — `firebase_uid ASC` + `created_at DESC` |
+| v3.4 | 2026-03-28 | • `narrative_insights` field added to assistant messages: `{ key_finding, business_insight, analyst_note }` — generated by Gemini LLM in Phase 2 (parallel with `numerical_insights`); `null` if Phase 2 did not run <br> • `numerical_insights` on assistant messages is now populated by Gemini LLM (Phase 2) instead of pure Python; field semantics unchanged <br> • `POST /query/stream` now emits a second SSE event `event: insights` ~3s after `event: result` carrying both `numerical_insights` and `narrative_insights` <br> • New endpoints added: `POST /query/insights` (re-generate insights on demand), `GET /query/suggestions` (LLM schema-based suggestions, Redis cached 24h) <br> • Schema cache column map updated: `is_nullable` (string) replaced by `nullable` (boolean); `constraint_type`/`column_default` replaced by sparse `primary_key`/`default`/`references` fields (omitted when not applicable) — reduces token usage in LLM prompts |

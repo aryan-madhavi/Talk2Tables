@@ -144,7 +144,7 @@ async def query(
                 chat_id           = chat_id,
                 sql_query         = final_response.get("sql_query"),
                 summary           = final_response.get("summary"),
-                row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
+                row_count         = final_response.get("total_records", 0),
                 execution_time_ms = exec_ms,
                 status            = "success" if response_type == "results" else response_type,
                 error_message     = final_response.get("error_message"),
@@ -253,6 +253,14 @@ async def query_stream(
                         "data":          [final_response],
                     }
                     yield f"event: result\ndata: {_json.dumps(envelope)}\n\n"
+                elif sse_line.startswith("event: insights\n"):
+                    import json as _json
+                    data_part = sse_line.split("data: ", 1)[1].rstrip()
+                    insights_data = _json.loads(data_part)
+                    # Merge Phase 2 insights into final_response so they are persisted
+                    final_response["narrative_insights"]  = insights_data.get("narrative_insights")
+                    final_response["numerical_insights"]  = insights_data.get("numerical_insights")
+                    yield sse_line
                 else:
                     yield sse_line
         except Exception as exc:
@@ -290,7 +298,7 @@ async def query_stream(
                         chat_id           = chat_id,
                         sql_query         = final_response.get("sql_query"),
                         summary           = final_response.get("summary"),
-                        row_count         = final_response.get("numerical_insights", {}).get("total_records", 0),
+                        row_count         = final_response.get("total_records", 0),
                         execution_time_ms = exec_ms,
                         status            = "success" if response_type == "results" else response_type,
                         error_message     = final_response.get("error_message"),
@@ -581,11 +589,13 @@ async def generate_insights(
     if not body.data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data must not be empty.")
     try:
-        from ai_agent.nodes.output_parser import _compute_insights, _generate_narrative_insights
-        computed  = _compute_insights(body.data)
-        narrative = await _generate_narrative_insights(body.question, body.data, computed)
+        from ai_agent.nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+        numerical, narrative = await asyncio.gather(
+            _generate_numerical_insights(body.question, body.data),
+            _generate_narrative_insights(body.question, body.data),
+        )
         return {
-            "numerical_insights": computed,
+            "numerical_insights": numerical,
             "narrative_insights": narrative,
         }
     except Exception as exc:

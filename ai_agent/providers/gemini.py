@@ -13,7 +13,7 @@ import os
 
 from .base import LLMProvider
 
-_DEFAULT_MODEL = "gemini-2.0-flash"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite-preview-06-17"
 
 
 class GeminiProvider(LLMProvider):

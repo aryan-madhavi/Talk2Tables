@@ -257,9 +257,10 @@ def append_messages(
                 "status":             "error" if assistant_response.get("error_message") else "success",
                 "summary":            assistant_response.get("summary", ""),
                 "total_records":      assistant_response.get("total_records", 0),
-                "numerical_insights": assistant_response.get("numerical_insights", {}),
-                "data":               assistant_response.get("data", []),
-                "error_message":      assistant_response.get("error_message", None),
+                "numerical_insights":  assistant_response.get("numerical_insights") or {},
+                "narrative_insights":  assistant_response.get("narrative_insights") or None,
+                "data":                assistant_response.get("data", []),
+                "error_message":       assistant_response.get("error_message", None),
             }
             transaction.set(msgs_col.document(_ai_msg_id(new_turn)), ai_doc)
 
