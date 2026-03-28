@@ -166,6 +166,16 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
     }
   };
 
+  // Show spinner while Phase 2 parallel insights are being generated
+  if (result.insightsLoading && !narrative && !hasStats) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
+        <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+        <p className="text-sm text-gray-500">Generating insights…</p>
+      </div>
+    );
+  }
+
   if (!narrative && !hasStats) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4 text-gray-400">
@@ -173,8 +183,8 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
           <Sparkles className="w-5 h-5 opacity-40" />
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-gray-600 mb-1">No insights yet</p>
-          <p className="text-xs text-gray-400 max-w-xs">Generate AI-powered insights from the query result.</p>
+          <p className="text-sm font-medium text-gray-600 mb-1">No insights available</p>
+          <p className="text-xs text-gray-400 max-w-xs">AI-powered insights could not be generated for this query.</p>
         </div>
         {genError && <p className="text-xs text-red-500 text-center max-w-xs">{genError}</p>}
         <button
@@ -184,7 +194,7 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
         >
           {generating
             ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-            : <><Sparkles className="w-3.5 h-3.5" /> Generate Insights</>
+            : <><Sparkles className="w-3.5 h-3.5" /> Retry</>
           }
         </button>
       </div>
@@ -213,10 +223,10 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
         </div>
       )}
 
-      {/* ── Generate button / loading when stats exist but no narrative ── */}
+      {/* ── Loading spinner while Phase 2 narrative is in flight ── */}
       {!narrative && hasStats && (
         <div className="flex flex-col items-center gap-2 py-2">
-          {generating
+          {result.insightsLoading || generating
             ? (
               <div className="flex items-center gap-2 text-sm text-blue-500">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating AI insights…
@@ -228,7 +238,7 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
                   onClick={handleGenerate}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  <Sparkles className="w-3.5 h-3.5" /> Generate AI Insights
+                  <Sparkles className="w-3.5 h-3.5" /> Retry
                 </button>
               </>
             )

@@ -88,9 +88,10 @@ export interface QueryProgressEvent {
 }
 
 export interface StreamingQueryCallbacks {
-  onProgress: (event: QueryProgressEvent) => void;
-  onResult:   (response: QueryResponse & { chat_id: string }) => void;
-  onError:    (message: string) => void;
+  onProgress:  (event: QueryProgressEvent) => void;
+  onResult:    (response: QueryResponse & { chat_id: string }) => void;
+  onInsights?: (payload: { numerical_insights: unknown; narrative_insights: unknown }) => void;
+  onError:     (message: string) => void;
 }
 
 export async function executeQueryStream(
@@ -141,6 +142,8 @@ export async function executeQueryStream(
         callbacks.onProgress(data as QueryProgressEvent);
       } else if (eventType === 'result') {
         callbacks.onResult(data as QueryResponse & { chat_id: string });
+      } else if (eventType === 'insights') {
+        callbacks.onInsights?.(data as { numerical_insights: unknown; narrative_insights: unknown });
       } else if (eventType === 'error') {
         callbacks.onError((data as { message: string }).message ?? 'Unknown error');
       }

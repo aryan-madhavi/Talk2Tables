@@ -164,6 +164,7 @@ export function useQueryExecution(selectedConnectionId: string) {
               summary:           payload.summary,
               insights:          (payload as any).numerical_insights  ?? undefined,
               narrativeInsights: (payload as any).narrative_insights  ?? undefined,
+              insightsLoading:   true,
               chartData:     (payload.data || []).slice(0, 10).map(item => {
                 const keys = Object.keys(item);
                 return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -180,6 +181,19 @@ export function useQueryExecution(selectedConnectionId: string) {
             }]);
 
             setRefreshTrigger(n => n + 1);
+          },
+          onInsights: (payload) => {
+            if (generationRef.current !== generation) return;
+            setCurrentResult(prev =>
+              prev
+                ? {
+                    ...prev,
+                    insights:          payload.numerical_insights as QueryResult['insights'],
+                    narrativeInsights: payload.narrative_insights as QueryResult['narrativeInsights'],
+                    insightsLoading:   false,
+                  }
+                : prev,
+            );
           },
           onError: (msg) => {
             if (generationRef.current !== generation) return;

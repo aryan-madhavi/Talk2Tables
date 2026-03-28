@@ -50,10 +50,11 @@ export interface QueryResult {
   columns:       string[];
   executionTime: number;
   rowCount:      number;
-  question?:         string;
-  summary?:          string;
-  insights?:         NumericalInsights;
+  question?:          string;
+  summary?:           string;
+  insights?:          NumericalInsights;
   narrativeInsights?: NarrativeInsights;
+  insightsLoading?:   boolean;
   msgId?:        string;
   chartData?:    { name: string; value: number }[];
 }
