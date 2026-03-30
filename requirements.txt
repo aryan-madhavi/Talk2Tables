@@ -29,3 +29,4 @@ psycopg2-binary>=2.9.9
 # ── Production & Protection ────────────────────────────────────
 nuitka>=2.0.0            # Source code compiler
 zstandard>=0.22.0        # Required for Nuitka onefile compression
+ordered-set>=4.1.0       # Helps Nuitka optimize the build

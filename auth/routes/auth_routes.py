@@ -6,6 +6,8 @@ from auth.core.mongo import get_database
 from core.redis_client import redis_set, redis_delete
 import uuid
 
+from .dependencies import get_current_user
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
