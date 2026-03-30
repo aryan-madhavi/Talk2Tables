@@ -1,15 +1,10 @@
 # connections/services/connection_service.py
 """
-Business logic for database connection management.
+Business logic for database connection management using MongoDB.
 
 Cache strategy:
-    READ  → check Redis first, fallback to Firestore on miss, then populate cache.
-    WRITE → write to Firestore first, then invalidate relevant cache keys.
-
-Cache keys used:
-    connection:{id}          — single connection dict   TTL: 2 min
-    connections:list         — all connections list      TTL: 2 min
-    connections:list:active  — active-only list          TTL: 2 min
+    READ  → check Redis first, fallback to MongoDB on miss, then populate cache.
+    WRITE → write to MongoDB first, then invalidate relevant cache keys.
 """
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from auth.core.firebase import get_firestore_client
+from auth.core.mongo import get_database
 from connections.core.encryption import encrypt_password, decrypt_password
 from connections.routes.schemas import CreateConnectionRequest, UpdateConnectionRequest
 from core.redis_client import redis_get, redis_set, redis_delete
@@ -40,6 +35,9 @@ def _now_iso() -> str:
 
 def _safe_connection(doc: dict) -> dict:
     """Strip password_enc before returning to any caller."""
+    if not doc: return {}
+    # Convert ObjectId if present
+    if "_id" in doc: doc["id"] = str(doc.pop("_id"))
     return {k: v for k, v in doc.items() if k != "password_enc"}
 
 
@@ -63,15 +61,16 @@ async def create_connection(
     created_by_uid: str,
 ) -> dict:
     """
-    Encrypt password and write a new connection to Firestore.
+    Encrypt password and write a new connection to MongoDB.
     Invalidates the connections list cache.
     Returns safe connection dict (no password_enc).
     """
-    db            = get_firestore_client()
+    db            = get_database()
     connection_id = str(uuid.uuid4())
     now           = _now_iso()
 
     doc = {
+        "_id":            connection_id,
         "connection_id":  connection_id,
         "name":           body.name,
         "db_type":        body.db_type,
@@ -90,7 +89,7 @@ async def create_connection(
         "last_tested_ok": None,
     }
 
-    db.collection(COLLECTION).document(connection_id).set(doc)
+    await db[COLLECTION].insert_one(doc)
     logger.info(f"[Connections] Created | id={connection_id} name={body.name} by={created_by_uid}")
 
     safe = _safe_connection(doc)
@@ -111,7 +110,7 @@ async def get_connection_by_id(connection_id: str) -> Optional[dict]:
     """
     Fetch a single connection (safe — no password_enc).
 
-    Flow: Redis → Firestore → cache result
+    Flow: Redis → MongoDB → cache result
     """
     # 1. Cache check
     cached = await redis_get(key_connection(connection_id))
@@ -119,13 +118,13 @@ async def get_connection_by_id(connection_id: str) -> Optional[dict]:
         logger.debug(f"[Cache] HIT connection:{connection_id}")
         return cached
 
-    # 2. Firestore fallback
-    db  = get_firestore_client()
-    doc = db.collection(COLLECTION).document(connection_id).get()
-    if not doc.exists:
+    # 2. MongoDB fallback
+    db  = get_database()
+    doc = await db[COLLECTION].find_one({"_id": connection_id})
+    if not doc:
         return None
 
-    safe = _safe_connection(doc.to_dict())
+    safe = _safe_connection(doc)
 
     # 3. Populate cache
     await redis_set(key_connection(connection_id), safe, TTL_CONNECTION)
@@ -141,11 +140,11 @@ async def get_connection_with_password(connection_id: str) -> Optional[dict]:
     NEVER returned in any API response.
     NOT cached — passwords must never go into Redis.
     """
-    db  = get_firestore_client()
-    doc = db.collection(COLLECTION).document(connection_id).get()
-    if not doc.exists:
+    db  = get_database()
+    doc = await db[COLLECTION].find_one({"_id": connection_id})
+    if not doc:
         return None
-    data = doc.to_dict()
+    data = doc
     data["password"] = decrypt_password(data["password_enc"])
     return data
 
@@ -154,7 +153,7 @@ async def list_connections(active_only: bool = False) -> list[dict]:
     """
     List all connections. Optionally filter to active only.
 
-    Flow: Redis → Firestore → cache result
+    Flow: Redis → MongoDB → cache result
     """
     cache_key = key_connections_list(active_only)
 
@@ -164,17 +163,14 @@ async def list_connections(active_only: bool = False) -> list[dict]:
         logger.debug(f"[Cache] HIT {cache_key}")
         return cached
 
-    # 2. Firestore fallback
-    db    = get_firestore_client()
-    query = db.collection(COLLECTION)
-
+    # 2. MongoDB fallback
+    db    = get_database()
+    query = {}
     if active_only:
-        from google.cloud.firestore_v1.base_query import FieldFilter
-        query = query.where(filter=FieldFilter("is_active", "==", True))
+        query["is_active"] = True
 
-    docs    = query.stream()
-    results = [_safe_connection(d.to_dict()) for d in docs]
-    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    cursor = db[COLLECTION].find(query).sort("created_at", -1)
+    results = [_safe_connection(d) async for d in cursor]
 
     # 3. Populate cache
     await redis_set(cache_key, results, TTL_CONNECTIONS_LIST)
@@ -192,12 +188,8 @@ async def update_connection(
     """
     Partial update. Invalidates single + list caches after write.
     """
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(connection_id)
-
-    if not ref.get().exists:
-        return None
-
+    db  = get_database()
+    
     updates: dict = {"updated_at": _now_iso()}
 
     if body.name          is not None: updates["name"]          = body.name
@@ -212,10 +204,18 @@ async def update_connection(
         updates["password_enc"] = encrypt_password(body.password)
         logger.info(f"[Connections] Password rotated | id={connection_id}")
 
-    ref.update(updates)
+    result = await db[COLLECTION].find_one_and_update(
+        {"_id": connection_id},
+        {"$set": updates},
+        return_document=True
+    )
+    
+    if not result:
+        return None
+
     logger.info(f"[Connections] Updated | id={connection_id} fields={list(updates.keys())}")
 
-    updated = _safe_connection(ref.get().to_dict())
+    updated = _safe_connection(result)
 
     # Invalidate — data changed
     await _invalidate_connection_cache(connection_id)
@@ -231,13 +231,12 @@ async def delete_connection(connection_id: str) -> bool:
     """
     Hard-delete. Invalidates all related cache keys.
     """
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(connection_id)
+    db  = get_database()
+    result = await db[COLLECTION].delete_one({"_id": connection_id})
 
-    if not ref.get().exists:
+    if result.deleted_count == 0:
         return False
 
-    ref.delete()
     logger.info(f"[Connections] Deleted | id={connection_id}")
 
     await _invalidate_connection_cache(connection_id)
@@ -273,9 +272,8 @@ def _build_connection_url(conn: dict) -> str:
 async def test_connection(connection_id: str) -> dict:
     """
     Try to open a live connection to the target database.
-    Updates last_tested_at and last_tested_ok in Firestore regardless of outcome.
+    Updates last_tested_at and last_tested_ok in MongoDB regardless of outcome.
     Returns { ok: bool, message: str }.
-    NOT cached — always live test.
     """
     import asyncio
     from datetime import datetime, timezone
@@ -295,7 +293,6 @@ async def test_connection(connection_id: str) -> dict:
     ok      = False
     message = ""
     try:
-        # Run blocking SQLAlchemy call in a thread so we don't block the event loop
         def _ping():
             engine = create_engine(url, connect_args={"connect_timeout": 10}, pool_pre_ping=True)
             with engine.connect() as cx:
@@ -307,13 +304,15 @@ async def test_connection(connection_id: str) -> dict:
         message = "Connection successful."
         logger.info(f"[Connections] Test OK | id={connection_id}")
     except Exception as exc:
-        message = str(exc).split("\n")[0]  # first line only — avoid giant stacktraces
+        message = str(exc).split("\n")[0]
         logger.warning(f"[Connections] Test FAILED | id={connection_id} | {message}")
 
     # Persist result
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(connection_id)
-    ref.update({"last_tested_at": now, "last_tested_ok": ok, "updated_at": now})
+    db  = get_database()
+    await db[COLLECTION].update_one(
+        {"_id": connection_id},
+        {"$set": {"last_tested_at": now, "last_tested_ok": ok, "updated_at": now}}
+    )
     await _invalidate_connection_cache(connection_id)
 
     return {"ok": ok, "message": message}
@@ -325,17 +324,21 @@ async def set_connection_active(connection_id: str, is_active: bool) -> Optional
     """
     Enable or disable a connection. Invalidates all related cache keys.
     """
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(connection_id)
+    db  = get_database()
+    
+    result = await db[COLLECTION].find_one_and_update(
+        {"_id": connection_id},
+        {"$set": {"is_active": is_active, "updated_at": _now_iso()}},
+        return_document=True
+    )
 
-    if not ref.get().exists:
+    if not result:
         return None
 
-    ref.update({"is_active": is_active, "updated_at": _now_iso()})
     action = "Activated" if is_active else "Deactivated"
     logger.info(f"[Connections] {action} | id={connection_id}")
 
-    updated = _safe_connection(ref.get().to_dict())
+    updated = _safe_connection(result)
 
     # Invalidate — is_active changed so both list variants are stale
     await _invalidate_connection_cache(connection_id)

@@ -1,25 +1,20 @@
 # users/services/user_service.py
 """
-Business logic for user management.
+Business logic for user management using MongoDB.
 
 Cache strategy:
-    READ  → check Redis first, fallback to Firestore on miss, populate cache.
-    WRITE → write Firestore first, then invalidate relevant cache keys.
-
-Cache keys:
-    user:{uid}    — single user dict     TTL: 5 min
-    token:{uid}   — auth token cache     invalidated on deactivate / role change / delete
-    users:list    — all users list       TTL: 2 min
+    READ  → check Redis first, fallback to MongoDB on miss, populate cache.
+    WRITE → write MongoDB first, then invalidate relevant cache keys.
 """
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-import firebase_admin.auth as fb_auth
-
-from auth.core.firebase import get_firestore_client
+from auth.core.mongo import get_database
+from auth.core.security import get_password_hash
 from users.routes.schemas import CreateUserRequest, UpdateUserRequest
 from core.redis_client import redis_get, redis_set, redis_delete
 from core.cache_keys import (
@@ -39,45 +34,42 @@ def _now_iso() -> str:
 
 
 def _safe_user(doc: dict) -> dict:
-    EXCLUDE: set = set()
+    if not doc: return {}
+    if "_id" in doc: doc["id"] = str(doc.pop("_id"))
+    EXCLUDE: set = {"password_hash"}
     return {k: v for k, v in doc.items() if k not in EXCLUDE}
 
 
-async def _invalidate_user_cache(uid: str) -> None:
+async def _invalidate_user_cache(user_id: str) -> None:
     """
     Wipe all cache entries for a user.
-    MUST be called after any mutation — role change and deactivate
-    are security-critical: stale cache = wrong permissions.
     """
     await redis_delete(
-        key_user(uid),
-        key_token(uid),       # force re-fetch on user's next request
+        key_user(user_id),
+        key_token(user_id),
         key_users_list(),
     )
-    logger.debug(f"[Cache] Invalidated user keys — uid={uid}")
+    logger.debug(f"[Cache] Invalidated user keys — user_id={user_id}")
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
 async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
-    db = get_firestore_client()
+    db = get_database()
 
-    try:
-        fb_user = fb_auth.create_user(
-            email=body.email,
-            password=body.password,
-            display_name=body.display_name or "",
-            email_verified=False,
-        )
-    except fb_auth.EmailAlreadyExistsError:
+    # Check for existing email
+    existing = await db[COLLECTION].find_one({"email": body.email})
+    if existing:
         raise ValueError(f"Email '{body.email}' is already registered.")
 
-    uid = fb_user.uid
-    now = _now_iso()
+    user_id = str(uuid.uuid4())
+    now     = _now_iso()
 
     doc = {
-        "firebase_uid":     uid,
+        "_id":              user_id,
+        "firebase_uid":     user_id, # Compatibility
         "email":            body.email,
+        "password_hash":    get_password_hash(body.password),
         "display_name":     body.display_name,
         "photo_url":        None,
         "role":             body.role,
@@ -88,13 +80,13 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
         "last_login_at":    None,
     }
 
-    db.collection(COLLECTION).document(uid).set(doc)
-    logger.info(f"[Users] Created | uid={uid} email={body.email} role={body.role} by={created_by_uid}")
+    await db[COLLECTION].insert_one(doc)
+    logger.info(f"[Users] Created | user_id={user_id} email={body.email} role={body.role} by={created_by_uid}")
 
     safe = _safe_user(doc)
 
     # Cache the new user, bust list cache
-    await redis_set(key_user(uid), safe, TTL_USER)
+    await redis_set(key_user(user_id), safe, TTL_USER)
     await redis_delete(key_users_list())
 
     return safe
@@ -102,44 +94,40 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
-async def get_user_by_uid(uid: str) -> Optional[dict]:
-    """Flow: Redis → Firestore → populate cache"""
-    cached = await redis_get(key_user(uid))
+async def get_user_by_uid(user_id: str) -> Optional[dict]:
+    """Flow: Redis → MongoDB → populate cache"""
+    cached = await redis_get(key_user(user_id))
     if cached:
-        logger.debug(f"[Cache] HIT user:{uid}")
+        logger.debug(f"[Cache] HIT user:{user_id}")
         return cached
 
-    db  = get_firestore_client()
-    doc = db.collection(COLLECTION).document(uid).get()
-    if not doc.exists:
+    db  = get_database()
+    doc = await db[COLLECTION].find_one({"_id": user_id})
+    if not doc:
         return None
 
-    safe = _safe_user(doc.to_dict())
-    await redis_set(key_user(uid), safe, TTL_USER)
-    logger.debug(f"[Cache] MISS user:{uid} — cached {TTL_USER}s")
+    safe = _safe_user(doc)
+    await redis_set(key_user(user_id), safe, TTL_USER)
+    logger.debug(f"[Cache] MISS user:{user_id} — cached {TTL_USER}s")
     return safe
 
 
 async def list_users(active_only: bool = False) -> list[dict]:
     """
-    Flow: Redis → Firestore → populate cache.
-    Full list is cached; active filter applied in Python on cache hit.
+    Flow: Redis → MongoDB → populate cache.
     """
     cached = await redis_get(key_users_list())
     if cached:
         logger.debug("[Cache] HIT users:list")
         return [u for u in cached if u.get("is_active")] if active_only else cached
 
-    db    = get_firestore_client()
-    query = db.collection(COLLECTION)
-
+    db    = get_database()
+    query = {}
     if active_only:
-        from google.cloud.firestore_v1.base_query import FieldFilter
-        query = query.where(filter=FieldFilter("is_active", "==", True))
+        query["is_active"] = True
 
-    docs    = query.stream()
-    results = [_safe_user(d.to_dict()) for d in docs]
-    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    cursor  = db[COLLECTION].find(query).sort("created_at", -1)
+    results = [_safe_user(d) async for d in cursor]
 
     await redis_set(key_users_list(), results, TTL_USERS_LIST)
     logger.debug(f"[Cache] MISS users:list — cached {len(results)} users")
@@ -148,118 +136,108 @@ async def list_users(active_only: bool = False) -> list[dict]:
 
 # ── Update role ───────────────────────────────────────────────────────────────
 
-async def update_user_role(uid: str, new_role: str, changed_by_uid: str) -> Optional[dict]:
+async def update_user_role(user_id: str, new_role: str, changed_by_uid: str) -> Optional[dict]:
     """
-    SECURITY: invalidates token cache immediately — the user's next
-    request picks up the new role without requiring re-login.
+    SECURITY: invalidates token cache immediately.
     """
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(uid)
+    db  = get_database()
+    
+    result = await db[COLLECTION].find_one_and_update(
+        {"_id": user_id},
+        {"$set": {"role": new_role}},
+        return_document=True
+    )
 
-    if not ref.get().exists:
+    if not result:
         return None
 
-    ref.update({"role": new_role})
+    logger.info(f"[Users] Role updated | user_id={user_id} new_role={new_role} by={changed_by_uid}")
 
-    try:
-        fb_auth.set_custom_user_claims(uid, {"role": new_role})
-    except Exception as e:
-        logger.warning(f"[Users] Custom claim sync failed uid={uid}: {e}")
-
-    logger.info(f"[Users] Role updated | uid={uid} new_role={new_role} by={changed_by_uid}")
-
-    safe = _safe_user(ref.get().to_dict())
+    safe = _safe_user(result)
 
     # Invalidate first, then re-populate with fresh data
-    await _invalidate_user_cache(uid)
-    await redis_set(key_user(uid), safe, TTL_USER)
+    await _invalidate_user_cache(user_id)
+    await redis_set(key_user(user_id), safe, TTL_USER)
 
     return safe
 
 
 # ── Update profile ────────────────────────────────────────────────────────────
 
-async def update_user(uid: str, body: UpdateUserRequest) -> Optional[dict]:
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(uid)
-
-    if not ref.get().exists:
-        return None
-
+async def update_user(user_id: str, body: UpdateUserRequest) -> Optional[dict]:
+    db  = get_database()
+    
     updates: dict = {}
     if body.display_name is not None:
         updates["display_name"] = body.display_name
-        try:
-            fb_auth.update_user(uid, display_name=body.display_name)
-        except Exception as e:
-            logger.warning(f"[Users] display_name Firebase sync failed uid={uid}: {e}")
 
     if body.is_active is not None:
         updates["is_active"] = body.is_active
 
     if updates:
-        ref.update(updates)
-        logger.info(f"[Users] Updated | uid={uid} fields={list(updates.keys())}")
+        result = await db[COLLECTION].find_one_and_update(
+            {"_id": user_id},
+            {"$set": updates},
+            return_document=True
+        )
+        if not result:
+            return None
+        logger.info(f"[Users] Updated | user_id={user_id} fields={list(updates.keys())}")
+        safe = _safe_user(result)
+    else:
+        doc = await db[COLLECTION].find_one({"_id": user_id})
+        if not doc:
+            return None
+        safe = _safe_user(doc)
 
-    safe = _safe_user(ref.get().to_dict())
-
-    await _invalidate_user_cache(uid)
-    await redis_set(key_user(uid), safe, TTL_USER)
+    await _invalidate_user_cache(user_id)
+    await redis_set(key_user(user_id), safe, TTL_USER)
 
     return safe
 
 
 # ── Activate / Deactivate ─────────────────────────────────────────────────────
 
-async def set_user_active(uid: str, is_active: bool, changed_by_uid: str) -> Optional[dict]:
+async def set_user_active(user_id: str, is_active: bool, changed_by_uid: str) -> Optional[dict]:
     """
-    SECURITY: invalidates token cache — a deactivated user is blocked
-    immediately on their next request without waiting for token expiry.
+    SECURITY: invalidates token cache.
     """
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(uid)
+    db  = get_database()
+    
+    result = await db[COLLECTION].find_one_and_update(
+        {"_id": user_id},
+        {"$set": {"is_active": is_active}},
+        return_document=True
+    )
 
-    if not ref.get().exists:
+    if not result:
         return None
 
-    ref.update({"is_active": is_active})
-
-    try:
-        fb_auth.update_user(uid, disabled=not is_active)
-    except Exception as e:
-        logger.warning(f"[Users] Firebase disabled sync failed uid={uid}: {e}")
-
     action = "Activated" if is_active else "Deactivated"
-    logger.info(f"[Users] {action} | uid={uid} by={changed_by_uid}")
+    logger.info(f"[Users] {action} | user_id={user_id} by={changed_by_uid}")
 
-    safe = _safe_user(ref.get().to_dict())
+    safe = _safe_user(result)
 
-    # CRITICAL: bust token cache — deactivated user must be blocked NOW
-    await _invalidate_user_cache(uid)
-    await redis_set(key_user(uid), safe, TTL_USER)
+    # CRITICAL: bust token cache
+    await _invalidate_user_cache(user_id)
+    await redis_set(key_user(user_id), safe, TTL_USER)
 
     return safe
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
-async def delete_user(uid: str, deleted_by_uid: str) -> bool:
-    db  = get_firestore_client()
-    ref = db.collection(COLLECTION).document(uid)
+async def delete_user(user_id: str, deleted_by_uid: str) -> bool:
+    db  = get_database()
+    
+    result = await db[COLLECTION].delete_one({"_id": user_id})
 
-    if not ref.get().exists:
+    if result.deleted_count == 0:
         return False
 
-    ref.delete()
-
-    try:
-        fb_auth.delete_user(uid)
-    except Exception as e:
-        logger.warning(f"[Users] Firebase Auth delete failed uid={uid}: {e}")
-
-    logger.info(f"[Users] Hard deleted | uid={uid} by={deleted_by_uid}")
+    logger.info(f"[Users] Hard deleted | user_id={user_id} by={deleted_by_uid}")
 
     # Wipe all traces
-    await _invalidate_user_cache(uid)
+    await _invalidate_user_cache(user_id)
 
     return True

@@ -1,13 +1,3 @@
-"""
-Talk2Tables — FastAPI Application Entry Point
-=============================================
-Storage: Firebase Auth + Firestore (NO PostgreSQL, no SQLAlchemy)
-Auth:    Firebase Service Account (verify_id_token + create_custom_token)
-Cache:   Redis (optional — set REDIS_URL in .env to enable)
-
-Run (dev):        uvicorn main:app --reload --port 8000
-Run (production): uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
-"""
 from __future__ import annotations
 
 import logging
@@ -28,7 +18,8 @@ load_dotenv()
 
 from auth import auth_router
 from auth.core.config import settings
-from auth.core.firebase import get_firebase_app, get_firestore_client
+# Updated Import: Firebase replaced by MongoDB
+from auth.core.mongo import connect_to_mongo, close_mongo_connection
 from connections import connections_router
 from users import users_router
 from access import access_router
@@ -53,33 +44,25 @@ async def lifespan(app: FastAPI):
     logger.info("  Talk2Tables — Starting up")
     logger.info("=" * 60)
 
-    # 1. Initialise Firebase Admin SDK (validates Service Account credentials)
+    # 1. Initialize MongoDB connection (Replaces Firebase)
     try:
-        get_firebase_app()
-        logger.info("✅  Firebase Admin SDK ready (Service Account loaded)")
+        await connect_to_mongo()
+        logger.info("✅  MongoDB connection established")
     except Exception as exc:
-        logger.error(f"❌  Firebase Admin SDK failed: {exc}")
-        raise   # Fatal — cannot run without Service Account
+        logger.error(f"❌  MongoDB connection failed: {exc}")
+        raise   # Fatal — cannot run without database
 
-    # 2. Ping Firestore to confirm connectivity
-    try:
-        get_firestore_client()
-        logger.info("✅  Firestore client ready")
-    except Exception as exc:
-        logger.error(f"❌  Firestore client failed: {exc}")
-        raise   # Fatal — all user/session data is in Firestore
-
-    # 3. Redis cache (optional — non-fatal if unavailable)
+    # 2. Redis cache (optional — non-fatal if unavailable)
     try:
         await init_redis()
         if settings.redis_url:
             logger.info("✅  Redis cache connected")
         else:
-            logger.info("ℹ️   Redis not configured (REDIS_URL not set) — all reads hit Firestore")
+            logger.info("ℹ️   Redis not configured (REDIS_URL not set) — all reads hit MongoDB")
     except Exception as exc:
         logger.warning(f"⚠️   Redis init failed (non-fatal): {exc}")
 
-    # 4. Optional: pre-compile the LangGraph agent
+    # 3. Optional: pre-compile the LangGraph agent
     try:
         from ai_agent import get_agent  # type: ignore
         get_agent()
@@ -95,6 +78,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────
+    await close_mongo_connection()
     await close_redis()
     logger.info("Talk2Tables — Shutting down gracefully.")
 
@@ -182,12 +166,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-app.include_router(auth_router)         # /api/v1/auth/*
-app.include_router(connections_router)  # /api/v1/connections/*
-app.include_router(users_router)        # /api/v1/users/*
-app.include_router(access_router)       # /api/v1/access-grants/*
-app.include_router(query_router)        # /api/v1/query, /api/v1/schema/*
-app.include_router(chat_router)         # /api/v1/chat/*
+app.include_router(auth_router)         
+app.include_router(connections_router)  
+app.include_router(users_router)        
+app.include_router(access_router)       
+app.include_router(query_router)        
+app.include_router(chat_router)         
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
@@ -198,19 +182,8 @@ async def health():
 
 @app.get("/health/redis", tags=["system"])
 async def health_redis():
-    """
-    Ping Redis and return its health status.
-
-    Response shape:
-      { status, latency_ms, url, message }
-
-    - status "ok"             — Redis reachable, PING returned PONG
-    - status "error"          — configured but unreachable or timed out
-    - status "not_configured" — REDIS_URL env var not set
-    """
     return await redis_health()
 
 @app.get("/", tags=["system"])
 async def root():
     return {"message": "Talk2Tables API running. See /docs", "docs": "/docs"}
-

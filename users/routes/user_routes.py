@@ -1,6 +1,6 @@
 # users/routes/user_routes.py
 """
-User management endpoints.
+User management endpoints (On-Premise).
 
 Role requirements per endpoint:
   GET  /users              — db_manager+ (view users)
@@ -51,9 +51,8 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Create a new user",
     description=(
-        "Admin creates a user in Firebase Auth + Firestore. "
+        "Admin creates a user in the local database. "
         "Role defaults to 'analyst'. "
-        "User should change their password after first login."
     ),
 )
 async def create_user_route(
@@ -62,10 +61,10 @@ async def create_user_route(
 ):
     logger.info(
         f"[POST /users] email={body.email} role={body.role} "
-        f"by={current_user['firebase_uid']}"
+        f"by={current_user['uid']}"
     )
     try:
-        user = await create_user(body, created_by_uid=current_user["firebase_uid"])
+        user = await create_user(body, created_by_uid=current_user["uid"])
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     return user
@@ -136,8 +135,8 @@ async def update_user_route(
     response_model=UserOut,
     summary="Change a user's role",
     description=(
-        "Admin only. Updates role in Firestore AND sets Firebase custom claim "
-        "so the new role is reflected in the next ID token refresh."
+        "Admin only. Updates role in the local database. "
+        "Role change is reflected in the next access token issuance."
     ),
 )
 async def update_role_route(
@@ -146,7 +145,7 @@ async def update_role_route(
     current_user: dict = Depends(require_admin),
 ):
     # Prevent admin from demoting themselves
-    if uid == current_user["firebase_uid"] and body.role != "admin":
+    if uid == current_user["uid"] and body.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot change your own role.",
@@ -154,12 +153,12 @@ async def update_role_route(
 
     logger.info(
         f"[PATCH /users/{uid}/role] new_role={body.role} "
-        f"by={current_user['firebase_uid']}"
+        f"by={current_user['uid']}"
     )
     user = await update_user_role(
         uid,
         new_role=body.role,
-        changed_by_uid=current_user["firebase_uid"],
+        changed_by_uid=current_user["uid"],
     )
     if not user:
         raise HTTPException(
@@ -181,7 +180,7 @@ async def activate_user_route(
     current_user: dict = Depends(require_admin),
 ):
     user = await set_user_active(
-        uid, is_active=True, changed_by_uid=current_user["firebase_uid"]
+        uid, is_active=True, changed_by_uid=current_user["uid"]
     )
     if not user:
         raise HTTPException(
@@ -198,8 +197,8 @@ async def activate_user_route(
     response_model=UserOut,
     summary="Deactivate a user",
     description=(
-        "Disables the user in Firebase Auth and sets is_active=False in Firestore. "
-        "User immediately loses access. Preferred over hard delete."
+        "Deactivates the user in the local database. "
+        "User immediately loses access."
     ),
 )
 async def deactivate_user_route(
@@ -207,14 +206,14 @@ async def deactivate_user_route(
     current_user: dict = Depends(require_admin),
 ):
     # Prevent self-deactivation
-    if uid == current_user["firebase_uid"]:
+    if uid == current_user["uid"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot deactivate your own account.",
         )
 
     user = await set_user_active(
-        uid, is_active=False, changed_by_uid=current_user["firebase_uid"]
+        uid, is_active=False, changed_by_uid=current_user["uid"]
     )
     if not user:
         raise HTTPException(
@@ -231,23 +230,22 @@ async def deactivate_user_route(
     response_model=UserOut,
     summary="Delete a user (admin only)",
     description=(
-        "Soft-deletes the user by setting is_active=False and disabling them in Firebase Auth. "
+        "Soft-deletes the user by setting is_active=False. "
         "All audit history and data are preserved. "
-        "Use PATCH /{uid}/activate to restore access."
     ),
 )
 async def delete_user_route(
     uid: str,
     current_user: dict = Depends(require_admin),
 ):
-    if uid == current_user["firebase_uid"]:
+    if uid == current_user["uid"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot delete your own account.",
         )
 
-    logger.info(f"[DELETE /users/{uid}] soft-delete by={current_user['firebase_uid']}")
-    user = await set_user_active(uid, is_active=False, changed_by_uid=current_user["firebase_uid"])
+    logger.info(f"[DELETE /users/{uid}] soft-delete by={current_user['uid']}")
+    user = await set_user_active(uid, is_active=False, changed_by_uid=current_user["uid"])
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

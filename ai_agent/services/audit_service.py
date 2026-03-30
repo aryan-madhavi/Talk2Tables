@@ -1,17 +1,17 @@
 # ai_agent/services/audit_service.py
 """
-Query Audit Service — append-only writes to Firestore.
+Query Audit Service — append-only writes to MongoDB.
 
-Firestore path: database_connections/{connection_id}/audits/{audit_id}
+MongoDB Collection: audits
 
-Queries are scoped under their connection so admins can review per-DB activity.
+Queries are stored with connection_id so admins can review per-DB activity.
 
 Fields per audit doc:
-    audit_id, firebase_uid, connection_id, chat_id,
+    audit_id, user_id, connection_id, chat_id,
     sql_query, summary, row_count, execution_time_ms,
     status ("results" | "error"), error_message, created_at
 
-IMPORTANT: Append-only — never call .update() or .delete() on audit documents.
+IMPORTANT: Append-only — never update or delete audit records.
 """
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from auth.core.mongo import get_database
 
-_CONNECTIONS_COL = "database_connections"
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -30,7 +30,7 @@ def _now_iso() -> str:
 
 
 async def log_query(
-    firebase_uid:      str,
+    user_id:           str,
     connection_id:     str,
     chat_id:           str,
     sql_query:         Optional[str],
@@ -41,9 +41,9 @@ async def log_query(
     error_message:     Optional[str] = None,
 ) -> str:
     """
-    Append a query record under database_connections/{connection_id}/audits/{audit_id}.
+    Append a query record to the 'audits' collection.
 
-    Non-fatal — any Firestore error is logged but NOT raised.
+    Non-fatal — any MongoDB error is logged but NOT raised.
 
     Returns:
         The generated audit_id string, or empty string on failure.
@@ -51,7 +51,8 @@ async def log_query(
     audit_id = str(uuid.uuid4())
     doc = {
         "audit_id":          audit_id,
-        "firebase_uid":      firebase_uid,
+        "user_id":           user_id,
+        "firebase_uid":      user_id, # Compatibility field
         "connection_id":     connection_id,
         "chat_id":           chat_id,
         "sql_query":         sql_query or "",
@@ -64,18 +65,16 @@ async def log_query(
     }
 
     try:
-        from auth.core.firebase import get_firestore_client
-        db = get_firestore_client()
-        (
-            db.collection(_CONNECTIONS_COL)
-              .document(connection_id)
-              .collection("audits")
-              .document(audit_id)
-              .set(doc)
-        )
+        db = get_database()
+        if db is None:
+            logger.warning("[AuditService] Database not initialized — skipping audit log.")
+            return ""
+            
+        await db["audits"].insert_one(doc)
+        
         logger.info(
             f"[AuditService] Logged | audit_id={audit_id} "
-            f"status={status} rows={row_count} uid={firebase_uid}"
+            f"status={status} rows={row_count} uid={user_id}"
         )
         return audit_id
     except Exception as exc:

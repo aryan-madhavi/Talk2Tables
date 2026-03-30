@@ -1,272 +1,47 @@
 # auth/routes/auth_routes.py
-"""
-Auth endpoints — Firebase Service Account + Firestore, no PostgreSQL.
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from auth.core.security import verify_password, create_access_token, create_refresh_token
+from auth.core.mongo import get_database
+from core.redis_client import redis_set, redis_delete
+import uuid
 
-  POST /api/v1/auth/login          verify Firebase ID token → return custom token
-  POST /api/v1/auth/register       same flow as login (Firebase handles signup client-side)
-  POST /api/v1/auth/logout                   revoke session + Firebase refresh tokens
-  POST /api/v1/auth/admin/logout/{uid}       force-logout any user (admin only)
-  POST /api/v1/auth/token-active             check if token + Firestore session are valid
-  GET  /api/v1/auth/me             current user profile from Firestore
-  GET  /api/v1/auth/sessions       list active Firestore sessions
+router = APIRouter(prefix="/auth", tags=["auth"])
 
-──────────────────────────────────────────────────────────────────────
-Frontend flow:
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
-  import { getAuth, signInWithEmailAndPassword, signInWithCustomToken } from "firebase/auth"
-  const auth = getAuth()
-
-  // 1. Sign in with Firebase SDK (client-side — no server involved yet)
-  const { user: fbUser } = await signInWithEmailAndPassword(auth, email, password)
-  const idToken = await fbUser.getIdToken()
-
-  // 2. Send Firebase ID token to our backend
-  const res = await fetch("/api/v1/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ firebase_id_token: idToken })
-  })
-  const { custom_token, user, session_id } = await res.json()
-
-  // 3. Exchange custom token for fresh Firebase ID token
-  //    (new token contains our role claim embedded by Service Account)
-  const { user: refreshedUser } = await signInWithCustomToken(auth, custom_token)
-  const freshIdToken = await refreshedUser.getIdToken()
-
-  // 4. Use freshIdToken for all API calls:
-  //    Authorization: Bearer <freshIdToken>
-
-  // 5. Auto-refresh before expiry (Firebase SDK handles this):
-  //    const freshIdToken = await auth.currentUser.getIdToken(true)
-──────────────────────────────────────────────────────────────────────
-"""
-import logging
-from typing import List
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-
-from auth.services.auth_service import (
-    login,
-    check_token_active,
-    logout,
-    logout_all,
-    update_profile,
-    revoke_single_session,
-    get_all_sessions,
-)
-from auth.routes.dependencies import get_current_user, require_admin
-from auth.routes.schemas import (
-    FirebaseTokenRequest,
-    LoginResponse,
-    LogoutRequest,
-    MeResponse,
-    MessageResponse,
-    SessionOut,
-    TokenActiveRequest,
-    TokenActiveResponse,
-    UpdateProfileRequest,
-)
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
-
-
-# ── POST /api/v1/auth/login ───────────────────────────────────────────────────
-
-@router.post(
-    "/login",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Login — verify Firebase ID token, return Service Account custom token",
-)
-@limiter.limit("10/minute")
-async def login_route(body: FirebaseTokenRequest, request: Request):
-    try:
-        result = await login(
-            id_token    = body.firebase_id_token,
-            device_info = request.headers.get("User-Agent", "")[:512],
-            ip_address  = request.client.host if request.client else "",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
-
-    logger.info(f"[POST /auth/login] email={result['user']['email']}")
-    return result
-
-
-# ── POST /api/v1/auth/register ────────────────────────────────────────────────
-
-@router.post(
-    "/register",
-    response_model=LoginResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register — client creates Firebase account, server upserts Firestore doc",
-    description=(
-        "Client calls createUserWithEmailAndPassword() in Firebase SDK, "
-        "then sends the ID token here. Server upserts the Firestore user doc "
-        "and returns a custom token. Functionally identical to /login."
-    ),
-)
-@limiter.limit("5/minute")
-async def register_route(body: FirebaseTokenRequest, request: Request):
-    try:
-        result = await login(
-            id_token    = body.firebase_id_token,
-            device_info = request.headers.get("User-Agent", "")[:512],
-            ip_address  = request.client.host if request.client else "",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
-
-    logger.info(f"[POST /auth/register] email={result['user']['email']}")
-    return result
-
-
-# ── POST /api/v1/auth/token-active ───────────────────────────────────────────
-
-@router.post(
-    "/token-active",
-    response_model=TokenActiveResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Check token + Firestore session validity (never raises 401)",
-)
-async def token_active_route(body: TokenActiveRequest):
-    result = await check_token_active(body.firebase_id_token)
-    logger.info(f"[POST /auth/token-active] active={result.get('active')} uid={result.get('uid')}")
-    return result
-
-
-# ── POST /api/v1/auth/logout ──────────────────────────────────────────────────
-
-@router.post(
-    "/logout",
-    response_model=MessageResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Logout — revoke Firestore session + Firebase refresh tokens",
-)
-async def logout_route(
-    body: LogoutRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    await logout(
-        firebase_uid = current_user["firebase_uid"],
-        session_id   = body.session_id,
-    )
-    scope = f"session {body.session_id}" if body.session_id else "all sessions"
-    logger.info(f"[POST /auth/logout] uid={current_user['firebase_uid']} scope={scope}")
-    return {"message": f"Logged out ({scope})."}
-
-
-# ── POST /api/v1/auth/admin/logout/{uid} ─────────────────────────────────────
-
-@router.post(
-    "/admin/logout/{target_uid}",
-    response_model=MessageResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Force-logout any user (admin only)",
-    description=(
-        "Revokes all Firestore sessions and Firebase refresh tokens for the target user. "
-        "Their current tokens will stop working on the next API call. "
-        "Requires admin role."
-    ),
-)
-async def admin_force_logout(
-    target_uid:   str,
-    current_user: dict = Depends(require_admin),
-):
-    count = await logout_all(target_uid)
-    logger.info(
-        f"[POST /auth/admin/logout/{target_uid}] "
-        f"forced by admin={current_user['firebase_uid']} sessions_revoked={count}"
-    )
-    return {"message": f"User {target_uid} force-logged out ({count} session(s) revoked)."}
-
-
-# ── GET /api/v1/auth/me ───────────────────────────────────────────────────────
-
-@router.get(
-    "/me",
-    response_model=MeResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Current user profile from Firestore",
-)
-async def me_route(current_user: dict = Depends(get_current_user)):
+@router.post("/login")
+async def login(request: LoginRequest):
+    db = get_database()
+    user = await db["users"].find_one({"email": request.email})
+    
+    if not user or not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+        
+    user_id = str(user["_id"])
+    access_token = create_access_token(subject=user_id, role=user.get("role", "analyst"))
+    refresh_token = create_refresh_token(subject=user_id)
+    
+    # Store refresh token in Redis for session tracking/revocation
+    session_id = str(uuid.uuid4())
+    await redis_set(f"session:{user_id}:{session_id}", refresh_token, ttl_seconds=604800) # 7 days
+    
     return {
-        "firebase_uid": current_user["firebase_uid"],
-        "email":        current_user["email"],
-        "display_name": current_user.get("display_name"),
-        "photo_url":    current_user.get("photo_url"),
-        "role":         current_user["role"],
-        "email_verified": True,
-        "is_active":    current_user["is_active"],
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "uid": user_id,
+            "email": user["email"],
+            "role": user.get("role", "analyst")
+        }
     }
 
-
-# ── PATCH /api/v1/auth/me ─────────────────────────────────────────────────────
-
-@router.patch(
-    "/me",
-    response_model=MeResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Update current user's display name",
-)
-async def update_me_route(
-    body:         UpdateProfileRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    updated = await update_profile(current_user["firebase_uid"], body.display_name)
-    logger.info(f"[PATCH /auth/me] uid={current_user['firebase_uid']} display_name={body.display_name!r}")
-    return {
-        "firebase_uid":   updated["firebase_uid"],
-        "email":          updated["email"],
-        "display_name":   updated.get("display_name"),
-        "photo_url":      updated.get("photo_url"),
-        "role":           updated["role"],
-        "email_verified": updated.get("email_verified", True),
-        "is_active":      updated["is_active"],
-    }
-
-
-# ── GET /api/v1/auth/sessions ─────────────────────────────────────────────────
-
-@router.get(
-    "/sessions",
-    response_model=List[SessionOut],
-    status_code=status.HTTP_200_OK,
-    summary="List active Firestore sessions for current user",
-)
-async def sessions_route(current_user: dict = Depends(get_current_user)):
-    sessions = await get_all_sessions(current_user["firebase_uid"])
-    return sessions
-
-
-# ── DELETE /api/v1/auth/sessions/{session_id} ─────────────────────────────────
-
-@router.delete(
-    "/sessions/{session_id}",
-    response_model=MessageResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Revoke a specific session (does not affect other active sessions)",
-    description=(
-        "Marks the Firestore session as revoked. The device using that session will "
-        "be denied on its next API call. Other sessions and Firebase refresh tokens "
-        "are NOT affected — this is a targeted single-device sign-out."
-    ),
-)
-async def revoke_session_route(
-    session_id:   str,
-    current_user: dict = Depends(get_current_user),
-):
-    revoked = await revoke_single_session(current_user["firebase_uid"], session_id)
-    if not revoked:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session '{session_id}' not found or already revoked.",
-        )
-    logger.info(f"[DELETE /auth/sessions/{session_id}] uid={current_user['firebase_uid']}")
-    return {"message": f"Session {session_id} revoked."}
+@router.post("/logout")
+async def logout(user: dict = Depends(get_current_user)):
+    # In a full implementation, you would pass the specific session_id to delete
+    # Or delete all sessions for the user to force global logout
+    await redis_delete(f"session:{user['uid']}:*")
+    return {"message": "Logged out successfully"}

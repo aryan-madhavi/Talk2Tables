@@ -3,21 +3,21 @@
 Central registry for ALL Redis cache keys and TTLs.
 
 Naming convention:
-    token:{firebase_uid}              → decoded Firebase token dict
-    user:{firebase_uid}               → UserOut dict
+    token:{user_id}              → decoded JWT token dict
+    user:{user_id}               → UserOut dict
     users:list                        → list of all users
     connection:{connection_id}        → single ConnectionOut dict
     connections:list                  → list of all connections
     connections:list:active           → list of active-only connections
-    access:{firebase_uid}:{conn_id}   → single AccessGrantOut dict
-    access:user:{firebase_uid}        → list of all grants for a user
+    access:{user_id}:{conn_id}   → single AccessGrantOut dict
+    access:user:{user_id}        → list of all grants for a user
 """
 from __future__ import annotations
 
 # ── TTLs (seconds) ────────────────────────────────────────────────────────────
 
-# Token: Firebase tokens are valid for 1 hour — cache just under that
-TTL_TOKEN      = 55 * 60        # 55 minutes
+# Token: Access tokens are short-lived — cache just under expiry
+TTL_TOKEN      = 25 * 60        # 25 minutes (if expiry is 30m)
 
 # Users: role and is_active rarely change — 5 min is safe
 TTL_USER       = 5  * 60        # 5 minutes
@@ -34,11 +34,11 @@ TTL_ACCESS_USER_GRANTS = 2 * 60  # 2 minutes
 
 # ── Key builders ──────────────────────────────────────────────────────────────
 
-def key_token(firebase_uid: str) -> str:
-    return f"token:{firebase_uid}"
+def key_token(user_id: str) -> str:
+    return f"token:{user_id}"
 
-def key_user(firebase_uid: str) -> str:
-    return f"user:{firebase_uid}"
+def key_user(user_id: str) -> str:
+    return f"user:{user_id}"
 
 def key_users_list() -> str:
     return "users:list"
@@ -52,14 +52,14 @@ def key_connections_list(active_only: bool = False) -> str:
 def key_access_grant(access_id: str) -> str:
     return f"access:grant:{access_id}"
 
-def key_access_user(firebase_uid: str) -> str:
-    return f"access:user:{firebase_uid}"
+def key_access_user(user_id: str) -> str:
+    return f"access:user:{user_id}"
 
-def key_access_pair(firebase_uid: str, connection_id: str) -> str:
+def key_access_pair(user_id: str, connection_id: str) -> str:
     """Used by verify_access() — the hottest cache path."""
-    return f"access:{firebase_uid}:{connection_id}"
+    return f"access:{user_id}:{connection_id}"
 
-# Schema cache (mirrors Firestore schema_cache sub-collection)
+# Schema cache (mirrors database schema_cache sub-collection)
 TTL_SCHEMA = 60 * 60  # 1 hour — same as SCHEMA_CACHE_TTL_SECONDS in schema_tools.py
 
 def key_schema_tables(connection_id: str) -> str:
@@ -81,6 +81,6 @@ def key_suggestions(connection_id: str) -> str:
 # Query history (per user, short TTL — invalidated after every query)
 TTL_HISTORY = 2 * 60  # 2 minutes
 
-def key_history(firebase_uid: str, favourites_only: bool = False) -> str:
+def key_history(user_id: str, favourites_only: bool = False) -> str:
     suffix = ":favourites" if favourites_only else ""
-    return f"history:{firebase_uid}{suffix}"
+    return f"history:{user_id}{suffix}"

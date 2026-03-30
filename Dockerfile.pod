@@ -1,0 +1,36 @@
+# Stage 1: Build the compiled binary using Nuitka
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install system dependencies required for compilation
+RUN apt-get update && apt-get install -y gcc patchelf ccache python3-dev
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt nuitka
+
+# Copy source code
+COPY . .
+
+# Compile the application
+RUN python build.py
+
+# Stage 2: Create the minimal production image
+# Using distroless base image for maximum security
+FROM gcr.io/distroless/cc-debian12
+
+WORKDIR /app
+
+# Copy ONLY the compiled binary from the builder stage
+# (The output name depends on the OS, usually 'main.bin' or 'main' on Linux)
+COPY --from=builder /app/dist/main.bin /app/talk2tables_engine
+
+# Copy the .env file if you plan to inject it this way, 
+# though environment variables via Docker Compose are preferred.
+# COPY .env . 
+
+EXPOSE 8000
+
+# Run the compiled binary
+ENTRYPOINT ["/app/talk2tables_engine"]
