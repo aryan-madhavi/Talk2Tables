@@ -1,742 +1,464 @@
+# ai_agent/graph.py
 """
-Talk2Tables — LangGraph AI SQL Agent
-======================================
-The core orchestrator for the Talk2Tables NL2SQL pipeline.
+Talk2Tables — LangGraph Outer Graph
+=====================================
+Assembles the three-node outer StateGraph:
 
-Implemented as a LangGraph StateGraph — a state machine where each node
-performs one step of the query lifecycle and edges encode conditional routing.
+    START → entry_node → react_agent_node → output_parser_node → END
+                 ↓ error                    ↑ retry (max 3)
+                END
 
-Node flow:
-  load_schema
-      │
-  generate_sql
-      │
-  classify_and_validate
-      ├── CLARIFY   → return_clarification
-      ├── WRITE_OP  → return_preview
-      ├── INVALID   → retry_generate (max 2 retries, then error)
-      └── SELECT    → execute_query → format_results → END
-
-Author  : Member 1 (Backend Lead)
-Project : Talk2Tables — Diploma Final Year Project
+The react_agent_node uses langgraph.prebuilt.create_react_agent internally,
+which mirrors the n8n AI Agent node behaviour: the LLM autonomously decides
+when to call get_schema_list, get_table_definition, and execute_sql.
 """
-
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
-from typing import Any, Literal, Optional
+import re
+from typing import Any, Optional
 
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import create_react_agent
 
-from .state import AgentState, ChatMessage, ValidationResult
-from .llm_provider import get_llm_provider
-from .schema_manager import get_schema_context, get_doc_context, detect_dialect
-from .sql_validator import validate_sql
-from .prompts import build_system_prompt, build_retry_user_message
+from .config import agent_config
+from .state import AgentState
+from .nodes import node_entry, node_output_parser
+from .prompts import build_system_prompt
+from .providers import get_llm
+from .tools import get_tools
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-MAX_RETRIES = 2  # Max SQL generation retries on validation failure
+
+# ── Inner ReAct agent cache ────────────────────────────────────────────────────
+# create_react_agent(llm, tools) compiles a small StateGraph.  It's cheap but
+# still takes ~10-30ms and allocates objects on every call.  Cache keyed by
+# (connection_id, user_role) so the same user hitting the same DB reuses the
+# compiled agent; the LLM singleton is already shared across all entries.
+_react_agent_cache: dict[tuple, Any] = {}
 
 
-# ===========================================================================
-# GRAPH NODES
-# ===========================================================================
+# ── React agent node ───────────────────────────────────────────────────────────
 
-# ---------------------------------------------------------------------------
-# Node 1: load_schema
-# ---------------------------------------------------------------------------
-async def node_load_schema(state: AgentState, config: RunnableConfig) -> AgentState:
+async def node_react_agent(state: AgentState) -> AgentState:
     """
-    Load the live database schema via SQLAlchemy reflection.
-    Also fetches schema doc context from connection_schema_docs table.
+    Run the LangChain ReAct agent with tools bound to the current DB connection.
 
-    Populates: state.schema_context, state.doc_context, state.db_dialect
+    The agent:
+      1. Calls get_schema_list → learns available tables
+      2. Calls get_table_definition(table, schema) → learns column structure
+      3. Calls execute_sql(query) → runs the query
+      4. Returns a structured JSON string as the final message
+
+    Chat history from Firestore is injected as initial messages to provide
+    multi-turn context (mirrors n8n's Simple Memory with sessionId key).
     """
-    logger.info(f"[node_load_schema] Loading schema for connection_id={state['connection_id']}")
-
-    # ── Detect dialect from connection string ─────────────────────────────
-    dialect = detect_dialect(state["db_connection_string"])
-    # Allow state to override if explicitly set
-    if state.get("db_dialect"):
-        dialect = state["db_dialect"]
-
-    # ── Reflect live schema ───────────────────────────────────────────────
-    try:
-        schema_ctx = get_schema_context(state["db_connection_string"], dialect)
-    except RuntimeError as exc:
-        logger.error(f"[node_load_schema] Schema load failed: {exc}")
-        return {
-            **state,
-            "db_dialect":    dialect,
-            "schema_context": f"ERROR: {exc}",
-            "doc_context":    None,
-            "error_message":  str(exc),
-            "response_type":  "error",
-            "final_response": {"error_message": str(exc), "retry_count": 0},
-        }
-
-    # ── Fetch schema doc context ──────────────────────────────────────────
-    doc_ctx: Optional[str] = None
-    # system_db_session is injected via RunnableConfig configurable fields
-    system_db_session = config.get("configurable", {}).get("system_db_session")
-    if system_db_session:
-        try:
-            doc_ctx = await get_doc_context(state["connection_id"], system_db_session)
-        except Exception as exc:
-            logger.warning(f"[node_load_schema] Doc context fetch failed (non-fatal): {exc}")
-            doc_ctx = None
-
-    logger.info(
-        f"[node_load_schema] Schema loaded: {len(schema_ctx)} chars | "
-        f"doc_context={'yes' if doc_ctx else 'no'} | dialect={dialect}"
-    )
-
-    return {
-        **state,
-        "db_dialect":     dialect,
-        "schema_context": schema_ctx,
-        "doc_context":    doc_ctx,
-        "retry_count":    state.get("retry_count", 0),
-        "error_message":  None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 2: generate_sql
-# ---------------------------------------------------------------------------
-async def node_generate_sql(state: AgentState) -> AgentState:
-    """
-    Call the active LLM provider to generate SQL from the natural language query.
-    On retries, injects error context to guide the LLM toward a correct response.
-
-    Populates: state.generated_sql, state.llm_provider_used
-    """
-    retry_count = state.get("retry_count", 0)
-    logger.info(
-        f"[node_generate_sql] Generating SQL | "
-        f"retry={retry_count} | user='{state['user_id']}'"
-    )
-
-    # ── Build system prompt ───────────────────────────────────────────────
-    system_prompt = build_system_prompt(
-        db_dialect     = state.get("db_dialect", "mysql"),
-        schema_context = state.get("schema_context", ""),
-        doc_context    = state.get("doc_context"),
-    )
-
-    # ── Determine user message (handle retry context) ─────────────────────
-    if retry_count > 0 and state.get("retry_error_context") and state.get("generated_sql"):
-        user_message = build_retry_user_message(
-            original_query = state["natural_language_query"],
-            failed_sql     = state["generated_sql"],
-            error_reason   = state["retry_error_context"],
-        )
-    else:
-        user_message = state["natural_language_query"]
-
-    # ── Get LLM provider (with cascading fallback) ────────────────────────
-    try:
-        provider = get_llm_provider()
-    except RuntimeError as exc:
-        logger.error(f"[node_generate_sql] No LLM provider available: {exc}")
-        return {
-            **state,
-            "error_message":  str(exc),
-            "response_type":  "error",
-            "final_response": {"error_message": str(exc), "retry_count": retry_count},
-        }
-
-    # ── Call LLM ──────────────────────────────────────────────────────────
-    try:
-        generated_sql, provider_name = provider.generate_sql(
-            system_prompt = system_prompt,
-            user_query    = user_message,
-            chat_history  = state.get("chat_history", []),
-        )
-    except Exception as exc:
-        logger.error(f"[node_generate_sql] LLM call failed: {exc}")
-        return {
-            **state,
-            "error_message":  f"AI generation failed: {exc}",
-            "response_type":  "error",
-            "final_response": {
-                "error_message": f"AI provider error: {exc}",
-                "retry_count":   retry_count,
-            },
-        }
-
-    logger.info(
-        f"[node_generate_sql] SQL generated by {provider_name}: "
-        f"{generated_sql[:120]!r}{'...' if len(generated_sql) > 120 else ''}"
-    )
-
-    return {
-        **state,
-        "generated_sql":      generated_sql,
-        "llm_provider_used":  provider_name,
-        "error_message":      None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 3: classify_and_validate
-# ---------------------------------------------------------------------------
-async def node_classify_and_validate(state: AgentState) -> AgentState:
-    """
-    Run the multi-stage SQL safety & validation pipeline.
-    Sets state.validation_result for the router to branch on.
-
-    Handles:
-      - CLARIFY: directives
-      - WRITE_OP: directives
-      - Injection guard
-      - DDL block
-      - RBAC enforcement
-      - Row limit enforcement
-    """
-    generated_sql = state.get("generated_sql", "")
-    user_role     = state.get("user_role", "viewer")
-    db_dialect    = state.get("db_dialect", "mysql")
-
-    logger.info(f"[node_validate] Validating SQL | role={user_role} | dialect={db_dialect}")
-
-    result, clarification_question = validate_sql(
-        raw_sql    = generated_sql,
-        user_role  = user_role,
-        db_dialect = db_dialect,
-    )
-
-    return {
-        **state,
-        "validation_result":      result,
-        "clarification_question": clarification_question,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 4a: execute_query
-# ---------------------------------------------------------------------------
-async def node_execute_query(state: AgentState, config: RunnableConfig) -> AgentState:
-    """
-    Execute the validated SELECT query against the target database.
-    Uses SQLAlchemy with connection pooling; enforces 10,000 row cap.
-
-    Populates: state.query_results, state.column_metadata, state.execution_time_ms
-    """
-    sql       = state["validation_result"]["sanitized_sql"]
     conn_str  = state["db_connection_string"]
+    dialect   = state["db_dialect"]
+    user_role = state["user_role"]
 
-    logger.info(f"[node_execute_query] Executing SELECT | user={state['user_id']}")
+    logger.info(
+        f"[node_react_agent] Starting | uid={state['firebase_uid']} "
+        f"dialect={dialect} retry={state.get('retry_count', 0)}"
+    )
 
+    # ── Build tools and compiled inner agent (cached) ────────────────────
+    cache_key = (state["connection_id"], user_role)
     try:
-        from sqlalchemy import create_engine, text as sa_text
-        engine = create_engine(conn_str, pool_pre_ping=True, echo=False)
+        llm           = get_llm()
+        system_prompt = build_system_prompt(dialect, user_role)
+        if cache_key not in _react_agent_cache:
+            tools = get_tools(conn_str, user_role, state["connection_id"])
+            _react_agent_cache[cache_key] = create_react_agent(llm, tools)
+            logger.debug(f"[node_react_agent] Compiled new inner agent for key={cache_key}")
+        else:
+            logger.debug(f"[node_react_agent] Reusing cached inner agent for key={cache_key}")
+        agent = _react_agent_cache[cache_key]
+    except Exception as exc:
+        logger.error(f"[node_react_agent] Setup failed: {exc}")
+        msg = f"AI agent could not be initialised: {exc}"
+        return {**state, "error_message": msg, "response_type": "error",
+                "final_response": {"error_message": msg}}
 
-        t_start = time.perf_counter()
-        with engine.connect() as conn:
-            result  = conn.execute(sa_text(sql))
-            columns = list(result.keys())
-            rows    = result.fetchmany(10_000)  # Hard cap per spec
-        elapsed_ms = (time.perf_counter() - t_start) * 1000
+    # ── Build message history ──────────────────────────────────────────────
+    max_turns = agent_config.max_history_turns
+    history   = state.get("chat_history", [])
+    trimmed   = history[-(max_turns * 2):]  # keep last N turns (user+assistant pairs)
 
-        # Serialize rows to list of dicts (handle non-serializable types)
-        serialized_rows = [
-            {col: _serialize_value(val) for col, val in zip(columns, row)}
-            for row in rows
-        ]
+    messages: list = [SystemMessage(content=system_prompt)]
+    for turn in trimmed:
+        role    = turn.get("role", "user")
+        content = turn.get("content", "")
+        if not content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
 
-        col_metadata = [{"name": col, "type": "string"} for col in columns]
-        # Attempt to enrich column types from validation result
-        # (type info already reflected in schema, frontend will handle display)
+    # Add the current user query
+    messages.append(HumanMessage(content=state["natural_language_query"]))
+
+    # If this is a retry, add a nudge to fix the output format
+    # If this is a retry, add a nudge to fix the output format
+    if state.get("retry_count", 0) > 0:
+        messages.append(HumanMessage(
+            content=(
+                "Your previous response was not formatted correctly. "
+                "Your previous response was not formatted correctly. "
+                "Use tools if needed, then return ONLY a valid JSON object with keys: "
+                "title, sql_query, summary, total_records, data. "
+                "No markdown, no plain text, ONLY JSON."
+            )
+        ))
+
+    # ── Run react agent ────────────────────────────────────────────────────
+    try:
+        result = await agent.ainvoke({"messages": messages})
+
+        # The last message in the output is the final AI response
+        output_messages = result.get("messages", [])
+        last_ai_content = ""
+        for msg in reversed(output_messages):
+            if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content.strip():
+                last_ai_content = msg.content
+                break
 
         logger.info(
-            f"[node_execute_query] Query OK: {len(serialized_rows)} rows | "
-            f"{elapsed_ms:.0f}ms"
+            f"[node_react_agent] Agent done | "
+            f"output_length={len(last_ai_content)} | "
+            f"preview={last_ai_content[:120]!r}"
         )
 
-        return {
-            **state,
-            "query_results":    serialized_rows,
-            "column_metadata":  col_metadata,
-            "execution_time_ms": elapsed_ms,
-            "error_message":    None,
-        }
+        return {**state, "agent_output": last_ai_content}
 
     except Exception as exc:
-        logger.error(f"[node_execute_query] Query execution failed: {exc}")
-        return {
-            **state,
-            "error_message":  f"Query execution error: {exc}",
-            "response_type":  "error",
-            "final_response": {
-                "error_message":  str(exc),
-                "generated_sql":  sql,
-                "retry_count":    state.get("retry_count", 0),
-            },
-        }
+        logger.error(f"[node_react_agent] Agent failed: {exc}", exc_info=True)
+        msg = f"AI agent encountered an error: {exc}"
+        return {**state, "error_message": msg, "response_type": "error",
+                "final_response": {"error_message": msg}}
 
 
-# ---------------------------------------------------------------------------
-# Node 4b: format_results
-# ---------------------------------------------------------------------------
-async def node_format_results(state: AgentState) -> AgentState:
-    """
-    Build the final structured response for SELECT query results.
-    Adds an AI-generated summary of the results (single-sentence).
-    """
-    rows          = state.get("query_results", [])
-    columns       = state.get("column_metadata", [])
-    sql           = state["validation_result"]["sanitized_sql"]
-    elapsed_ms    = state.get("execution_time_ms", 0)
-    provider_name = state.get("llm_provider_used", "unknown")
+# ── Edge routers ───────────────────────────────────────────────────────────────
 
-    # ── Build human summary ───────────────────────────────────────────────
-    row_count   = len(rows)
-    table_count = sql.upper().count(" JOIN ") + 1
-    summary = _generate_result_summary(
-        row_count     = row_count,
-        query         = state["natural_language_query"],
-        columns       = [c["name"] for c in columns],
-    )
-
-    final_response = {
-        "sql":            sql,
-        "results":        rows,
-        "columns":        columns,
-        "summary":        summary,
-        "row_count":      row_count,
-        "execution_time": f"{elapsed_ms:.0f}ms",
-        "llm_provider":   provider_name,
-        "is_truncated":   row_count >= 10_000,
-    }
-
-    # ── Append assistant turn to conversation history ─────────────────────
-    updated_history = list(state.get("chat_history", []))
-    updated_history.append(ChatMessage(role="user",      content=state["natural_language_query"]))
-    updated_history.append(ChatMessage(role="assistant", content=f"[SQL] {sql}"))
-
-    logger.info(f"[node_format_results] Response built | {row_count} rows")
-
-    return {
-        **state,
-        "response_type":  "results",
-        "final_response": final_response,
-        "chat_history":   updated_history,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 5: return_preview  (write operations)
-# ---------------------------------------------------------------------------
-async def node_return_preview(state: AgentState) -> AgentState:
-    """
-    Build a WRITE_OP preview response.
-    The frontend displays the SQL in a warning box with Confirm/Cancel buttons.
-    The actual execution happens via a separate /api/query/execute endpoint.
-    """
-    sql       = state["validation_result"]["sanitized_sql"]
-    op_type   = state["validation_result"]["operation_type"]
-    risk      = state["validation_result"]["risk_level"]
-
-    # Estimate affected rows with a COUNT query (best-effort, non-blocking)
-    affected_estimate = _estimate_affected_rows(
-        sql        = sql,
-        conn_str   = state["db_connection_string"],
-        op_type    = op_type,
-    )
-
-    risk_messages = {
-        "high":     "⚠️  HIGH RISK: This operation may affect many rows or is missing a WHERE clause. Review carefully before confirming.",
-        "moderate": "⚠️  CAUTION: This write operation will modify data. Please review the SQL before confirming.",
-    }
-
-    final_response = {
-        "sql":             sql,
-        "operation_type":  op_type,
-        "affected_rows":   affected_estimate,
-        "risk_level":      risk,
-        "warning_message": risk_messages.get(risk, "Please confirm this write operation."),
-        "llm_provider":    state.get("llm_provider_used", "unknown"),
-        "requires_confirmation": True,
-    }
-
-    logger.info(f"[node_return_preview] Write preview: op={op_type}, risk={risk}")
-
-    return {
-        **state,
-        "response_type":  "preview",
-        "final_response": final_response,
-        "affected_rows":  affected_estimate,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 6: return_clarification
-# ---------------------------------------------------------------------------
-async def node_return_clarification(state: AgentState) -> AgentState:
-    """
-    Return the LLM's clarification question to the user.
-    The frontend displays this as a chat bubble with a text input.
-    """
-    question = state.get("clarification_question", "Could you provide more details?")
-
-    logger.info(f"[node_return_clarification] Asking: {question!r}")
-
-    # Append to history so context is preserved for next turn
-    updated_history = list(state.get("chat_history", []))
-    updated_history.append(ChatMessage(role="user",      content=state["natural_language_query"]))
-    updated_history.append(ChatMessage(role="assistant", content=f"CLARIFY: {question}"))
-
-    return {
-        **state,
-        "response_type":  "clarification",
-        "final_response": {"question": question},
-        "chat_history":   updated_history,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 7: retry_generate
-# ---------------------------------------------------------------------------
-async def node_retry_generate(state: AgentState) -> AgentState:
-    """
-    Increment retry counter and feed validation error back as context.
-    The graph routes back to generate_sql for another attempt.
-    """
-    new_retry_count = state.get("retry_count", 0) + 1
-    error_reason    = state["validation_result"]["error"]
-
-    logger.warning(
-        f"[node_retry_generate] Retry #{new_retry_count} | reason: {error_reason}"
-    )
-
-    return {
-        **state,
-        "retry_count":        new_retry_count,
-        "retry_error_context": error_reason,
-    }
-
-
-# ===========================================================================
-# EDGE ROUTERS (conditional branching)
-# ===========================================================================
-
-def route_after_schema_load(state: AgentState) -> str:
-    """After load_schema: go to generate_sql unless a critical error occurred."""
-    if state.get("response_type") == "error":
+def route_after_entry(state: AgentState) -> str:
+    if state.get("error_message"):
         return END
-    return "generate_sql"
+    return "react_agent"
 
 
-def route_after_generate(state: AgentState) -> str:
-    """After generate_sql: go to validate unless LLM provider failed."""
-    if state.get("response_type") == "error":
+def route_after_react_agent(state: AgentState) -> str:
+    if state.get("error_message"):
         return END
-    return "classify_and_validate"
+    return "output_parser"
 
 
-def route_after_validation(state: AgentState) -> str:
-    """
-    Core routing decision after validation:
-      - CLARIFY   → return_clarification
-      - WRITE_OP  → return_preview
-      - INVALID   → retry (up to MAX_RETRIES) → then error
-      - SELECT    → execute_query
-      - error     → END
-    """
-    if state.get("response_type") == "error":
+def route_after_output_parser(state: AgentState) -> str:
+    if state.get("response_type") == "results":
         return END
-
-    result: ValidationResult = state.get("validation_result", {})
-
-    op_type  = result.get("operation_type", "UNKNOWN")
-    is_valid = result.get("is_valid", False)
-
-    if op_type == "CLARIFY":
-        return "return_clarification"
-
-    if op_type == "WRITE_OP":
-        return "return_preview"
-
-    if not is_valid:
-        retry_count = state.get("retry_count", 0)
-        if retry_count < MAX_RETRIES:
-            return "retry_generate"
-        else:
-            # Max retries exceeded — return error
-            logger.error(
-                f"[Router] Max retries ({MAX_RETRIES}) exceeded. "
-                f"Last error: {result.get('error')}"
-            )
-            return END  # Final response was set in validate node
-
-    # Valid SELECT (or INSERT/UPDATE/DELETE that somehow slipped past — shouldn't happen)
-    return "execute_query"
+    # If output_parser set retry_count but no terminal response_type, retry
+    if state.get("retry_count", 0) > 0 and not state.get("final_response"):
+        return "react_agent"
+    return END
 
 
-def route_after_retry(state: AgentState) -> str:
-    """After retry_generate: always go back to generate_sql."""
-    return "generate_sql"
+# ── Graph assembly ─────────────────────────────────────────────────────────────
 
-
-def route_after_execute(state: AgentState) -> str:
-    """After execute_query: go to format_results unless execution error."""
-    if state.get("response_type") == "error":
-        return END
-    return "format_results"
-
-
-# ===========================================================================
-# GRAPH ASSEMBLY
-# ===========================================================================
-
-def build_agent_graph() -> Any:
-    """
-    Assemble and compile the LangGraph StateGraph for the Talk2Tables SQL agent.
-
-    Returns:
-        Compiled LangGraph app — call with .ainvoke(state) from FastAPI routes.
-    """
+def build_agent_graph():
+    """Assemble and compile the outer LangGraph StateGraph."""
     graph = StateGraph(AgentState)
 
-    # ── Register nodes ────────────────────────────────────────────────────
-    graph.add_node("load_schema",           node_load_schema)
-    graph.add_node("generate_sql",          node_generate_sql)
-    graph.add_node("classify_and_validate", node_classify_and_validate)
-    graph.add_node("execute_query",         node_execute_query)
-    graph.add_node("format_results",        node_format_results)
-    graph.add_node("return_preview",        node_return_preview)
-    graph.add_node("return_clarification",  node_return_clarification)
-    graph.add_node("retry_generate",        node_retry_generate)
+    graph.add_node("entry",         node_entry)
+    graph.add_node("react_agent",   node_react_agent)
+    graph.add_node("output_parser", node_output_parser)
 
-    # ── Entry point ───────────────────────────────────────────────────────
-    graph.add_edge(START, "load_schema")
+    graph.add_edge(START, "entry")
+    graph.add_conditional_edges("entry",         route_after_entry,         {"react_agent": "react_agent", END: END})
+    graph.add_conditional_edges("react_agent",   route_after_react_agent,   {"output_parser": "output_parser", END: END})
+    graph.add_conditional_edges("output_parser", route_after_output_parser, {"react_agent": "react_agent", END: END})
 
-    # ── Conditional edges ─────────────────────────────────────────────────
-    graph.add_conditional_edges("load_schema",           route_after_schema_load, {
-        "generate_sql": "generate_sql",
-        END:             END,
-    })
-    graph.add_conditional_edges("generate_sql",          route_after_generate, {
-        "classify_and_validate": "classify_and_validate",
-        END:                      END,
-    })
-    graph.add_conditional_edges("classify_and_validate", route_after_validation, {
-        "execute_query":          "execute_query",
-        "return_preview":         "return_preview",
-        "return_clarification":   "return_clarification",
-        "retry_generate":         "retry_generate",
-        END:                       END,
-    })
-    graph.add_conditional_edges("retry_generate",        route_after_retry, {
-        "generate_sql": "generate_sql",
-    })
-    graph.add_conditional_edges("execute_query",         route_after_execute, {
-        "format_results": "format_results",
-        END:               END,
-    })
-
-    # ── Terminal edges ────────────────────────────────────────────────────
-    graph.add_edge("format_results",       END)
-    graph.add_edge("return_preview",       END)
-    graph.add_edge("return_clarification", END)
-
-    # ── Compile ───────────────────────────────────────────────────────────
     compiled = graph.compile()
-    logger.info("[AgentGraph] Talk2Tables SQL Agent graph compiled successfully.")
+    logger.info("[AgentGraph] Talk2Tables outer graph compiled successfully.")
     return compiled
 
 
-# ---------------------------------------------------------------------------
-# Public API — called from FastAPI routes
-# ---------------------------------------------------------------------------
+# ── Singleton ──────────────────────────────────────────────────────────────────
 
-# Singleton — compiled once at startup
 _agent_graph = None
 
 
-def get_agent() -> Any:
-    """Return the compiled singleton agent graph."""
+def get_agent():
+    """Return the compiled singleton agent graph (compiled once at startup)."""
     global _agent_graph
     if _agent_graph is None:
         _agent_graph = build_agent_graph()
     return _agent_graph
 
 
+# ── Write-intent guard ─────────────────────────────────────────────────────────
+# Fast pre-flight check — no LLM calls needed for obvious write requests from
+# read-only roles. Saves tokens and prevents cascading rate-limit hits.
+
+_WRITE_INTENT_RE = re.compile(
+    r'\b(update|delete|insert|modify|rename|replace|edit|remove|drop)\b'
+    r'|\bchange\b.{0,80}\bto\b'
+    r'|\badd\b.{0,40}\b(record|row|entry|data|column)\b',
+    re.IGNORECASE,
+)
+_ROLES_ALLOWED_WRITE = {"admin", "power_user", "db_manager"}
+
+_WRITE_BLOCKED_RESPONSE: dict[str, Any] = {
+    "title":               "Write access required",
+    "sql_query":           "",
+    "summary":             (
+        "You don't have permission to modify data. "
+        "Your role (analyst) only allows SELECT queries. "
+        "Please contact your administrator to request write access."
+    ),
+    "total_records":       0,
+    "numerical_insights":  {"total_records": 0, "aggregations": {}},
+    "data":                [],
+}
+
+# ── In-flight deduplication ────────────────────────────────────────────────────
+# Prevents a user from accidentally submitting two concurrent heavy queries
+# (e.g., re-clicking Send while waiting) which would double the LLM token spend
+# and cascade rate-limit errors.
+
+_in_flight: set[str] = set()   # set of firebase_uid strings
+
+
+# ── Public entry point ─────────────────────────────────────────────────────────
+
 async def run_agent(
     natural_language_query: str,
-    db_connection_string:   str,
     connection_id:          str,
-    user_id:                str,
+    firebase_uid:           str,
     user_role:              str,
-    chat_history:           list[ChatMessage],
-    db_dialect:             Optional[str] = None,
-    system_db_session       = None,
+    chat_id:                str,
+    chat_history:           list[dict],
 ) -> dict[str, Any]:
     """
-    Main entry point: run the full NL2SQL agent pipeline.
-
-    Called by the FastAPI route handler (api/routes/query.py).
+    Main entry point called by the query route handler.
 
     Args:
-        natural_language_query : User's query text (English or Hindi)
-        db_connection_string   : SQLAlchemy URL for target database
-        connection_id          : UUID of the DB connection record
-        user_id                : Authenticated user ID
-        user_role              : RBAC role (admin / power_user / viewer)
-        chat_history           : Previous conversation turns for multi-turn context
-        db_dialect             : Optional dialect override; auto-detected if None
-        system_db_session      : SQLAlchemy async session for system DB (for doc context)
+        natural_language_query : User's chat message
+        connection_id          : Firestore document ID in database_connections
+        firebase_uid           : Authenticated user Firebase UID
+        user_role              : RBAC role (analyst | power_user | db_manager | admin)
+        chat_id                : Firestore chat document ID
+        chat_history           : Previous messages loaded from Firestore
 
     Returns:
-        final_response dict with keys depending on response_type:
-          results       → sql, results, columns, summary, row_count, execution_time, llm_provider
-          preview       → sql, operation_type, affected_rows, risk_level, warning_message
-          clarification → question
-          error         → error_message, retry_count
+        {   
+            "response_type":  "results" | "error",
+            "final_response": { sql_query, summary, numerical_insights, data }
+                              or { error_message }
+        }
     """
-    agent = get_agent()
+    # ── Guard 1: write-intent pre-flight for read-only roles ──────────────────
+    if user_role not in _ROLES_ALLOWED_WRITE and _WRITE_INTENT_RE.search(natural_language_query):
+        logger.info(
+            f"[run_agent] Write intent blocked — role={user_role} | "
+            f"query={natural_language_query[:80]!r}"
+        )
+        return {"response_type": "results", "final_response": _WRITE_BLOCKED_RESPONSE}
 
-    initial_state: AgentState = {
-        # Input
-        "natural_language_query": natural_language_query,
-        "db_connection_string":   db_connection_string,
-        "db_dialect":             db_dialect or "",
-        "user_id":                user_id,
-        "user_role":              user_role,
-        "connection_id":          connection_id,
-        # Memory
-        "chat_history":           chat_history,
-        # Schema (populated by load_schema node)
-        "schema_context":         None,
-        "doc_context":            None,
-        # LLM output
-        "generated_sql":          None,
-        "llm_provider_used":      None,
-        "clarification_question": None,
-        # Validation
-        "validation_result":      None,
-        "retry_count":            0,
-        "retry_error_context":    None,
-        # Execution
-        "query_results":          None,
-        "column_metadata":        None,
-        "execution_time_ms":      None,
-        "affected_rows":          None,
-        # Response
-        "response_type":          None,
-        "final_response":         None,
-        "error_message":          None,
-    }
-
-    config = RunnableConfig(
-        configurable={"system_db_session": system_db_session}
-    )
-
-    try:
-        final_state = await agent.ainvoke(initial_state, config=config)
-    except Exception as exc:
-        logger.error(f"[run_agent] Unhandled agent error: {exc}", exc_info=True)
+    # ── Guard 2: in-flight deduplication (per user) ───────────────────────────
+    if firebase_uid in _in_flight:
+        logger.warning(
+            f"[run_agent] Concurrent query rejected — uid={firebase_uid} already has a query in flight"
+        )
         return {
-            "response_type":  "error",
+            "response_type": "results",
             "final_response": {
-                "error_message": f"Internal agent error: {exc}",
-                "retry_count":   0,
+                "title":              "Query in progress",
+                "sql_query":          "",
+                "summary":            "Your previous query is still running. Please wait for it to complete before sending a new one.",
+                "total_records":      0,
+                "numerical_insights": {"total_records": 0, "aggregations": {}},
+                "data":               [],
             },
         }
 
+    _in_flight.add(firebase_uid)
+    agent = get_agent()
+
+    initial_state: AgentState = {
+        "natural_language_query": natural_language_query,
+        "connection_id":          connection_id,
+        "firebase_uid":           firebase_uid,
+        "user_role":              user_role,
+        "chat_id":                chat_id,
+        "chat_history":           chat_history,
+        # Populated by entry_node
+        "db_connection_string":   None,
+        "db_dialect":             None,
+        "db_type":                None,
+        # Agent output
+        "agent_output":           None,
+        # Response
+        "response_type":          None,
+        "final_response":         None,
+        # Retry
+        "retry_count":            0,
+        # Error
+        "error_message":          None,
+    }
+
+    try:
+        final_state = await agent.ainvoke(initial_state)
+    except Exception as exc:
+        logger.error(f"[run_agent] Unhandled error: {exc}", exc_info=True)
+        return {
+            "response_type":  "error",
+            "final_response": {"error_message": f"Internal agent error: {exc}"},
+        }
+    finally:
+        _in_flight.discard(firebase_uid)
+
+    # Phase 2: parallel LLM insights (numerical via Gemini + narrative)
+    data = (final_state.get("final_response") or {}).get("data", [])
+    if data and final_state.get("response_type") == "results":
+        from .nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+        numerical, narrative = await asyncio.gather(
+            _generate_numerical_insights(natural_language_query, data),
+            _generate_narrative_insights(natural_language_query, data),
+        )
+        final_state["final_response"]["numerical_insights"] = numerical
+        final_state["final_response"]["narrative_insights"] = narrative
+
     return {
-        "response_type":    final_state.get("response_type", "error"),
-        "final_response":   final_state.get("final_response", {}),
-        "chat_history":     final_state.get("chat_history", chat_history),
-        "llm_provider":     final_state.get("llm_provider_used"),
+        "response_type":  final_state.get("response_type", "error"),
+        "final_response": final_state.get("final_response", {}),
     }
 
 
-# ===========================================================================
-# Internal utilities
-# ===========================================================================
+# ── Streaming entry point ──────────────────────────────────────────────────────
 
-def _serialize_value(value: Any) -> Any:
-    """Convert non-JSON-serializable types from DB rows to safe Python types."""
-    import datetime, decimal
-    if isinstance(value, (datetime.date, datetime.datetime)):
-        return value.isoformat()
-    if isinstance(value, decimal.Decimal):
-        return float(value)
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
-
-
-def _generate_result_summary(
-    row_count: int,
-    query: str,
-    columns: list[str],
-) -> str:
+async def run_agent_stream(
+    natural_language_query: str,
+    connection_id:          str,
+    firebase_uid:           str,
+    user_role:              str,
+    chat_id:                str,
+    chat_history:           list[dict],
+):
     """
-    Generate a simple human-readable summary of the query results.
-    This is a deterministic template; the LLM is not called again to save latency.
+    Async generator that yields SSE-formatted strings.
+    Emits `event: progress` lines as the agent works, then `event: result` with the final response.
     """
-    if row_count == 0:
-        return "No records found matching your query."
-    if row_count >= 10_000:
-        return (
-            f"Found 10,000+ records (display capped). "
-            f"Consider adding filters to narrow results."
-        )
-    col_preview = ", ".join(columns[:4])
-    suffix      = f" and {len(columns) - 4} more columns" if len(columns) > 4 else ""
-    return (
-        f"Found {row_count:,} record{'s' if row_count != 1 else ''} "
-        f"with columns: {col_preview}{suffix}."
-    )
+    import json as _json
 
+    # ── Pre-flight: write intent ──────────────────────────────────────────────
+    if user_role not in _ROLES_ALLOWED_WRITE and _WRITE_INTENT_RE.search(natural_language_query):
+        payload = {"response_type": "results", "final_response": _WRITE_BLOCKED_RESPONSE, "chat_id": chat_id or ""}
+        yield f"event: result\ndata: {_json.dumps(payload)}\n\n"
+        return
 
-def _estimate_affected_rows(
-    sql: str,
-    conn_str: str,
-    op_type: str,
-) -> int:
-    """
-    Estimate rows affected by a write operation by constructing a COUNT query.
-    Returns 0 if estimation fails (non-critical — preview still shown).
-    """
-    import re
-    from sqlalchemy import create_engine, text as sa_text
+    # ── Pre-flight: in-flight dedup ───────────────────────────────────────────
+    if firebase_uid in _in_flight:
+        payload = {
+            "response_type": "results",
+            "final_response": {
+                "title": "Query in progress",
+                "sql_query": "",
+                "summary": "Your previous query is still running. Please wait.",
+                "total_records": 0,
+                "numerical_insights": {"total_records": 0, "aggregations": {}},
+                "data": [],
+            },
+            "chat_id": chat_id or "",
+        }
+        yield f"event: result\ndata: {_json.dumps(payload)}\n\n"
+        return
+
+    _in_flight.add(firebase_uid)
+
+    initial_state: AgentState = {
+        "natural_language_query": natural_language_query,
+        "connection_id":          connection_id,
+        "firebase_uid":           firebase_uid,
+        "user_role":              user_role,
+        "chat_id":                chat_id,
+        "chat_history":           chat_history,
+        "db_connection_string":   None,
+        "db_dialect":             None,
+        "db_type":                None,
+        "agent_output":           None,
+        "response_type":          None,
+        "final_response":         None,
+        "retry_count":            0,
+        "error_message":          None,
+    }
+
+    agent = get_agent()
+    final_result = None
+    _progress_sent: set[str] = set()
+
+    def _emit_progress(stage: str, message: str) -> str | None:
+        if stage in _progress_sent:
+            return None
+        _progress_sent.add(stage)
+        return f"event: progress\ndata: {_json.dumps({'stage': stage, 'message': message})}\n\n"
 
     try:
-        # Extract WHERE clause for estimation
-        where_match = re.search(r"\bWHERE\b(.+?)(?:\bORDER BY\b|\bLIMIT\b|$)",
-                                sql, re.IGNORECASE | re.DOTALL)
-        if not where_match:
-            return -1  # -1 signals "all rows" to frontend (high risk indicator)
+        async for event in agent.astream_events(initial_state, version="v2"):
+            kind = event.get("event", "")
+            name = event.get("name", "")
 
-        # Extract table name for UPDATE / DELETE
-        if op_type in ("UPDATE", "DELETE"):
-            table_match = re.search(
-                r"(?:UPDATE|DELETE\s+FROM)\s+(\w+)", sql, re.IGNORECASE
-            )
-            if not table_match:
-                return 0
-            table_name = table_match.group(1)
-            where_clause = where_match.group(1).strip()
-            count_sql = f"SELECT COUNT(*) FROM {table_name} WHERE {where_clause}"
-        else:
-            return 0
+            if kind == "on_chain_start" and name == "entry":
+                p = _emit_progress("entry", "Connecting to database...")
+                if p:
+                    yield p
 
-        engine = create_engine(conn_str, pool_pre_ping=True)
-        with engine.connect() as conn:
-            result = conn.execute(sa_text(count_sql))
-            count  = result.scalar()
-            return int(count) if count is not None else 0
+            elif kind == "on_tool_start":
+                if name == "get_schema_list":
+                    p = _emit_progress("schema", "Loading database schema...")
+                    if p:
+                        yield p
+                elif name == "get_table_definition":
+                    p = _emit_progress("inspect", "Inspecting table structure...")
+                    if p:
+                        yield p
+                elif name == "execute_sql":
+                    p = _emit_progress("exec", "Executing SQL query...")
+                    if p:
+                        yield p
+
+            elif kind == "on_chat_model_start":
+                p = _emit_progress("llm", "Generating SQL query...")
+                if p:
+                    yield p
+
+            elif kind == "on_chain_end" and name == "LangGraph":
+                output = event.get("data", {}).get("output", {})
+                if isinstance(output, dict) and output.get("response_type"):
+                    final_result = {
+                        "response_type":  output.get("response_type", "error"),
+                        "final_response": output.get("final_response", {}),
+                    }
+
+        if final_result is None:
+            final_result = {"response_type": "error", "final_response": {"error_message": "No response received from agent."}}
 
     except Exception as exc:
-        logger.warning(f"[_estimate_affected_rows] Estimation failed: {exc}")
-        return 0
+        logger.error(f"[run_agent_stream] Error: {exc}", exc_info=True)
+        final_result = {"response_type": "error", "final_response": {"error_message": f"AI agent error: {exc}"}}
+    finally:
+        _in_flight.discard(firebase_uid)
+
+    yield f"event: result\ndata: {_json.dumps(final_result)}\n\n"
+
+    # Phase 2: parallel LLM insights (numerical via Gemini + narrative)
+    data = (final_result.get("final_response") or {}).get("data", [])
+    if data and final_result.get("response_type") == "results":
+        from .nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+        numerical, narrative = await asyncio.gather(
+            _generate_numerical_insights(natural_language_query, data),
+            _generate_narrative_insights(natural_language_query, data),
+        )
+        yield f"event: insights\ndata: {_json.dumps({'numerical_insights': numerical, 'narrative_insights': narrative})}\n\n"

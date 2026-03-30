@@ -1,139 +1,78 @@
+# ai_agent/state.py
 """
-Talk2Tables — AI SQL Agent State Definition
-============================================
-Defines the AgentState TypedDict used across all LangGraph nodes.
-Every node reads from and writes to this shared state object.
+Talk2Tables — Agent State Definition
+=====================================
+Shared state TypedDict passed between all nodes in the LangGraph outer graph.
 
-Author  : Member 1 (Backend Lead)
-Project : Talk2Tables — Diploma Final Year Project
+The outer graph has three nodes:
+    entry_node → react_agent_node → output_parser_node
+
+The inner react_agent (langgraph.prebuilt.create_react_agent) manages its own
+messages list internally. The outer state only captures inputs/outputs.
 """
-
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
 from typing_extensions import TypedDict
 
 
-# ---------------------------------------------------------------------------
-# Message format for multi-turn conversation memory
-# ---------------------------------------------------------------------------
 class ChatMessage(TypedDict):
-    """A single turn in the conversation history."""
+    """Single conversation turn, compatible with LangChain message format."""
     role: Literal["user", "assistant", "system"]
     content: str
 
 
-# ---------------------------------------------------------------------------
-# Validation result returned by the SQL validator node
-# ---------------------------------------------------------------------------
-class ValidationResult(TypedDict):
-    """Structured result from the SQL validation pipeline."""
-    is_valid: bool
-    operation_type: Literal["SELECT", "INSERT", "UPDATE", "DELETE", "WRITE_OP", "CLARIFY", "UNKNOWN"]
-    error: Optional[str]           # Human-readable reason if invalid
-    sanitized_sql: Optional[str]   # Cleaned SQL (stripped of trailing semicolons etc.)
-    risk_level: Literal["safe", "moderate", "high"]
-
-
-# ---------------------------------------------------------------------------
-# Core agent state — passed between every LangGraph node
-# ---------------------------------------------------------------------------
 class AgentState(TypedDict):
-    """
-    Central state object for the Talk2Tables LangGraph SQL agent.
+    """Outer graph state. Passed between entry → react_agent → output_parser nodes."""
 
-    Lifecycle:
-        START → load_schema → generate_sql → classify_and_validate
-                → [execute_query | return_preview | return_clarification | retry_generate]
-                → format_results → END
-    """
-
-    # ── Input ──────────────────────────────────────────────────────────────
+    # ── Input (supplied by route handler) ─────────────────────────────────
     natural_language_query: str
-    """The raw natural language query submitted by the user."""
-
-    db_connection_string: str
-    """SQLAlchemy-compatible connection URL for the TARGET database."""
-
-    db_dialect: Literal["mysql", "postgresql", "sqlite", "mssql", "oracle", "mariadb"]
-    """Detected or configured database dialect; injected into the system prompt."""
-
-    user_id: str
-    """Authenticated user ID for audit logging and RBAC enforcement."""
-
-    user_role: Literal["admin", "power_user", "viewer"]
-    """RBAC role extracted from JWT; controls write operation access."""
+    """The user's chat message."""
 
     connection_id: str
-    """ID of the DB connection record; used to fetch schema docs context."""
+    """Firestore document ID in database_connections/{id}. Credentials fetched server-side."""
 
-    # ── Conversation Memory ────────────────────────────────────────────────
+    firebase_uid: str
+    """Authenticated user's Firebase UID — used for access grant verification and audit."""
+
+    user_role: str
+    """RBAC role: analyst | power_user | db_manager | admin."""
+
+    chat_id: str
+    """Firestore chat document ID under users/{uid}/workspaces/{conn_id}/chats/{id}."""
+
+    # ── Populated by entry_node ────────────────────────────────────────────
+    db_connection_string: Optional[str]
+    """SQLAlchemy URL built from decrypted Firestore credentials."""
+
+    db_dialect: Optional[str]
+    """Detected dialect: mysql | postgresql | mssql | oracle | mariadb."""
+
+    db_type: Optional[str]
+    """Raw db_type field from Firestore document (e.g. 'mysql', 'postgres')."""
+
+    # ── Conversation history ───────────────────────────────────────────────
     chat_history: list[ChatMessage]
-    """
-    Full multi-turn conversation history for this session.
-    Injected into the LLM prompt to maintain context across queries.
-    Max last N turns are used (configured via MAX_HISTORY_TURNS env var).
-    """
+    """Previous turns loaded from Firestore messages sub-collection.
+    Injected into react_agent as initial messages for multi-turn context."""
 
-    # ── Schema Context (populated by load_schema node) ────────────────────
-    schema_context: Optional[str]
-    """Live DB schema as CREATE TABLE DDL strings from SQLAlchemy reflection."""
+    # ── Output from react_agent_node ──────────────────────────────────────
+    agent_output: Optional[str]
+    """Raw string from the final AI message. Expected to be a JSON object."""
 
-    doc_context: Optional[str]
-    """Extracted text from user-uploaded schema docs (PDFs, Word, Excel).
-    Fetched from connection_schema_docs table; max ~2000 tokens."""
-
-    # ── LLM Output (populated by generate_sql node) ───────────────────────
-    generated_sql: Optional[str]
-    """Raw SQL string returned by the LLM provider."""
-
-    llm_provider_used: Optional[str]
-    """Name of the LLM provider that generated the SQL (for response metadata)."""
-
-    clarification_question: Optional[str]
-    """If the LLM returns CLARIFY:, this holds the question to ask the user."""
-
-    # ── Validation (populated by classify_and_validate node) ──────────────
-    validation_result: Optional[ValidationResult]
-    """Full structured output from the SQL safety & validation pipeline."""
-
-    retry_count: int
-    """Number of SQL generation retries attempted. Max = 2 (per spec)."""
-
-    retry_error_context: Optional[str]
-    """Error message from failed validation, passed back to LLM on retry."""
-
-    # ── Execution Output (populated by execute_query / format_results) ────
-    query_results: Optional[list[dict[str, Any]]]
-    """List of row dicts returned by query execution. Max 10,000 rows."""
-
-    column_metadata: Optional[list[dict[str, str]]]
-    """Column names and types for frontend table rendering."""
-
-    execution_time_ms: Optional[float]
-    """Query wall-clock execution time in milliseconds."""
-
-    affected_rows: Optional[int]
-    """For write ops preview: estimated affected row count."""
-
-    # ── Final Response (populated by format_results / return_* nodes) ─────
-    response_type: Optional[Literal[
-        "results",       # Successful SELECT → results table
-        "preview",       # Write op → SQL preview awaiting confirmation
-        "clarification", # LLM needs more info from user
-        "error",         # Unrecoverable error
-    ]]
+    # ── Parsed final response ─────────────────────────────────────────────
+    response_type: Optional[Literal["results", "error"]]
 
     final_response: Optional[dict[str, Any]]
-    """
-    Structured response dict returned to the FastAPI route.
-    Shape varies by response_type:
-      results      → { sql, results, columns, summary, execution_time, llm_provider }
-      preview      → { sql, affected_rows, operation_type, warning_message }
-      clarification→ { question }
-      error        → { error_message, retry_count }
+    """Structured response returned to the route handler.
+    On success:  { sql_query, summary, numerical_insights, data }
+    On error:    { error_message }
     """
 
-    # ── Internal routing flags ─────────────────────────────────────────────
+    # ── Retry tracking ─────────────────────────────────────────────────────
+    retry_count: int
+    """Number of output_parser retries attempted. Capped at agent_config.max_retries."""
+
+    # ── Internal error flag ────────────────────────────────────────────────
     error_message: Optional[str]
-    """Internal error accumulator; set by any node on failure."""
+    """Set by any node on unrecoverable failure. Routes to END immediately."""
