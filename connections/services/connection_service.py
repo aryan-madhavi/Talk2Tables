@@ -262,7 +262,7 @@ def _build_connection_url(conn: dict) -> str:
         "postgresql": f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
         "postgres":   f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
         "mssql":      f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server",
-        "oracle":     f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}",
+        "oracle":     f"oracle+oracledb://{user}:{password}@{host}:{port}/{database}",
     }
     url = _DRIVER_MAP.get(db_type)
     if not url:

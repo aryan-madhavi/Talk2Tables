@@ -72,7 +72,12 @@ ai_agent/
   llm_provider.py        — LLMProvider ABC + OpenRouter/Groq/Gemini/Ollama implementations
   schema_manager.py      — SQLAlchemy schema reflection + doc context fetch
   sql_validator.py       — multi-stage SQL safety pipeline (injection guard, DDL block, RBAC)
-  prompts.py             — system prompt builder
+  prompts.py             — system prompt builder (includes sample_values usage rules)
+  tools/
+    schema_tools.py      — get_schema_list + get_table_definition LangChain tools;
+                           get_table_definition runs SELECT DISTINCT on string columns
+                           and attaches sample_values to low-cardinality categoricals
+    query_tools.py       — execute_sql tool
   routes_query.py        — /api/v1/query/* endpoints (not yet wired into main.py)
 ```
 
@@ -114,6 +119,10 @@ All cache key names are defined in `core/cache_keys.py`. Key patterns:
 - `user:{firebase_uid}` — TTL 5 min
 - `connection:{id}` — TTL 2 min; **passwords are never cached**
 - `access:{uid}:{conn_id}` — TTL 2 min; invalidated immediately on revoke (security-critical)
+- `schema:tables:{conn_id}` — TTL 1 h; list of all tables
+- `schema:def:{conn_id}:{schema}:{table}` — TTL 1 h; column definitions **including `sample_values`**
+
+Schema cache can be force-cleared via `POST /api/v1/connections/{id}/schema/refresh`.
 
 Redis client is stateless (no singleton pool) to avoid Windows `uvicorn --reload` event loop issues.
 
@@ -127,3 +136,36 @@ Redis client is stateless (no singleton pool) to avoid Windows `uvicorn --reload
 6. Server verifies token → Redis cache check → Firestore user check on miss
 
 New users are created with role `analyst` by default. Role changes require an admin via the users API.
+
+### Enum Value Sampling in NL2SQL
+
+The `get_table_definition` tool (`ai_agent/tools/schema_tools.py`) automatically runs
+`SELECT DISTINCT` on string columns (VARCHAR, CHAR, TEXT, ENUM, NVARCHAR, etc.) that are
+not primary keys or foreign keys. The distinct values are stored as `sample_values` on the
+column definition and surfaced to the LLM.
+
+**Why:** Without this, the LLM guesses filter values (e.g. `WHERE status = 'Leave'` instead
+of the real value `'On Leave'`), causing queries to silently return zero rows.
+
+**Design decisions:**
+- Threshold: columns with **> 20 distinct values** are treated as free-text (names, emails,
+  addresses) and are not sampled.
+- Enabled on **all connections by default**.
+- `sample_values` is stored in both **Redis** and **Firestore** as part of the schema cache,
+  so `SELECT DISTINCT` only runs once per cache TTL (1 hour) per table.
+- The helper `_sample_enum_values()` is always safe to call — any error (permissions,
+  timeout, etc.) is silently caught and returns `[]`; schema loading never fails because of it.
+- The system prompt (`prompts.py`) explicitly instructs the LLM:
+  > *"NEVER guess column values — if a column has a `sample_values` list, use ONLY those
+  > exact values in WHERE clause conditions."*
+
+**Firestore schema cache path:**
+```
+database_connections/{connection_id}/schema_cache/{schema}__{table}
+  → { columns: [..., { column_name, data_type, sample_values: [...] }], cached_at }
+```
+
+**To force a re-sample** (e.g. after adding new enum values to the DB):
+```bash
+POST /api/v1/connections/{id}/schema/refresh
+```

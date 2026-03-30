@@ -26,7 +26,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from langchain_core.tools import tool
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,15 @@ _DIALECT_HINTS: dict[str, str] = {
     "mssql":      "mssql",
     "oracle":     "oracle",
 }
+
+# ── Enum sampling constants ────────────────────────────────────────────────────
+# String-like types that may carry categorical / enum values worth sampling.
+_ENUM_CANDIDATE_TYPES = frozenset({
+    "varchar", "char", "text", "enum", "nvarchar", "nchar",
+    "string", "tinytext", "mediumtext", "longtext",
+    "character varying", "character",
+})
+_ENUM_MAX_DISTINCT = 20  # columns with more than this count are treated as free-text
 
 # ── SQLAlchemy engine pool ────────────────────────────────────────────────────
 # Creating a new engine (and TCP connection) per tool call was the biggest
@@ -155,6 +164,108 @@ def invalidate_schema_cache(connection_id: str) -> None:
         logger.warning(f"[SchemaCache] invalidate_schema_cache Firestore failed (non-fatal): {exc}")
 
 
+# ── Schema cache warmer ───────────────────────────────────────────────────────
+
+# Inline driver map (duplicated from entry.py to avoid circular import)
+_WARM_DRIVER_MAP_TEMPLATE = {
+    "mysql":      "mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
+    "mariadb":    "mysql+pymysql://{user}:{password}@{host}:{port}/{database}",
+    "postgresql": "postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+    "postgres":   "postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+    "mssql":      "mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server",
+    "oracle":     "oracle+oracledb://{user}:{password}@{host}:{port}/{database}",
+}
+
+_WARM_TIMEOUT = 30  # seconds — killed if DB has hundreds of tables or is very slow
+
+
+async def warm_schema_cache(connection_id: str) -> None:
+    """
+    Background task: pre-populate Redis + Firestore schema cache for a connection.
+
+    Fetches all tables via get_schema_list, then get_table_definition for every
+    table (including SELECT DISTINCT enum sampling). Everything lands in the normal
+    Redis + Firestore cache, so the first user query hits only cache hits.
+
+    Design:
+      - Completely non-fatal — any error is logged and swallowed.
+      - Runs sync helpers in a thread pool (executor) so it doesn't block the event loop.
+      - Hard 30-second timeout. Cache-miss fallback still works if warmup doesn't finish.
+    """
+    import asyncio
+    import json as _json
+    import time
+
+    logger.info(f"[warm_schema_cache] Starting | conn={connection_id}")
+    t0 = time.monotonic()
+
+    try:
+        # ── 1. Fetch connection with decrypted password ───────────────────────
+        from connections.services.connection_service import get_connection_with_password
+        conn = await get_connection_with_password(connection_id)
+        if not conn:
+            logger.warning(f"[warm_schema_cache] Connection not found | conn={connection_id}")
+            return
+        if not conn.get("is_active", True):
+            logger.info(f"[warm_schema_cache] Connection inactive, skipping | conn={connection_id}")
+            return
+
+        # ── 2. Build SQLAlchemy URL (inline map to avoid circular import) ─────
+        db_type  = conn["db_type"].lower()
+        template = _WARM_DRIVER_MAP_TEMPLATE.get(db_type)
+        if not template:
+            logger.warning(f"[warm_schema_cache] Unsupported db_type '{db_type}' | conn={connection_id}")
+            return
+        conn_str = template.format(
+            user=conn["username"], password=conn["password"],
+            host=conn["host"], port=conn["port"], database=conn["database_name"],
+        )
+
+        # ── 3. Build LangChain tools (reuses all caching logic internally) ────
+        tools          = make_schema_tools(conn_str, connection_id)
+        schema_tool    = tools[0]   # get_schema_list
+        table_def_tool = tools[1]   # get_table_definition
+
+        # ── 4. Run synchronous warm loop in executor with a hard timeout ──────
+        def _warm_sync() -> int:
+            # Step 1: fetch + cache table list
+            raw = schema_tool.invoke({})
+            try:
+                tables = _json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                logger.warning(f"[warm_schema_cache] Could not parse table list | conn={connection_id}")
+                return 0
+            if not isinstance(tables, list):
+                return 0
+
+            # Step 2: fetch + cache each table definition (incl. sample_values)
+            count = 0
+            for t in tables:
+                schema_name = t.get("table_schema", "public")
+                table_name  = t.get("table_name", "")
+                if not table_name:
+                    continue
+                try:
+                    table_def_tool.invoke({"table_name": table_name, "schema_name": schema_name})
+                    count += 1
+                except Exception as exc:
+                    logger.debug(f"[warm_schema_cache] Skipped {schema_name}.{table_name}: {exc}")
+            return count
+
+        loop  = asyncio.get_event_loop()
+        count = await asyncio.wait_for(
+            loop.run_in_executor(None, _warm_sync),
+            timeout=_WARM_TIMEOUT,
+        )
+        elapsed = round(time.monotonic() - t0, 2)
+        logger.info(f"[warm_schema_cache] Done — {count} tables cached in {elapsed}s | conn={connection_id}")
+
+    except asyncio.TimeoutError:
+        logger.warning(f"[warm_schema_cache] Timed out after {_WARM_TIMEOUT}s | conn={connection_id}")
+    except Exception as exc:
+        logger.warning(f"[warm_schema_cache] Failed (non-fatal): {exc} | conn={connection_id}")
+
+
 # ── Redis helpers (sync wrappers for use inside sync @tool functions) ─────────
 
 def _redis_get_sync(key: str) -> Any | None:
@@ -179,6 +290,91 @@ def _redis_set_sync(key: str, value: Any, ttl: int) -> None:
             pool.submit(asyncio.run, redis_set(key, value, ttl)).result(timeout=4)
     except Exception:
         pass
+
+
+# ── Enum value sampler ────────────────────────────────────────────────────────
+
+def _sample_enum_values(
+    engine,
+    dialect: str,
+    schema_name: str | None,
+    table_name: str,
+    column_name: str,
+) -> list[str]:
+    """
+    Run SELECT DISTINCT on *column_name* and return the distinct non-NULL string values.
+
+    Returns [] if:
+      - the column has more than _ENUM_MAX_DISTINCT distinct values (free-text field)
+      - any DB / permission error occurs (silent, non-fatal)
+
+    Uses dialect-appropriate identifier quoting and LIMIT syntax.
+    """
+    try:
+        d = dialect.lower()
+
+        # ── Column identifier quoting ─────────────────────────────────────────
+        if d in ("mysql", "mariadb"):
+            col_q = f"`{column_name}`"
+        elif d == "mssql":
+            col_q = f"[{column_name}]"
+        else:  # postgresql, oracle
+            col_q = f'"{column_name}"'
+
+        # ── Schema-qualified table reference ──────────────────────────────────
+        eff_schema = schema_name if schema_name and schema_name != "default" else None
+        if eff_schema:
+            if d in ("mysql", "mariadb"):
+                table_q = f"`{eff_schema}`.`{table_name}`"
+            elif d == "mssql":
+                table_q = f"[{eff_schema}].[{table_name}]"
+            else:
+                table_q = f'"{eff_schema}"."{table_name}"'
+        else:
+            if d in ("mysql", "mariadb"):
+                table_q = f"`{table_name}`"
+            elif d == "mssql":
+                table_q = f"[{table_name}]"
+            else:
+                table_q = f'"{table_name}"'
+
+        # ── Dialect-aware SELECT DISTINCT with row cap ────────────────────────
+        # Fetch one extra row beyond the threshold so we can detect high-cardinality.
+        cap = _ENUM_MAX_DISTINCT + 1
+        if d == "mssql":
+            sql = (
+                f"SELECT DISTINCT TOP {cap} {col_q} FROM {table_q} "
+                f"WHERE {col_q} IS NOT NULL ORDER BY {col_q}"
+            )
+        elif d == "oracle":
+            # ROWNUM filter must wrap the ORDER BY in a subquery for Oracle.
+            sql = (
+                f"SELECT {col_q} FROM ("
+                f"SELECT DISTINCT {col_q} FROM {table_q} WHERE {col_q} IS NOT NULL ORDER BY {col_q}"
+                f") WHERE ROWNUM <= {cap}"
+            )
+        else:  # mysql, mariadb, postgresql
+            sql = (
+                f"SELECT DISTINCT {col_q} FROM {table_q} "
+                f"WHERE {col_q} IS NOT NULL ORDER BY {col_q} LIMIT {cap}"
+            )
+
+        with engine.connect() as conn:
+            rows = conn.execute(text(sql)).fetchall()
+
+        values = [str(r[0]) for r in rows if r[0] is not None]
+
+        # High-cardinality → treat as free-text (names, emails, etc.), do not include
+        if len(values) > _ENUM_MAX_DISTINCT:
+            return []
+
+        return values
+
+    except Exception as exc:
+        logger.debug(
+            f"[_sample_enum_values] Skipped {schema_name}.{table_name}.{column_name}: {exc}"
+        )
+        return []
 
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
@@ -298,6 +494,9 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         """
         Get the full column definitions for a specific table, including data types,
         nullable flags, default values, and foreign key relationships.
+        For string columns with a small number of distinct values (e.g. status, type,
+        department), also returns a `sample_values` list with the exact values stored
+        in the database. Use ONLY these values in WHERE clause filters — never guess.
         Call this before querying any table to know its exact columns.
 
         Args:
@@ -394,7 +593,28 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             if not result_rows:
                 return f"No columns found for table {schema_name}.{table_name}"
 
-            # ── 4. Write to Redis + Firestore ──────────────────────────────
+            # ── 4. Enrich string columns with discovered enum / categorical values ──
+            # For every non-PK, non-FK string column, run SELECT DISTINCT and attach
+            # the real stored values as sample_values.  The LLM then uses these
+            # exact values in WHERE clauses instead of guessing.
+            _dialect = detect_dialect(connection_string)
+            for _entry in result_rows:
+                _col_type  = _entry.get("data_type", "").lower()
+                _is_string = any(t in _col_type for t in _ENUM_CANDIDATE_TYPES)
+                _is_pk     = _entry.get("primary_key", False)
+                _is_fk     = "references" in _entry
+                if not _is_string or _is_pk or _is_fk:
+                    continue
+                _vals = _sample_enum_values(
+                    engine, _dialect, schema_arg, table_name, _entry["column_name"]
+                )
+                if _vals:
+                    _entry["sample_values"] = _vals
+            logger.debug(
+                f"[get_table_definition] Enum sampling done for {schema_name}.{table_name}"
+            )
+
+            # ── 5. Write to Redis + Firestore ──────────────────────────────
             _redis_set_sync(redis_key, result_rows, TTL_SCHEMA)
             try:
                 ref.set({"columns": result_rows, "cached_at": _now_iso()})

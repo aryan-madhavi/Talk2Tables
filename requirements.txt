@@ -27,8 +27,8 @@ sqlparse==0.5.1                # SQL parsing + validation
 # DB drivers — install only the ones you need:
 pymysql==1.1.1                 # MySQL 8 + MariaDB
 psycopg2-binary==2.9.9         # PostgreSQL 15
-# pyodbc==5.1.0                # SQL Server (requires ODBC driver installed)
-# cx-Oracle==8.3.0             # Oracle (requires Oracle Instant Client)
+pyodbc==5.1.0                  # SQL Server (also requires ODBC Driver 17/18 on the OS)
+oracledb==2.4.1                # Oracle — thin mode, no Instant Client required
 # aiosqlite==0.20.0            # SQLite async support
 
 # ── Auth ──────────────────────────────────────────────────────
