@@ -1,7 +1,7 @@
 services:
   # ── MongoDB: User & Chat Storage ──────────────────────────────────────────
   mongodb:
-    image: mongo:latest
+    image: docker.io/library/mongo:latest
     container_name: t2t-mongo
     restart: always
     ports:
@@ -11,7 +11,7 @@ services:
 
   # ── Redis: Session & Schema Cache ─────────────────────────────────────────
   redis:
-    image: redis:alpine
+    image: docker.io/library/redis:alpine
     container_name: t2t-redis
     restart: always
     ports:
