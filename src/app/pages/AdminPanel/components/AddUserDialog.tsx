@@ -130,7 +130,7 @@ export function AddUserDialog({ open, onClose, onSave, saving = false }: Props) 
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="e.g. Aryan Madhavi"
+                  placeholder="e.g. John Doe"
                   value={form.display_name}
                   onChange={e => set('display_name', e.target.value)}
                   className={cn(inputCls(), 'pl-8')}

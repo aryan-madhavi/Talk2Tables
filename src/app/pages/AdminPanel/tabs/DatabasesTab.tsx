@@ -1,6 +1,6 @@
 // src/app/pages/AdminPanel/tabs/DatabasesTab.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database, Plus, Settings2, Power, PowerOff, Loader2, AlertCircle } from 'lucide-react';
+import { Database, Plus, Settings2, Power, PowerOff, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../../lib/utils';
 import { DatabaseConnection } from '../../../types';
@@ -13,6 +13,7 @@ import {
   activateConnection,
   deactivateConnection,
   testConnection,
+  refreshSchemaCache,
   ConnectionOut,
 } from '../../../../lib/connectionService';
 
@@ -57,7 +58,9 @@ export function DatabasesTab() {
   const [saving, setSaving]           = useState(false);
 
   // Per-card toggling (activate/deactivate)
-  const [togglingId, setTogglingId]   = useState<string | null>(null);
+  const [togglingId, setTogglingId]           = useState<string | null>(null);
+  // Per-card schema refresh
+  const [refreshingSchemaId, setRefreshingSchemaId] = useState<string | null>(null);
 
   // ── Fetch connections on mount ─────────────────────────────────────────────
 
@@ -195,6 +198,21 @@ export function DatabasesTab() {
       toast.error(msg);
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  // ── Refresh Schema ─────────────────────────────────────────────────────────
+
+  const handleRefreshSchema = async (db: DatabaseConnection) => {
+    setRefreshingSchemaId(db.connection_id);
+    try {
+      const res = await refreshSchemaCache(db.connection_id);
+      toast.success(res.message ?? `Schema cache refresh started for "${db.name}".`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to refresh schema cache.';
+      toast.error(msg);
+    } finally {
+      setRefreshingSchemaId(null);
     }
   };
 
@@ -351,6 +369,21 @@ export function DatabasesTab() {
                         : <Power    className="w-3 h-3" />
                     }
                     {db.is_active ? 'Disable' : 'Enable'}
+                  </button>
+
+                  {/* Refresh Schema */}
+                  <button
+                    onClick={() => handleRefreshSchema(db)}
+                    disabled={refreshingSchemaId === db.connection_id}
+                    title="Refresh schema cache"
+                    className={cn(
+                      'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-all',
+                      'border-purple-200 text-purple-600 hover:bg-purple-50',
+                      refreshingSchemaId === db.connection_id && 'opacity-50 cursor-not-allowed',
+                    )}
+                  >
+                    <RefreshCw className={cn('w-3 h-3', refreshingSchemaId === db.connection_id && 'animate-spin')} />
+                    {refreshingSchemaId === db.connection_id ? 'Refreshing…' : 'Sync Schema'}
                   </button>
 
                   {/* Configure */}

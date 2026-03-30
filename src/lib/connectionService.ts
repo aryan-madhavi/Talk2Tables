@@ -159,3 +159,10 @@ export async function testConnection(id: string): Promise<TestConnectionResponse
     method: 'POST',
   });
 }
+
+/** POST /api/v1/connections/:id/schema/refresh — invalidate + re-warm schema cache */
+export async function refreshSchemaCache(id: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/connections/${id}/schema/refresh`, {
+    method: 'POST',
+  });
+}
