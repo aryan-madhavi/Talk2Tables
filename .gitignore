@@ -38,3 +38,6 @@ next-env.d.ts
 
 #firebase congifuration file
 src/components/firebase
+
+# releases
+/release

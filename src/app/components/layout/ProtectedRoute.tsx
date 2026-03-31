@@ -2,12 +2,12 @@
 // Guards every authenticated route.
 //
 // CRITICAL: Never redirect while loading === true.
-// Firebase needs up to ~1-2s on refresh to restore its cached session from
-// IndexedDB. If we redirect to /login before that finishes, the user gets
-// kicked out on every page refresh even though they're logged in.
+// The app needs a moment on refresh to verify the access_token/cookie.
+// If we redirect to /login before that finishes, the user gets
+// kicked out on every page refresh even though they have a valid session.
 //
 // Flow:
-//   loading=true  → show spinner (Firebase is restoring session)
+//   loading=true  → show spinner (Verifying session)
 //   loading=false, no user  → redirect to /login
 //   loading=false, user ok  → render children (+ optional role check)
 

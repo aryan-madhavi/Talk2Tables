@@ -2,7 +2,7 @@
 // All API calls for /api/v1/connections endpoints.
 // Mirrors backend connection_routes.py exactly.
 
-import { auth } from './firebaseConfig';
+import { getAccessToken } from './authService';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -64,9 +64,9 @@ export interface UpdateConnectionPayload {
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
 async function getIdToken(): Promise<string> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('Not signed in');
-  return user.getIdToken();
+  const token = getAccessToken();
+  if (!token) throw new Error('Not signed in');
+  return token;
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {

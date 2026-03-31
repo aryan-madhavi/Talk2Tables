@@ -1,5 +1,5 @@
 // src/lib/userService.ts
-import { auth } from './firebaseConfig';
+import { getAccessToken } from './authService';
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/auth', '') ??
@@ -33,9 +33,9 @@ export interface CreateUserPayload {
 }
 
 async function getIdToken(): Promise<string> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('Not signed in');
-  return user.getIdToken();
+  const token = getAccessToken();
+  if (!token) throw new Error('Not signed in');
+  return token;
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {

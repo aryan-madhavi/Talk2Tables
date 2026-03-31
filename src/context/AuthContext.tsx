@@ -1,18 +1,10 @@
 // src/context/AuthContext.tsx
 // Global auth state — wrap the entire app with <AuthProvider>.
-//
 // Boot sequence on every page load / refresh:
-//   1. loading = true  (ProtectedRoute shows spinner, NO redirect yet)
-//   2. Firebase onAuthStateChanged fires — may take 0-2s to restore cached session
-//   3. If fbUser exists  → GET /me → set user (401 = session revoked → sign out)
-//   4. If fbUser is null → set user = null
-//   5. loading = false  → ProtectedRoute now decides: allow or redirect to /login
-//
-// The key fix for the refresh-redirect bug:
-//   loading stays TRUE until onAuthStateChanged has fired AND we've finished
-//   the backend session check. ProtectedRoute must never redirect while
-//   loading === true. This prevents the flicker where Firebase hasn't yet
-//   restored the cached session from IndexedDB.
+//   1. loading = true
+//   2. Check for access_token in cookies
+//   3. If token exists → GET /me → set user
+//   4. loading = false
 
 import React, {
   createContext,
@@ -23,19 +15,19 @@ import React, {
   useMemo,
   ReactNode,
 } from 'react';
-import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { auth }             from '../lib/firebaseConfig';
 import {
   login  as apiLogin,
   logout as apiLogout,
   getMe,
+  getAccessToken,
+  clearTokens,
   BackendUser,
 }                           from '../lib/authService';
 
 // ── Context shape ─────────────────────────────────────────────────────────────
 
 interface AuthContextValue {
-  /** Full user profile from Firestore. null = not logged in. */
+  /** Full user profile. null = not logged in. */
   user:        BackendUser | null;
   /**
    * TRUE during the initial boot session check.
@@ -59,40 +51,31 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user,    setUser]    = useState<BackendUser | null>(null);
-  const [loading, setLoading] = useState(true);   // ← stays true until Firebase resolves
+  const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
 
   useEffect(() => {
-    // onAuthStateChanged fires once on mount:
-    //   • Immediately if Firebase has no cached session
-    //   • After restoring from IndexedDB if the user was previously signed in
-    //     (this can take up to ~1-2 seconds on a slow device)
-    // We must NOT set loading=false or redirect before this callback fires.
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      if (!fbUser) {
-        // No Firebase session at all — definitely logged out
+    const initAuth = async () => {
+      const token = getAccessToken();
+      if (!token) {
         setUser(null);
         setLoading(false);
         return;
       }
 
-      // Firebase has a cached session — verify via /me (single call)
       try {
         const profile = await getMe();
         setUser(profile);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '';
-        if (msg.includes('401') || msg.includes('Session') || msg.includes('sign in')) {
-          // Session revoked on backend — sign out Firebase too
-          await firebaseSignOut(auth);
-        }
+        console.error('Auth initialization failed:', err);
+        clearTokens();
         setUser(null);
       } finally {
-        setLoading(false);  // ← only NOW does ProtectedRoute make a decision
+        setLoading(false);
       }
-    });
+    };
 
-    return unsubscribe;
+    initAuth();
   }, []);
 
   // ── Login ──────────────────────────────────────────────────────────────────

@@ -1,14 +1,10 @@
 import React, { useState } from 'react';
 import { Lock, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react';
-import {
-  reauthenticateWithCredential,
-  updatePassword,
-  EmailAuthProvider,
-} from 'firebase/auth';
 import { toast } from 'sonner';
-import { auth } from '../../../../lib/firebaseConfig';
+import { useAuth } from '../../../../context/AuthContext';
 
 export function PasswordSection() {
+  const { user } = useAuth();
   const [current,  setCurrent]  = useState('');
   const [next,     setNext]     = useState('');
   const [confirm,  setConfirm]  = useState('');
@@ -23,7 +19,6 @@ export function PasswordSection() {
 
   async function handleChange() {
     if (!canSave) return;
-    const user = auth.currentUser;
     if (!user || !user.email) {
       toast.error('Not signed in.');
       return;
@@ -31,20 +26,15 @@ export function PasswordSection() {
 
     setSaving(true);
     try {
-      const credential = EmailAuthProvider.credential(user.email, current);
-      await reauthenticateWithCredential(user, credential);
-      await updatePassword(user, next);
+      // TODO: Implement backend password change endpoint
+      // Example: await updatePassword(current, next);
+      toast.info('Password change is currently disabled in local mode.');
       setDone(true);
       setCurrent(''); setNext(''); setConfirm('');
       setTimeout(() => setDone(false), 4000);
-      toast.success('Password changed successfully.');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to change password.';
-      if (msg.includes('wrong-password') || msg.includes('invalid-credential')) {
-        toast.error('Current password is incorrect.');
-      } else {
-        toast.error(msg);
-      }
+      toast.error(msg);
     } finally {
       setSaving(false);
     }

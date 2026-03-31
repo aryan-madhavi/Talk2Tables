@@ -7,6 +7,7 @@ import { createBrowserRouter } from 'react-router';
 import { AppLayout }      from './components/layout/AppLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import Login              from './pages/Login';
+import Signup             from './pages/Signup';
 import Dashboard          from './pages/Dashboard';
 import QueryInterface     from './pages/QueryInterface';
 import History            from './pages/History';
@@ -29,6 +30,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <Login />,
+  },
+  {
+    path: '/signup',
+    element: <Signup />,
   },
 
   // ── Protected — valid session required for everything under "/" ────────────
