@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth.routes.dependencies import require_analyst
 from chat.routes.schemas import (
@@ -187,24 +187,52 @@ async def list_chats(
 @router.get(
     "/workspaces/{connection_id}/chats/{chat_id}/messages",
     response_model=MessagesResponse,
-    summary="Get all messages in a chat",
-    description="Returns messages ordered by seq (ascending). Each message includes all stored fields.",
+    summary="Get paginated messages in a chat",
+    description=(
+        "Returns messages ordered by seq (ascending). "
+        "Use ?limit=30 to control page size and ?before_seq=N to load earlier pages. "
+        "Pass next_before_seq from the previous response as before_seq to paginate backwards."
+    ),
 )
 async def get_messages(
     connection_id: str,
     chat_id:       str,
-    current_user:  dict = Depends(require_analyst),
+    limit:         int      = Query(default=30, ge=1, le=100),
+    before_seq:    int|None = Query(default=None, ge=1),
+    current_user:  dict     = Depends(require_analyst),
 ):
     uid = current_user["firebase_uid"]
     try:
-        db   = _db()
-        docs = _messages_col(db, uid, connection_id, chat_id).order_by("seq").stream()
-        messages = [_to_message_out(doc.id, doc.to_dict()) for doc in docs]
+        from google.cloud.firestore_v1 import Query as FsQuery
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        db = _db()
+
+        q = _messages_col(db, uid, connection_id, chat_id)
+
+        if before_seq is not None:
+            q = q.where(filter=FieldFilter("seq", "<", before_seq))
+
+        # Fetch descending (limit+1 to detect has_more), then reverse to ascending
+        docs = list(
+            q.order_by("seq", direction=FsQuery.DESCENDING)
+             .limit(limit + 1)
+             .stream()
+        )
+
+        has_more  = len(docs) > limit
+        page_docs = docs[:limit]
+        page_docs.reverse()   # oldest → newest for the frontend
+
+        messages        = [_to_message_out(doc.id, doc.to_dict()) for doc in page_docs]
+        next_before_seq = messages[0]["seq"] if has_more and messages else None
+
         return MessagesResponse(
-            chat_id       = chat_id,
-            connection_id = connection_id,
-            messages      = messages,
-            total         = len(messages),
+            chat_id         = chat_id,
+            connection_id   = connection_id,
+            messages        = messages,
+            total           = len(messages),
+            has_more        = has_more,
+            next_before_seq = next_before_seq,
         )
     except Exception as exc:
         logger.error(f"[GET messages] chat={chat_id} uid={uid} error: {exc}")

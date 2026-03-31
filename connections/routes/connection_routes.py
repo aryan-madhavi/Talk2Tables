@@ -18,7 +18,7 @@ Endpoints:
     GET    /api/v1/connections/{id}/stats          — usage statistics (query counts, success rate, top users, daily chart)
     POST   /api/v1/connections/{id}/schema/refresh — force-invalidate schema cache
 """
-from __future__ import annotations
+
 
 import logging
 
