@@ -1,0 +1,25 @@
+services:
+  mysql-db:
+    image: docker.io/library/mysql:8.0
+    container_name: t2t-mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: factory_db
+      MYSQL_USER: t2t_user
+      MYSQL_PASSWORD: t2t_password
+    volumes:
+      - ./mysql_init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  postgres-db:
+    image: docker.io/library/postgres:15
+    container_name: t2t-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: t2t_user
+      POSTGRES_PASSWORD: t2t_password
+      POSTGRES_DB: logistics_db
+    volumes:
+      - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
