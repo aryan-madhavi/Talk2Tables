@@ -1,0 +1,13 @@
+# Cloud/Large Model Prompts (Optimized for Gemini / GPT-4 / 70B+ models)
+# These involve joins, aggregations, and complex business logic.
+
+1. Give me a breakdown of parts by category and show the total stock value for each.
+2. Find all parts that failed quality inspection and show their names and the inspector's name.
+3. Show me warehouses that are currently over 80% capacity based on their inventory levels.
+4. Calculate the average shipment weight for each region.
+5. Identify the top 3 most expensive parts that have passed quality inspection.
+6. Join shipments and warehouses to show where our West region stock is being delivered.
+7. Show me a daily trend of quality checks performed last week.
+8. Which region has the highest number of successful shipments?
+9. Compare the total capacity of warehouses in the South versus the North.
+10. Find parts that have never been checked in the quality logs.

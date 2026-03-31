@@ -1,0 +1,13 @@
+# Local Model Prompts (Optimized for Qwen 2.5 3B / Smaller CPUs)
+# These are simple, direct, and avoid complex reasoning.
+
+1. list all tables in this db
+2. show me all data from the parts table
+3. how many warehouses are there?
+4. list all electronics parts
+5. show me shipments that are in_transit
+6. which warehouses are in the North region?
+7. what is the unit price of Valve-B2?
+8. show me the first 5 records of quality_logs
+9. list all regions in the warehouses table
+10. count the number of shipments
