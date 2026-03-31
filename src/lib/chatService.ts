@@ -50,10 +50,12 @@ export interface MessageOut {
 }
 
 export interface MessagesResponse {
-  chat_id:       string;
-  connection_id: string;
-  messages:      MessageOut[];
-  total:         number;
+  chat_id:          string;
+  connection_id:    string;
+  messages:         MessageOut[];
+  total:            number;
+  has_more:         boolean;
+  next_before_seq:  number | null;
 }
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
@@ -94,9 +96,19 @@ export async function listChats(connectionId: string): Promise<ChatListResponse>
   return apiFetch<ChatListResponse>(`/chat/workspaces/${connectionId}/chats`);
 }
 
-/** GET /api/v1/chat/workspaces/{connection_id}/chats/{chat_id}/messages */
-export async function getMessages(connectionId: string, chatId: string): Promise<MessagesResponse> {
-  return apiFetch<MessagesResponse>(`/chat/workspaces/${connectionId}/chats/${chatId}/messages`);
+/** GET /api/v1/chat/workspaces/{conn}/{chat}/messages — paginated */
+export async function getMessages(
+  connectionId: string,
+  chatId:       string,
+  options?: { limit?: number; beforeSeq?: number },
+): Promise<MessagesResponse> {
+  const params = new URLSearchParams();
+  if (options?.limit)     params.set('limit',      String(options.limit));
+  if (options?.beforeSeq) params.set('before_seq', String(options.beforeSeq));
+  const qs = params.toString() ? `?${params}` : '';
+  return apiFetch<MessagesResponse>(
+    `/chat/workspaces/${connectionId}/chats/${chatId}/messages${qs}`,
+  );
 }
 
 /** GET /api/v1/chat/recent — last 5 recent chats across all workspaces */

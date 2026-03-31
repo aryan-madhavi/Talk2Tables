@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Message, QueryResult } from '../types';
 import { executeQueryStream, isErrorPayload } from '../../../../lib/queryService';
-import { MessageOut } from '../../../../lib/chatService';
+import { MessageOut, getMessages } from '../../../../lib/chatService';
 
 const INITIAL_MESSAGE: Message = {
   id:        'welcome',
@@ -37,9 +37,17 @@ export function useQueryExecution(selectedConnectionId: string) {
   const [chatId,           setChatId]           = useState<string | null>(null);
   const [refreshTrigger,   setRefreshTrigger]   = useState(0);
   const [progressMessage,  setProgressMessage]  = useState<string | null>(null);
-  const messagesEndRef  = useRef<HTMLDivElement | null>(null);
+
+  // ── Pagination state ────────────────────────────────────────────────────────
+  const [hasMoreMessages,  setHasMoreMessages]  = useState(false);
+  const [nextBeforeSeq,    setNextBeforeSeq]    = useState<number | null>(null);
+  const [loadingEarlier,   setLoadingEarlier]   = useState(false);
+
+  const messagesEndRef       = useRef<HTMLDivElement | null>(null);
+  // Prevents auto-scroll-to-bottom when prepending earlier messages
+  const suppressAutoScrollRef = useRef(false);
   // Increments each time the connection changes; used to discard stale responses
-  const generationRef   = useRef(0);
+  const generationRef        = useRef(0);
 
   // Reset when switching connections
   useEffect(() => {
@@ -50,16 +58,27 @@ export function useQueryExecution(selectedConnectionId: string) {
     setIsTyping(false);
     setExecutingChatId(undefined);
     setRefreshTrigger(0);
+    setHasMoreMessages(false);
+    setNextBeforeSeq(null);
+    setLoadingEarlier(false);
   }, [selectedConnectionId]);
 
+  // Auto-scroll to bottom on new messages — suppressed during earlier-message prepend
   useEffect(() => {
+    if (suppressAutoScrollRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
   // ── Load a past chat from history ──────────────────────────────────────────
 
-  const loadChat = useCallback((restoredChatId: string, history: MessageOut[]) => {
+  const loadChat = useCallback((
+    restoredChatId: string,
+    history:        MessageOut[],
+    meta?:          { has_more: boolean; next_before_seq: number | null },
+  ) => {
     setChatId(restoredChatId);
+    setHasMoreMessages(meta?.has_more ?? false);
+    setNextBeforeSeq(meta?.next_before_seq ?? null);
 
     if (history.length === 0) {
       setMessages([INITIAL_MESSAGE]);
@@ -83,12 +102,44 @@ export function useQueryExecution(selectedConnectionId: string) {
     setCurrentResult(lastWithData ? buildResultFromMessage(lastWithData) : null);
   }, []);
 
+  // ── Load earlier messages (infinite scroll upward) ─────────────────────────
+
+  const loadEarlierMessages = useCallback(async () => {
+    if (!chatId || !selectedConnectionId || !nextBeforeSeq || loadingEarlier) return;
+    setLoadingEarlier(true);
+
+    // Suppress auto-scroll-to-bottom while prepending
+    suppressAutoScrollRef.current = true;
+
+    try {
+      const res = await getMessages(selectedConnectionId, chatId, { beforeSeq: nextBeforeSeq });
+      const older: Message[] = res.messages.map(m => ({
+        id:          m.msg_id,
+        role:        m.role,
+        content:     m.content,
+        timestamp:   new Date(m.created_at),
+        queryResult: buildResultFromMessage(m) ?? undefined,
+      }));
+      setMessages(prev => [...older, ...prev]);
+      setHasMoreMessages(res.has_more);
+      setNextBeforeSeq(res.next_before_seq);
+    } catch {
+      // silently fail — user can still interact
+    } finally {
+      setLoadingEarlier(false);
+      // Re-enable auto-scroll after React has flushed state + layout effects
+      setTimeout(() => { suppressAutoScrollRef.current = false; }, 100);
+    }
+  }, [chatId, selectedConnectionId, nextBeforeSeq, loadingEarlier]);
+
   // ── Start a new chat ───────────────────────────────────────────────────────
 
   const newChat = useCallback(() => {
     setChatId(null);
     setCurrentResult(null);
     setMessages([INITIAL_MESSAGE]);
+    setHasMoreMessages(false);
+    setNextBeforeSeq(null);
   }, []);
 
   // ── Send a message ─────────────────────────────────────────────────────────
@@ -271,5 +322,7 @@ export function useQueryExecution(selectedConnectionId: string) {
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
     updateCurrentResultInsights, progressMessage,
+    // Pagination
+    hasMoreMessages, loadingEarlier, loadEarlierMessages,
   };
 }

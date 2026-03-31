@@ -30,7 +30,7 @@ interface ChatSidebarProps {
   executingChatId: string | null | undefined;
   refreshTrigger:  number;
   onNewChat:       () => void;
-  onSelectChat:    (chatId: string, messages: MessageOut[]) => void;
+  onSelectChat:    (chatId: string, messages: MessageOut[], meta?: { has_more: boolean; next_before_seq: number | null }) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -89,7 +89,10 @@ export function ChatSidebar({
     setLoadingId(chat.chat_id);
     try {
       const res = await getMessages(connectionId, chat.chat_id);
-      onSelectChat(chat.chat_id, res.messages);
+      onSelectChat(chat.chat_id, res.messages, {
+        has_more:        res.has_more,
+        next_before_seq: res.next_before_seq,
+      });
     } catch {
       // Silently fail — user can still start a new query
     } finally {

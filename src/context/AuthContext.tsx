@@ -42,6 +42,11 @@ interface AuthContextValue {
    * ProtectedRoute MUST wait for this to be false before redirecting.
    */
   loading:     boolean;
+  /**
+   * TRUE once onAuthStateChanged has fired AND /me check is done.
+   * Gate API calls behind this — never fires during the auth race window.
+   */
+  authReady:   boolean;
   /** Last error string from a failed login attempt. */
   error:       string | null;
   login:       (email: string, password: string) => Promise<void>;
@@ -58,9 +63,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user,    setUser]    = useState<BackendUser | null>(null);
-  const [loading, setLoading] = useState(true);   // ← stays true until Firebase resolves
-  const [error,   setError]   = useState<string | null>(null);
+  const [user,      setUser]      = useState<BackendUser | null>(null);
+  const [loading,   setLoading]   = useState(true);    // ← stays true until Firebase resolves
+  const [authReady, setAuthReady] = useState(false);   // ← true only after first onAuthStateChanged cycle
+  const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
     // onAuthStateChanged fires once on mount:
@@ -69,10 +75,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     //     (this can take up to ~1-2 seconds on a slow device)
     // We must NOT set loading=false or redirect before this callback fires.
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      // Reset authReady on every auth state change (login/logout/token refresh)
+      setAuthReady(false);
+
       if (!fbUser) {
         // No Firebase session at all — definitely logged out
         setUser(null);
         setLoading(false);
+        setAuthReady(true);   // ready — just not logged in
         return;
       }
 
@@ -88,7 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser(null);
       } finally {
-        setLoading(false);  // ← only NOW does ProtectedRoute make a decision
+        setLoading(false);    // ← ProtectedRoute can now decide
+        setAuthReady(true);   // ← components can now safely fire API calls
       }
     });
 
@@ -99,12 +110,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     setLoading(true);
+    setAuthReady(false);   // auth not ready during login flow
     try {
       const data = await apiLogin(email, password);
       setUser(data.user);
+      // Note: signInWithCustomToken (inside apiLogin) fires onAuthStateChanged,
+      // which will set authReady=true once /me resolves. Don't set it here.
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed. Please try again.';
       setError(msg);
+      setAuthReady(true);   // unblock on error so UI isn't stuck
       throw err;
     } finally {
       setLoading(false);
@@ -125,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     user,
     loading,
+    authReady,
     error,
     login,
     logout,
@@ -133,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isDbManager: user?.role === 'admin' || user?.role === 'db_manager',
     isPowerUser: user?.role === 'admin' || user?.role === 'db_manager' || user?.role === 'power_user',
     isAnalyst:   !!user,
-  }), [user, loading, error, login, logout, clearError]);
+  }), [user, loading, authReady, error, login, logout, clearError]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,5 +1,5 @@
-import React from 'react';
-import { TableProperties, RotateCcw } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
+import { TableProperties, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import { Message } from '../types';
 import { TypingIndicator } from './TypingIndicator';
@@ -11,11 +11,74 @@ interface ChatMessagesProps {
   messagesEndRef:  React.RefObject<HTMLDivElement | null>;
   onMessageClick:  (msg: Message) => void;
   onRetry?:        (input: string) => void;
+  // ── Infinite scroll upward ───────────────────────────────────────────────
+  hasMore?:        boolean;
+  loadingEarlier?: boolean;
+  onLoadEarlier?:  () => void;
 }
 
-export function ChatMessages({ messages, isTyping, progressMessage, messagesEndRef, onMessageClick, onRetry }: ChatMessagesProps) {
+export function ChatMessages({
+  messages, isTyping, progressMessage, messagesEndRef,
+  onMessageClick, onRetry,
+  hasMore = false, loadingEarlier = false, onLoadEarlier,
+}: ChatMessagesProps) {
+  const scrollContainerRef  = useRef<HTMLDivElement>(null);
+  const sentinelRef         = useRef<HTMLDivElement>(null);
+  // Stores scrollHeight just before earlier messages are prepended
+  const prevScrollHeightRef = useRef<number | null>(null);
+
+  // ── Restore scroll position after prepend (runs before paint to avoid flicker) ──
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || prevScrollHeightRef.current === null) return;
+    // Shift scrollTop by exactly how much taller the container got
+    container.scrollTop += container.scrollHeight - prevScrollHeightRef.current;
+    prevScrollHeightRef.current = null;
+  }, [messages]);
+
+  // ── IntersectionObserver: fire when sentinel scrolls into view ────────────
+  useEffect(() => {
+    const sentinel  = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container || !hasMore || loadingEarlier || !onLoadEarlier) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          // Capture height before React re-renders with the prepended messages
+          prevScrollHeightRef.current = container.scrollHeight;
+          onLoadEarlier();
+        }
+      },
+      {
+        root:      container,   // observe within the scrollable div, not the viewport
+        threshold: 0.1,
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingEarlier, onLoadEarlier]);
+
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50/30">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50/30">
+
+      {/*
+        Sentinel div sits at the very top.
+        IntersectionObserver fires when user scrolls here → triggers loadEarlierMessages().
+      */}
+      <div ref={sentinelRef} style={{ height: '1px' }} />
+
+      {/* Loading spinner while fetching older messages */}
+      {loadingEarlier && (
+        <div className="flex justify-center py-2">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Loading earlier messages…
+          </div>
+        </div>
+      )}
+
       {messages.map(msg => {
         const hasResult = msg.role === 'assistant' && !!msg.queryResult;
 
