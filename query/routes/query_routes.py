@@ -338,16 +338,33 @@ async def get_table_schema(
     )
 
 
-@router.get("/suggestions/{connection_id}")
+@router.get("/query/suggestions")
 async def get_query_suggestions(
-    connection_id: str,
+    connection_id: str = Query(...),
     current_user:  dict = Depends(require_analyst),
 ):
-    # For now, return static suggestions or implement LLM-based ones later
+    from ai_agent.suggestions import get_suggestions
+    suggestions = await get_suggestions(connection_id)
+    return {"suggestions": suggestions}
+
+
+class InsightsRequest(BaseModel):
+    question: str
+    data:     list[dict]
+
+@router.post("/query/insights")
+async def generate_insights_route(
+    body:         InsightsRequest,
+    current_user: dict = Depends(require_analyst),
+):
+    from ai_agent.nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+    
+    numerical, narrative = await asyncio.gather(
+        _generate_numerical_insights(body.question, body.data),
+        _generate_narrative_insights(body.question, body.data),
+    )
+    
     return {
-        "suggestions": [
-            "Show me the first 10 rows of every table",
-            "What tables are available?",
-            "Summarize the database structure"
-        ]
+        "numerical_insights": numerical,
+        "narrative_insights": narrative
     }

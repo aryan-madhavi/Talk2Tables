@@ -320,17 +320,6 @@ async def run_agent(
     finally:
         _in_flight.discard(firebase_uid)
 
-    # Phase 2: parallel LLM insights (numerical via Gemini + narrative)
-    data = (final_state.get("final_response") or {}).get("data", [])
-    if data and final_state.get("response_type") == "results":
-        from .nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
-        numerical, narrative = await asyncio.gather(
-            _generate_numerical_insights(natural_language_query, data),
-            _generate_narrative_insights(natural_language_query, data),
-        )
-        final_state["final_response"]["numerical_insights"] = numerical
-        final_state["final_response"]["narrative_insights"] = narrative
-
     return {
         "response_type":  final_state.get("response_type", "error"),
         "final_response": final_state.get("final_response", {}),
@@ -452,13 +441,3 @@ async def run_agent_stream(
         _in_flight.discard(firebase_uid)
 
     yield f"event: result\ndata: {_json.dumps(final_result)}\n\n"
-
-    # Phase 2: parallel LLM insights (numerical via Gemini + narrative)
-    data = (final_result.get("final_response") or {}).get("data", [])
-    if data and final_result.get("response_type") == "results":
-        from .nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
-        numerical, narrative = await asyncio.gather(
-            _generate_numerical_insights(natural_language_query, data),
-            _generate_narrative_insights(natural_language_query, data),
-        )
-        yield f"event: insights\ndata: {_json.dumps({'numerical_insights': numerical, 'narrative_insights': narrative})}\n\n"

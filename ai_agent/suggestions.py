@@ -15,41 +15,33 @@ import json
 import logging
 
 from ai_agent.providers import get_llm
-from auth.core.firebase import get_firestore_client
+from auth.core.mongo import get_database
 from core.redis_client import redis_get, redis_set
 from core.cache_keys import key_schema_tables, key_suggestions, TTL_SUGGESTIONS
 
 logger = logging.getLogger(__name__)
 
-_CONNECTIONS_COL = "database_connections"
-_CACHE_COL       = "schema_cache"
-_TABLES_DOC_ID   = "_tables"
+COLLECTION     = "schema_cache"
+_TABLES_DOC_ID = "_tables"
 
 
 async def _get_table_names(connection_id: str) -> list[str]:
-    """Return flat list of 'schema.table' strings from Redis → Firestore."""
+    """Return flat list of 'schema.table' strings from Redis → MongoDB."""
     # 1. Redis
     cached = await redis_get(key_schema_tables(connection_id))
     if cached:
         tables = cached if isinstance(cached, list) else json.loads(cached)
-        return [f"{t['table_schema']}.{t['table_name']}" for t in tables]
+        return [f"{t.get('table_schema')}.{t.get('table_name')}" for t in tables]
 
-    # 2. Firestore
+    # 2. MongoDB
     try:
-        db  = get_firestore_client()
-        ref = (
-            db.collection(_CONNECTIONS_COL)
-              .document(connection_id)
-              .collection(_CACHE_COL)
-              .document(_TABLES_DOC_ID)
-        )
-        import asyncio
-        doc = await asyncio.to_thread(ref.get)
-        if doc.exists:
-            tables = doc.to_dict().get("tables", [])
-            return [f"{t['table_schema']}.{t['table_name']}" for t in tables]
+        db = get_database()
+        doc = await db[COLLECTION].find_one({"connection_id": connection_id, "doc_id": _TABLES_DOC_ID})
+        if doc:
+            tables = doc.get("tables", [])
+            return [f"{t.get('table_schema')}.{t.get('table_name')}" for t in tables]
     except Exception as exc:
-        logger.warning(f"[Suggestions] Firestore schema read failed: {exc}")
+        logger.warning(f"[Suggestions] MongoDB schema read failed: {exc}")
 
     return []
 

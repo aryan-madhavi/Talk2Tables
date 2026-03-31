@@ -251,6 +251,12 @@ async def favourite_message(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
             
+        # MongoDB: Sync with audits collection
+        await db["audits"].update_one(
+            {"audit_id": msg_id},
+            {"$set": {"favourited": True}}
+        )
+
         # Bust cache
         try:
             from core.redis_client import redis_delete
@@ -291,6 +297,12 @@ async def unfavourite_message(
         if not result:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
             
+        # MongoDB: Sync with audits collection
+        await db["audits"].update_one(
+            {"audit_id": msg_id},
+            {"$set": {"favourited": False}}
+        )
+
         # Bust cache
         try:
             from core.redis_client import redis_delete

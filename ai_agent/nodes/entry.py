@@ -71,7 +71,7 @@ async def node_entry(state: AgentState) -> AgentState:
             from access.services.access_service import verify_access
 
             allowed, reason = await verify_access(
-                firebase_uid  = firebase_uid,
+                user_id       = firebase_uid,
                 connection_id = connection_id,
                 require_write = False,
             )

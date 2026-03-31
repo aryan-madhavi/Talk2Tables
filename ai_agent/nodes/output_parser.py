@@ -145,8 +145,8 @@ async def _generate_narrative_insights(
     )
 
     try:
-        from ai_agent.providers.gemini import GeminiProvider
-        llm      = GeminiProvider().get_model()
+        from ai_agent.providers import get_llm
+        llm      = get_llm()
         response = await llm.ainvoke(prompt)
         text     = response.content.strip()
         start    = text.find("{")
@@ -197,8 +197,8 @@ async def _generate_numerical_insights(question: str, data: list[dict]) -> dict:
     )
 
     try:
-        from ai_agent.providers.gemini import GeminiProvider
-        llm      = GeminiProvider().get_model()
+        from ai_agent.providers import get_llm
+        llm      = get_llm()
         response = await llm.ainvoke(prompt)
         text     = response.content.strip()
         start    = text.find("{"); end = text.rfind("}") + 1
