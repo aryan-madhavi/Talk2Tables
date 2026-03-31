@@ -81,3 +81,23 @@ class SchemaResponse(BaseModel):
     cached:        bool = False
     cached_at:     Optional[str] = None
     stale:         bool = False  # True = served from stale cache; background refresh triggered
+
+
+class ColumnInfo(BaseModel):
+    name:     str = Field(alias="column_name")
+    type:     str = Field(alias="data_type")
+    nullable: bool = True
+    pk:       bool = Field(default=False, alias="primary_key")
+
+    model_config = {"populate_by_name": True}
+
+
+class TableSchemaResponse(BaseModel):
+    connection_id: str
+    schema_name:   str = Field(alias="schema")
+    table_name:    str = Field(alias="table")
+    columns:       list[ColumnInfo]
+    cached:        bool = False
+    cached_at:     Optional[str] = None
+
+    model_config = {"populate_by_name": True}

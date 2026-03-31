@@ -80,3 +80,118 @@ async def log_query(
     except Exception as exc:
         logger.warning(f"[AuditService] Failed to write audit log (non-fatal): {exc}")
         return ""
+
+async def get_query_history(
+    user_id:         str,
+    limit:           int = 50,
+    offset:          int = 0,
+    favourites_only: bool = False,
+) -> list[dict]:
+    """
+    Fetch query audit records for a user from MongoDB.
+    """
+    try:
+        db = get_database()
+        query = {"user_id": user_id}
+        if favourites_only:
+            query["favourited"] = True
+
+        cursor = db["audits"].find(query).sort("created_at", -1).skip(offset).limit(limit)
+        results = []
+        async for doc in cursor:
+            # Add some fields for frontend compatibility
+            doc["msg_id"] = doc.get("audit_id")
+            if "_id" in doc: doc.pop("_id")
+            results.append(doc)
+        return results
+    except Exception as exc:
+        logger.warning(f"[AuditService] get_query_history failed: {exc}")
+        return []
+
+async def get_connection_audits(
+    connection_id: str,
+    limit:         int = 50,
+    offset:        int = 0,
+    status:        str | None = None,
+    user_id:       str | None = None,
+) -> list[dict]:
+    """Fetch audit logs for a specific connection across all users."""
+    try:
+        db = get_database()
+        query = {"connection_id": connection_id}
+        if status == "success":
+            query["status"] = "success"
+        elif status == "error":
+            query["status"] = "error"
+        if user_id:
+            query["user_id"] = user_id
+
+        cursor = db["audits"].find(query).sort("created_at", -1).skip(offset).limit(limit)
+        results = []
+        async for doc in cursor:
+            if "_id" in doc: doc.pop("_id")
+            results.append(doc)
+        return results
+    except Exception as exc:
+        logger.error(f"[AuditService] get_connection_audits failed: {exc}")
+        return []
+
+async def get_connection_stats(connection_id: str, days: int = 30) -> dict:
+    """Aggregate statistics for a connection from the audits collection."""
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+    
+    try:
+        db = get_database()
+        query = {"connection_id": connection_id}
+        if days > 0:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            query["created_at"] = {"$gte": cutoff}
+
+        cursor = db["audits"].find(query)
+        
+        total = 0
+        success = 0
+        total_rows = 0
+        total_ms = 0.0
+        user_counts = defaultdict(int)
+        daily = defaultdict(int)
+
+        async for d in cursor:
+            total += 1
+            if d.get("status") == "success":
+                success += 1
+            
+            total_rows += d.get("row_count", 0) or 0
+            total_ms += d.get("execution_time_ms", 0) or 0
+            user_counts[d.get("user_id", "unknown")] += 1
+            ts = d.get("created_at", "")
+            if ts: daily[ts[:10]] += 1
+
+        top_users = sorted(
+            [{"firebase_uid": uid, "query_count": cnt} for uid, cnt in user_counts.items()],
+            key=lambda x: x["query_count"], reverse=True
+        )[:5]
+
+        daily_activity = sorted(
+            [{"date": date, "count": cnt} for date, cnt in daily.items()],
+            key=lambda x: x["date"]
+        )
+
+        return {
+            "connection_id": connection_id,
+            "period_days": days if days > 0 else None,
+            "total_queries": total,
+            "successful_queries": success,
+            "failed_queries": total - success,
+            "success_rate": round(success / total * 100, 1) if total else 0.0,
+            "total_rows_fetched": total_rows,
+            "avg_rows_per_query": round(total_rows / success, 1) if success else 0.0,
+            "avg_execution_time_ms": round(total_ms / total, 1) if total else 0.0,
+            "query_type_breakdown": {}, # Placeholder
+            "top_users": top_users,
+            "daily_activity": daily_activity,
+        }
+    except Exception as exc:
+        logger.error(f"[AuditService] get_connection_stats failed: {exc}")
+        return {}

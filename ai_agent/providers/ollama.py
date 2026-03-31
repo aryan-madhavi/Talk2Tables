@@ -11,19 +11,15 @@ Setup: docker exec ollama ollama pull qwen2.5-coder:7b
 """
 from __future__ import annotations
 
-import os
-
+from auth.core.config import settings
 from .base import LLMProvider
-
-_DEFAULT_MODEL    = "qwen2.5-coder:7b"
-_DEFAULT_BASE_URL = "http://localhost:11434"
 
 
 class OllamaProvider(LLMProvider):
 
     def __init__(self):
-        self.base_url = os.environ.get("OLLAMA_BASE_URL", _DEFAULT_BASE_URL)
-        self.model    = os.environ.get("OLLAMA_MODEL", _DEFAULT_MODEL)
+        self.base_url = settings.ollama_base_url
+        self.model    = settings.ollama_model
 
     @property
     def name(self) -> str:
@@ -35,5 +31,5 @@ class OllamaProvider(LLMProvider):
             model       = self.model,
             base_url    = self.base_url,
             temperature = 0.1,
-            num_predict = 16384,
+            num_predict = 1024,
         )

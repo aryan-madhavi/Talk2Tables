@@ -23,7 +23,13 @@ from auth.routes.dependencies import require_analyst
 from ai_agent import run_agent, run_agent_stream
 from ai_agent.services.chat_service import get_or_create_chat, get_messages, append_messages
 from ai_agent.services.audit_service import log_query
-from query.routes.schemas import QueryRequest, QueryResponse, SchemaResponse, SchemaTable
+from query.routes.schemas import (
+    QueryRequest, 
+    QueryResponse, 
+    SchemaResponse, 
+    SchemaTable, 
+    TableSchemaResponse
+)
 
 limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
@@ -205,6 +211,33 @@ async def query_stream(
     return StreamingResponse(_event_generator(), media_type="text/event-stream")
 
 
+# ── GET /api/v1/query/history ──────────────────────────────────────────────────
+
+@router.get("/query/history")
+async def query_history(
+    limit:           int = Query(20, ge=1, le=100),
+    offset:          int = Query(0, ge=0),
+    favourites_only: bool = Query(False, alias="favourites_only"),
+    current_user:    dict = Depends(require_analyst),
+):
+    from ai_agent.services.audit_service import get_query_history
+    
+    user_id = current_user["uid"]
+    history = await get_query_history(
+        user_id         = user_id,
+        limit           = limit,
+        offset          = offset,
+        favourites_only = favourites_only,
+    )
+    
+    return {
+        "history": history,
+        "total":   len(history),
+        "limit":   limit,
+        "offset":  offset
+    }
+
+
 # ── GET /api/v1/schema/{connection_id} ────────────────────────────────────────
 
 @router.get("/schema/{connection_id}", response_model=SchemaResponse)
@@ -243,7 +276,7 @@ async def list_schema(
 
         # 2. Cold start
         tools = make_schema_tools(conn_str, connection_id)
-        result_raw = await asyncio.get_event_loop().run_in_executor(None, tools[0].invoke, {})
+        result_raw = await tools[0].ainvoke({})
         raw_tables = _json.loads(result_raw)
         
         schemas_grouped = {}
@@ -258,4 +291,63 @@ async def list_schema(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-# ... (omitting get_table_schema, get_query_suggestions, etc. for brevity but they should be updated similarly)
+
+@router.get("/schema/{connection_id}/{schema_name}/{table_name}", response_model=TableSchemaResponse)
+async def get_table_schema(
+    connection_id: str,
+    schema_name:   str,
+    table_name:    str,
+    current_user:  dict = Depends(require_analyst),
+):
+    from connections.services.connection_service import get_connection_with_password
+    from ai_agent.nodes.entry import _build_connection_string
+    from ai_agent.tools.schema_tools import make_schema_tools, _mongo_get, _is_fresh, _table_doc_id
+
+    conn = await get_connection_with_password(connection_id)
+    if not conn: raise HTTPException(status_code=404, detail="Connection not found")
+    
+    # 1. Check MongoDB cache
+    doc_id = _table_doc_id(schema_name, table_name)
+    doc = await _mongo_get(connection_id, doc_id)
+    if doc and _is_fresh(doc.get("cached_at", "")):
+        return TableSchemaResponse(
+            connection_id=connection_id,
+            schema=schema_name,
+            table=table_name,
+            columns=doc["columns"],
+            cached=True,
+            cached_at=doc.get("cached_at")
+        )
+
+    # 2. Live fetch
+    conn_str = _build_connection_string(conn)
+    tools = make_schema_tools(conn_str, connection_id)
+    # tools[1] is get_table_definition
+    result_raw = await tools[1].ainvoke({"table_name": table_name, "schema_name": schema_name})
+    
+    if result_raw.startswith("Error"):
+        raise HTTPException(status_code=500, detail=result_raw)
+        
+    columns = _json.loads(result_raw)
+    return TableSchemaResponse(
+        connection_id=connection_id,
+        schema=schema_name,
+        table=table_name,
+        columns=columns,
+        cached=False
+    )
+
+
+@router.get("/suggestions/{connection_id}")
+async def get_query_suggestions(
+    connection_id: str,
+    current_user:  dict = Depends(require_analyst),
+):
+    # For now, return static suggestions or implement LLM-based ones later
+    return {
+        "suggestions": [
+            "Show me the first 10 rows of every table",
+            "What tables are available?",
+            "Summarize the database structure"
+        ]
+    }

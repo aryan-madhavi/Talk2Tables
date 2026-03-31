@@ -70,24 +70,6 @@ def _now_iso() -> str:
 def _table_doc_id(schema: str, table: str) -> str:
     return f"{schema}__{table}"
 
-# ── Sync Helpers for LangChain Tools ──────────────────────────────────────────
-
-def _run_async(coro):
-    """Helper to run async code in a sync context."""
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    if loop.is_running():
-        # This is the tricky part in FastAPI. We use a ThreadPool to run the coro.
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result(timeout=10)
-    else:
-        return loop.run_until_complete(coro)
-
 # ── Cache Logic ───────────────────────────────────────────────────────────────
 
 async def _mongo_get(connection_id: str, doc_id: str):
@@ -109,12 +91,23 @@ async def _mongo_clear(connection_id: str):
     if db is None: return
     await db[COLLECTION].delete_many({"connection_id": connection_id})
 
+def invalidate_schema_cache(connection_id: str):
+    """Force clear all caches for a connection (Fire and forget async)."""
+    from core.redis_client import redis_delete
+    from core.cache_keys import key_schema_tables
+    
+    async def _clear():
+        await redis_delete(key_schema_tables(connection_id))
+        await _mongo_clear(connection_id)
+    
+    asyncio.create_task(_clear())
+
 # ── Tool factory ───────────────────────────────────────────────────────────────
 
 def make_schema_tools(connection_string: str, connection_id: str) -> list:
 
     @tool
-    def get_schema_list() -> str:
+    async def get_schema_list() -> str:
         """Get the list of all tables and their schemas in the connected database."""
         from core.cache_keys import key_schema_tables, TTL_SCHEMA
         from core.redis_client import redis_get, redis_set
@@ -122,39 +115,57 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         redis_key = key_schema_tables(connection_id)
 
         # 1. Redis
-        cached = _run_async(redis_get(redis_key))
+        cached = await redis_get(redis_key)
         if cached: return json.dumps(cached)
 
         # 2. MongoDB
-        doc = _run_async(_mongo_get(connection_id, _TABLES_DOC_ID))
+        doc = await _mongo_get(connection_id, _TABLES_DOC_ID)
         if doc and _is_fresh(doc.get("cached_at", "")):
             tables = doc["tables"]
-            _run_async(redis_set(redis_key, tables, TTL_SCHEMA))
+            await redis_set(redis_key, tables, TTL_SCHEMA)
             return json.dumps(tables)
 
         # 3. Live DB
         try:
-            engine = _get_engine(connection_string)
-            inspector = inspect(engine)
-            results = []
-            user_schemas = [s for s in inspector.get_schema_names() if s not in _SYSTEM_SCHEMAS] or [None]
+            logger.info(f"[SchemaTools] Fetching tables for connection_id={connection_id}")
+            # SQLAlchemy inspector is sync, so we run it in a thread
+            def _fetch():
+                engine = _get_engine(connection_string)
+                inspector = inspect(engine)
+                results = []
+                
+                try:
+                    raw_schemas = inspector.get_schema_names()
+                except Exception:
+                    raw_schemas = []
+                    
+                user_schemas = [s for s in raw_schemas if s not in _SYSTEM_SCHEMAS]
+                
+                if not user_schemas:
+                    for t in inspector.get_table_names():
+                        results.append({"table_schema": "default", "table_name": t, "column_count": 0})
+                else:
+                    for s in user_schemas:
+                        for t in inspector.get_table_names(schema=s):
+                            results.append({"table_schema": s, "table_name": t, "column_count": 0})
+                return results
+
+            results = await asyncio.get_event_loop().run_in_executor(None, _fetch)
             
-            for s in user_schemas:
-                for t in inspector.get_table_names(schema=s):
-                    results.append({"table_schema": s or "default", "table_name": t, "column_count": 0})
-            
+            logger.info(f"[SchemaTools] Found {len(results)} tables for {connection_id}")
             results.sort(key=lambda r: (r["table_schema"], r["table_name"]))
             
             # 4. Cache
-            _run_async(redis_set(redis_key, results, TTL_SCHEMA))
-            _run_async(_mongo_set(connection_id, _TABLES_DOC_ID, {"tables": results}))
+            await redis_set(redis_key, results, TTL_SCHEMA)
+            await _mongo_set(connection_id, _TABLES_DOC_ID, {"tables": results})
             
             return json.dumps(results)
         except Exception as exc:
+            logger.error(f"[SchemaTools] get_schema_list failed: {exc}")
             return f"Error: {exc}"
 
     @tool
-    def get_table_definition(table_name: str, schema_name: str) -> str:
+    async def get_table_definition(table_name: str, schema_name: str) -> str:
         """Get the full column definitions for a specific table."""
         from core.cache_keys import key_schema_table_def, TTL_SCHEMA
         from core.redis_client import redis_get, redis_set
@@ -163,41 +174,46 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         doc_id    = _table_doc_id(schema_name or "default", table_name)
 
         # 1. Redis
-        cached = _run_async(redis_get(redis_key))
+        cached = await redis_get(redis_key)
         if cached: return json.dumps(cached)
 
         # 2. MongoDB
-        doc = _run_async(_mongo_get(connection_id, doc_id))
+        doc = await _mongo_get(connection_id, doc_id)
         if doc and _is_fresh(doc.get("cached_at", "")):
             cols = doc["columns"]
-            _run_async(redis_set(redis_key, cols, TTL_SCHEMA))
+            await redis_set(redis_key, cols, TTL_SCHEMA)
             return json.dumps(cols)
 
         # 3. Live DB
         try:
-            engine = _get_engine(connection_string)
-            inspector = inspect(engine)
-            s_arg = schema_name if schema_name and schema_name != "default" else None
-            
-            columns = inspector.get_columns(table_name, schema=s_arg)
-            pk_cols = set(inspector.get_pk_constraint(table_name, schema=s_arg).get("constrained_columns", []))
-            
-            result_rows = []
-            for col in columns:
-                entry = {
-                    "column_name": col["name"],
-                    "data_type":   str(col.get("type", "UNKNOWN")),
-                    "nullable":    col.get("nullable", True),
-                }
-                if col["name"] in pk_cols: entry["primary_key"] = True
-                result_rows.append(entry)
+            def _fetch():
+                engine = _get_engine(connection_string)
+                inspector = inspect(engine)
+                s_arg = schema_name if schema_name and schema_name != "default" else None
+                
+                columns = inspector.get_columns(table_name, schema=s_arg)
+                pk_cols = set(inspector.get_pk_constraint(table_name, schema=s_arg).get("constrained_columns", []))
+                
+                result_rows = []
+                for col in columns:
+                    entry = {
+                        "column_name": col["name"],
+                        "data_type":   str(col.get("type", "UNKNOWN")),
+                        "nullable":    col.get("nullable", True),
+                    }
+                    if col["name"] in pk_cols: entry["primary_key"] = True
+                    result_rows.append(entry)
+                return result_rows
+
+            result_rows = await asyncio.get_event_loop().run_in_executor(None, _fetch)
 
             # 4. Cache
-            _run_async(redis_set(redis_key, result_rows, TTL_SCHEMA))
-            _run_async(_mongo_set(connection_id, doc_id, {"columns": result_rows}))
+            await redis_set(redis_key, result_rows, TTL_SCHEMA)
+            await _mongo_set(connection_id, doc_id, {"columns": result_rows})
             
             return json.dumps(result_rows, indent=2)
         except Exception as exc:
+            logger.error(f"[SchemaTools] get_table_definition failed: {exc}")
             return f"Error: {exc}"
 
     return [get_schema_list, get_table_definition]

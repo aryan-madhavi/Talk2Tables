@@ -75,7 +75,7 @@ class UserOut(BaseModel):
     role:           str
     is_active:      bool
     email_verified: bool
-    sign_in_provider: str
+    sign_in_provider: Optional[str] = None
     created_at:     Optional[str]  = None
     last_login_at:  Optional[str]  = None
 

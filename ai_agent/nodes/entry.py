@@ -21,12 +21,13 @@ logger = logging.getLogger(__name__)
 
 def _build_connection_string(conn: dict) -> str:
     """Build a SQLAlchemy URL from a Firestore connection document."""
+    from urllib.parse import quote_plus
     db_type  = conn["db_type"].lower()
     host     = conn["host"]
     port     = conn["port"]
     database = conn["database_name"]
-    user     = conn["username"]
-    password = conn["password"]  # already decrypted by get_connection_with_password()
+    user     = quote_plus(conn["username"])
+    password = quote_plus(conn["password"])  # already decrypted by get_connection_with_password()
 
     # Map Firestore db_type values to SQLAlchemy dialect+driver strings
     _DRIVER_MAP = {

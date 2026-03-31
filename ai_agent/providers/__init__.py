@@ -8,9 +8,9 @@ Override with LLM_PROVIDER env var.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
+from auth.core.config import settings
 from .base import LLMProvider
 from .openrouter import OpenRouterProvider
 from .groq import GroqProvider
@@ -29,8 +29,6 @@ _PROVIDER_MAP: dict[str, type[LLMProvider]] = {
 }
 
 # ── LLM singleton ─────────────────────────────────────────────────────────────
-# LLM instantiation (API key validation, HTTP client init) takes 50-200ms.
-# Cache the model object so only the first request pays that cost.
 _llm_singleton = None
 _llm_singleton_key: Optional[str] = None
 
@@ -38,36 +36,23 @@ _llm_singleton_key: Optional[str] = None
 def get_llm(preferred: Optional[str] = None):
     """
     Return the singleton LangChain ChatModel, instantiating it on first call.
-
-    The singleton is keyed by the effective provider name so a runtime change
-    to LLM_PROVIDER (e.g., in tests) still produces a fresh instance.
-
-    Args:
-        preferred: Provider key override. Falls back to LLM_PROVIDER env var,
-                   then the priority chain.
-
-    Returns:
-        An instantiated LangChain BaseChatModel.
-
-    Raises:
-        RuntimeError if no provider can be instantiated.
     """
     global _llm_singleton, _llm_singleton_key
 
-    env_pref  = preferred or os.environ.get("LLM_PROVIDER", "").lower().strip()
-    cache_key = env_pref or "auto"
+    effective_pref = preferred or settings.llm_provider
+    cache_key = effective_pref or "auto"
 
     if _llm_singleton is not None and _llm_singleton_key == cache_key:
-        logger.debug(f"[LLMFactory] Returning cached LLM (provider_key={cache_key})")
         return _llm_singleton
 
+    # If a specific provider is requested, put it at the front of the line
     priority = (
-        [env_pref] + [p for p in _PRIORITY if p != env_pref]
-        if env_pref in _PROVIDER_MAP
+        [effective_pref] + [p for p in _PRIORITY if p != effective_pref]
+        if effective_pref in _PROVIDER_MAP
         else _PRIORITY
     )
 
-    last_error: Optional[Exception] = None
+    errors = []
     for key in priority:
         cls = _PROVIDER_MAP.get(key)
         if cls is None:
@@ -75,18 +60,18 @@ def get_llm(preferred: Optional[str] = None):
         try:
             provider = cls()
             model    = provider.get_model()
-            logger.info(f"[LLMFactory] Using provider: {provider.name}")
+            logger.info(f"[LLMFactory] Successfully instantiated provider: {provider.name}")
             _llm_singleton     = model
             _llm_singleton_key = cache_key
             return model
         except Exception as exc:
-            logger.warning(f"[LLMFactory] Provider '{key}' unavailable: {exc}")
-            last_error = exc
+            logger.warning(f"[LLMFactory] Provider '{key}' failed: {exc}")
+            errors.append(f"{key}: {exc}")
 
+    error_detail = " | ".join(errors)
     raise RuntimeError(
-        f"No LLM provider could be instantiated. "
-        f"Set at least one of: OPENROUTER_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, or OLLAMA_BASE_URL. "
-        f"Last error: {last_error}"
+        f"No LLM provider could be instantiated. Checked: {priority}. "
+        f"Details: {error_detail}"
     )
 
 

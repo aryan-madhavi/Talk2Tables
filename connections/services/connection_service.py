@@ -248,12 +248,13 @@ async def delete_connection(connection_id: str) -> bool:
 
 def _build_connection_url(conn: dict) -> str:
     """Build a SQLAlchemy URL from a connection doc (with decrypted password)."""
+    from urllib.parse import quote_plus
     db_type  = conn["db_type"].lower()
     host     = conn["host"]
     port     = conn["port"]
     database = conn["database_name"]
-    user     = conn["username"]
-    password = conn["password"]
+    user     = quote_plus(conn["username"])
+    password = quote_plus(conn["password"])
 
     _DRIVER_MAP = {
         "mysql":      f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}",

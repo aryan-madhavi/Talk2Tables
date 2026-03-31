@@ -23,6 +23,7 @@ import logging
 import re
 import threading
 import time
+import asyncio
 from typing import Any
 
 from langchain_core.tools import tool
@@ -109,7 +110,7 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
     """
 
     @tool
-    def execute_sql(sql_query: str) -> str:
+    async def execute_sql(sql_query: str) -> str:
         """
         Execute a SQL query against the connected database.
         Only SELECT queries are executed immediately.
@@ -155,49 +156,52 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
         try:
             from sqlalchemy import create_engine, text as sa_text
 
-            _ct     = {"connect_args": {"connect_timeout": 10}}
-            engine  = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
-            t_start = time.perf_counter()
+            def _ping_and_run():
+                _ct     = {"connect_args": {"connect_timeout": 10}}
+                engine  = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
+                t_start = time.perf_counter()
 
-            if is_write:
-                with engine.begin() as conn:
-                    result      = conn.execute(sa_text(sql))
-                    affected    = result.rowcount
-                elapsed_ms = (time.perf_counter() - t_start) * 1000
-                logger.info(f"[execute_sql] Write OK | affected={affected} | {elapsed_ms:.0f}ms")
-                return json.dumps({
-                    "rows":             [],
-                    "row_count":        affected,
-                    "execution_time_ms": round(elapsed_ms, 1),
-                    "affected_rows":    affected,
-                })
-            else:
-                with engine.connect() as conn:
-                    result  = conn.execute(sa_text(sql))
-                    columns = list(result.keys())
-                    rows    = result.fetchmany(_MAX_ROWS)
-                elapsed_ms = (time.perf_counter() - t_start) * 1000
+                if is_write:
+                    with engine.begin() as conn:
+                        result      = conn.execute(sa_text(sql))
+                        affected    = result.rowcount
+                    elapsed_ms = (time.perf_counter() - t_start) * 1000
+                    logger.info(f"[execute_sql] Write OK | affected={affected} | {elapsed_ms:.0f}ms")
+                    return json.dumps({
+                        "rows":             [],
+                        "row_count":        affected,
+                        "execution_time_ms": round(elapsed_ms, 1),
+                        "affected_rows":    affected,
+                    })
+                else:
+                    with engine.connect() as conn:
+                        result  = conn.execute(sa_text(sql))
+                        columns = list(result.keys())
+                        rows    = result.fetchmany(_MAX_ROWS)
+                    elapsed_ms = (time.perf_counter() - t_start) * 1000
 
-                serialized = [
-                    {col: _serialize_value(val) for col, val in zip(columns, row)}
-                    for row in rows
-                ]
+                    serialized = [
+                        {col: _serialize_value(val) for col, val in zip(columns, row)}
+                        for row in rows
+                    ]
 
-                total = len(serialized)
-                preview = serialized[:_PREVIEW_ROWS]
-                logger.info(f"[execute_sql] Query OK | {total} rows | {elapsed_ms:.0f}ms")
-                # Cache the full result so output_parser can skip re-execution.
-                _cache_key = hashlib.md5(f"{connection_string}:{sql}".encode()).hexdigest()
-                with _full_result_lock:
-                    _full_result_cache[_cache_key] = serialized
-                # Only send a small preview to the LLM to avoid token limit errors.
-                return json.dumps({
-                    "rows":              preview,
-                    "row_count":         total,
-                    "execution_time_ms": round(elapsed_ms, 1),
-                    "is_truncated":      total >= _MAX_ROWS,
-                    "preview_note":      f"Preview: {len(preview)} of {total} rows shown. Full data included in final response.",
-                })
+                    total = len(serialized)
+                    preview = serialized[:_PREVIEW_ROWS]
+                    logger.info(f"[execute_sql] Query OK | {total} rows | {elapsed_ms:.0f}ms")
+                    # Cache the full result so output_parser can skip re-execution.
+                    _cache_key = hashlib.md5(f"{connection_string}:{sql}".encode()).hexdigest()
+                    with _full_result_lock:
+                        _full_result_cache[_cache_key] = serialized
+                    # Only send a small preview to the LLM to avoid token limit errors.
+                    return json.dumps({
+                        "rows":              preview,
+                        "row_count":         total,
+                        "execution_time_ms": round(elapsed_ms, 1),
+                        "is_truncated":      total >= _MAX_ROWS,
+                        "preview_note":      f"Preview: {len(preview)} of {total} rows shown. Full data included in final response.",
+                    })
+
+            return await asyncio.get_event_loop().run_in_executor(None, _ping_and_run)
 
         except Exception as exc:
             logger.error(f"[execute_sql] Execution failed: {exc}")

@@ -218,42 +218,14 @@ async def list_audits_route(
     current_user:  dict           = Depends(require_db_manager),
 ):
     try:
-        from auth.core.firebase import get_firestore_client
-        from google.cloud.firestore_v1 import Query
-        from google.cloud.firestore_v1.base_query import FieldFilter
-        db = get_firestore_client()
-
-        q = (
-            db.collection("database_connections")
-              .document(connection_id)
-              .collection("audits")
-              .order_by("created_at", direction=Query.DESCENDING)
+        from ai_agent.services.audit_service import get_connection_audits
+        audits = await get_connection_audits(
+            connection_id=connection_id,
+            limit=limit,
+            offset=offset,
+            status=status,
+            user_id=uid
         )
-        if status == "success":
-            q = q.where(filter=FieldFilter("status", "in", ["success", "results"]))
-        elif status == "error":
-            q = q.where(filter=FieldFilter("status", "==", "error"))
-        if uid:
-            q = q.where(filter=FieldFilter("firebase_uid", "==", uid))
-
-        docs   = q.limit(limit + offset).stream()
-        audits = []
-        for i, doc in enumerate(docs):
-            if i < offset:
-                continue
-            d = doc.to_dict()
-            audits.append({
-                "audit_id":          d.get("audit_id", doc.id),
-                "firebase_uid":      d.get("firebase_uid", ""),
-                "chat_id":           d.get("chat_id", ""),
-                "sql_query":         d.get("sql_query", ""),
-                "summary":           d.get("summary", ""),
-                "row_count":         d.get("row_count", 0),
-                "execution_time_ms": d.get("execution_time_ms", 0),
-                "status":            d.get("status", ""),
-                "error_message":     d.get("error_message"),
-                "created_at":        d.get("created_at", ""),
-            })
 
         return {
             "connection_id": connection_id,
@@ -284,87 +256,9 @@ async def connection_stats_route(
     days:          int  = 30,   # 0 = all time
     current_user:  dict = Depends(require_db_manager),
 ):
-    from auth.core.firebase import get_firestore_client
-    from google.cloud.firestore_v1 import Query
-    from google.cloud.firestore_v1.base_query import FieldFilter
-    from datetime import datetime, timezone, timedelta
-    from collections import defaultdict
-
     try:
-        db = get_firestore_client()
-        q  = (
-            db.collection("database_connections")
-              .document(connection_id)
-              .collection("audits")
-              .order_by("created_at", direction=Query.DESCENDING)
-        )
-        if days and days > 0:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            q = q.where(filter=FieldFilter("created_at", ">=", cutoff))
-
-        docs = list(q.stream())
-
-        # ── Aggregate ──────────────────────────────────────────────────────
-        total        = len(docs)
-        success      = 0
-        failed       = 0
-        total_rows   = 0
-        total_ms     = 0.0
-        type_counts  = defaultdict(int)   # SELECT / INSERT / UPDATE / DELETE
-        user_counts  = defaultdict(int)   # firebase_uid → count
-        daily        = defaultdict(int)   # "YYYY-MM-DD" → count
-
-        for doc in docs:
-            d      = doc.to_dict()
-            status = d.get("status", "")
-
-            if status in ("results", "success"):
-                success += 1
-            else:
-                failed += 1
-
-            total_rows += d.get("row_count", 0) or 0
-            total_ms   += d.get("execution_time_ms", 0) or 0
-
-            sql   = (d.get("sql_query") or "").strip().upper()
-            first = sql.split()[0] if sql.split() else "UNKNOWN"
-            qtype = "SELECT" if first in ("SELECT", "WITH") else first if first in ("INSERT", "UPDATE", "DELETE") else "OTHER"
-            type_counts[qtype] += 1
-
-            user_counts[d.get("firebase_uid", "unknown")] += 1
-
-            ts = d.get("created_at", "")
-            if ts:
-                daily[ts[:10]] += 1  # "YYYY-MM-DD"
-
-        # Top 5 users by query count
-        top_users = sorted(
-            [{"firebase_uid": uid, "query_count": cnt} for uid, cnt in user_counts.items()],
-            key=lambda x: x["query_count"],
-            reverse=True,
-        )[:5]
-
-        # Daily activity sorted ascending (for chart rendering)
-        daily_activity = sorted(
-            [{"date": date, "count": cnt} for date, cnt in daily.items()],
-            key=lambda x: x["date"],
-        )
-
-        return {
-            "connection_id":        connection_id,
-            "period_days":          days if days > 0 else None,
-            "total_queries":        total,
-            "successful_queries":   success,
-            "failed_queries":       failed,
-            "success_rate":         round(success / total * 100, 1) if total else 0.0,
-            "total_rows_fetched":   total_rows,
-            "avg_rows_per_query":   round(total_rows / success, 1) if success else 0.0,
-            "avg_execution_time_ms": round(total_ms / total, 1) if total else 0.0,
-            "query_type_breakdown": dict(type_counts),
-            "top_users":            top_users,
-            "daily_activity":       daily_activity,
-        }
-
+        from ai_agent.services.audit_service import get_connection_stats
+        return await get_connection_stats(connection_id, days)
     except Exception as exc:
         logger.error(f"[GET /connections/{connection_id}/stats] Failed: {exc}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

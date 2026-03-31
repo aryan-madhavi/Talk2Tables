@@ -30,11 +30,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         if user is None or not user.get("is_active", True):
             raise HTTPException(status_code=401, detail="User not found or inactive")
 
-        # Return dict matching your existing structure but with 'uid' and 'firebase_uid' for compatibility
+        # Use the role from the DATABASE, not the JWT, for maximum security
+        current_role = user.get("role", "analyst")
+
         return {
             "uid": str(user["_id"]),
-            "firebase_uid": str(user["_id"]), # COMPATIBILITY LAYER
-            "role": role,
+            "firebase_uid": str(user["_id"]), 
+            "role": current_role,
             "email": user["email"]
         }
         

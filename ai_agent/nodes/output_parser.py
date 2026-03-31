@@ -228,6 +228,12 @@ def _serialize(value: Any) -> Any:
 def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
     """Re-execute SQL synchronously; called via run_in_executor."""
     from sqlalchemy import create_engine, text as sa_text
+    import re
+    
+    # Mask password for logs
+    masked_url = re.sub(r":([^@/]+)@", ":****@", connection_string)
+    logger.info(f"[FetchData] Executing on {masked_url} | SQL: {sql}")
+    
     _ct    = {"connect_args": {"connect_timeout": 10}}
     engine = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
     try:
@@ -235,7 +241,13 @@ def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
             result  = cx.execute(sa_text(sql))
             columns = list(result.keys())
             rows    = result.fetchmany(_MAX_ROWS)
-        return [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
+            
+        res = [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
+        logger.info(f"[FetchData] Success | Columns: {columns} | Rows: {len(res)}")
+        return res
+    except Exception as exc:
+        logger.error(f"[FetchData] Failed: {exc}")
+        return []
     finally:
         engine.dispose()
 
@@ -297,26 +309,43 @@ async def node_output_parser(state: AgentState) -> AgentState:
         # a second DB round-trip. Fall back to re-execution on cache miss.
         sql      = (parsed.get("sql_query") or "").strip()
         conn_str = state.get("db_connection_string")
-        if sql and conn_str and sql.upper().split()[0] in {"SELECT", "WITH"}:
-            try:
-                import hashlib as _hashlib
-                from ai_agent.tools.query_tools import _full_result_cache, _full_result_lock
-                _cache_key = _hashlib.md5(f"{conn_str}:{sql}".encode()).hexdigest()
-                with _full_result_lock:
-                    _cached = _full_result_cache.pop(_cache_key, None)
-                if _cached is not None:
-                    full_data = _cached
-                    logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
-                else:
-                    full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
-                    logger.info(f"[node_output_parser] Full data re-fetched | rows={len(full_data)}")
-                parsed["data"] = full_data
-            except Exception as exc:
-                logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
-                # Fall back to whatever preview the LLM put in data
+        
+        # If model provided sql but no data (or placeholder data), try to fetch it
+        has_real_data = isinstance(parsed.get("data"), list) and len(parsed["data"]) > 0 and not any("<" in str(v) for v in parsed["data"][0].values() if isinstance(v, str))
+        
+        if sql and conn_str and (not has_real_data):
+            first_word = sql.upper().split()[0] if sql.split() else ""
+            if first_word in {"SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"}:
+                try:
+                    import hashlib as _hashlib
+                    from ai_agent.tools.query_tools import _full_result_cache, _full_result_lock
+                    _cache_key = _hashlib.md5(f"{conn_str}:{sql}".encode()).hexdigest()
+                    with _full_result_lock:
+                        _cached = _full_result_cache.pop(_cache_key, None)
+                    if _cached is not None:
+                        full_data = _cached
+                        logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
+                    else:
+                        full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
+                        logger.info(f"[node_output_parser] Full data re-fetched | rows={len(full_data)}")
+                    parsed["data"] = full_data
+                except Exception as exc:
+                    logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
+                    # CRITICAL: If SQL fails, don't just return 0 rows. 
+                    # Raise an error to trigger a RE-TRY so the agent can fix its mistake.
+                    raise ValueError(f"SQL Error: {exc}. Please use get_schema_list to find the correct table names.")
+        
+        if has_real_data and not parsed.get("data"):
+             # Edge case: LLM provided real-looking preview but we want the full set if available
+             pass
 
         # Phase 2 (graph.py) fills numerical_insights + narrative_insights via parallel LLM calls
-        total = len(parsed.get("data", []))
+        data = parsed.get("data")
+        if not isinstance(data, list):
+            data = []
+            parsed["data"] = []
+            
+        total = len(data)
         parsed["total_records"]      = total
         parsed["numerical_insights"] = None
         parsed["narrative_insights"] = None
