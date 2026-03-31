@@ -43,6 +43,26 @@ def _ai_msg_id(turn: int) -> str:
     return f"a_{turn:04d}"
 
 
+# ── Workspace ─────────────────────────────────────────────────────────────────
+
+async def ensure_workspace(user_id: str, connection_id: str, connection_name: str = "") -> None:
+    """Create or update the workspace document in MongoDB."""
+    try:
+        db = get_database()
+        await db["workspaces"].update_one(
+            {"user_id": user_id, "connection_id": connection_id},
+            {"$set": {
+                "connection_name": connection_name,
+                "updated_at":      _now_iso()
+            }, "$setOnInsert": {
+                "created_at":      _now_iso()
+            }},
+            upsert=True
+        )
+    except Exception as exc:
+        logger.warning(f"[ChatService] ensure_workspace failed: {exc}")
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 async def create_chat(
@@ -81,6 +101,7 @@ async def get_or_create_chat(
     first_message: str,
 ) -> str:
     """Return existing chat_id if provided, otherwise create a new chat."""
+    await ensure_workspace(user_id, connection_id)
     if chat_id:
         return chat_id
     return await create_chat(user_id, connection_id, first_message)

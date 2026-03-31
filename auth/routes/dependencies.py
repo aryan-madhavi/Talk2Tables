@@ -45,10 +45,33 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 # ── Role-Based Access Control (RBAC) Dependencies ────────────────────────────
 
+ROLE_HIERARCHY = {
+    "analyst": 1,
+    "power_user": 2,
+    "db_manager": 3,
+    "admin": 4
+}
+
 async def require_user(user: dict = Depends(get_current_user)) -> dict:
     if not user.get("role"):
          raise HTTPException(status_code=403, detail="Role not assigned.")
     return user
+
+async def require_role(allowed_roles: set[str]):
+    async def _role_checker(user: dict = Depends(require_user)) -> dict:
+        if user["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail=f"Access denied. Required roles: {allowed_roles}")
+        return user
+    return _role_checker
+
+async def require_min_role(min_role: str):
+    async def _role_checker(user: dict = Depends(require_user)) -> dict:
+        user_rank = ROLE_HIERARCHY.get(user["role"], 0)
+        required_rank = ROLE_HIERARCHY.get(min_role, 99)
+        if user_rank < required_rank:
+            raise HTTPException(status_code=403, detail=f"Access denied. Minimum role required: {min_role}")
+        return user
+    return _role_checker
 
 async def require_analyst(user: dict = Depends(require_user)) -> dict:
     # analyst is the base role; all authenticated users are at least analysts

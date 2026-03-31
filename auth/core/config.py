@@ -1,29 +1,8 @@
 # auth/core/config.py
 """
-Settings — copy .env.example to .env and fill in your values.
-
-Required .env keys:
-────────────────────────────────────────────────────────────────────
-# Firebase Service Account  (download from Firebase Console →
-#   Project Settings → Service Accounts → Generate new private key)
-FIREBASE_CREDENTIALS_PATH=firebase-credentials.json
-
-# OR paste the entire JSON as one line for Docker / cloud deploys:
-# FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"..."}
-
-FIREBASE_PROJECT_ID=your-firebase-project-id
-
-# Redis cache (optional — leave blank to disable, app falls back to Firestore)
-# Local dev:          REDIS_URL=redis://localhost:6379/0
-# Cloud Memorystore:  REDIS_URL=redis://10.x.x.x:6379/0
-REDIS_URL=
-────────────────────────────────────────────────────────────────────
-
-Storage architecture:
-  • Firebase Auth    — identity, password hashing, token signing/verification
-  • Firestore        — users collection, sessions sub-collection
-  • Redis            — optional cache layer (tokens, users, connections, grants)
-  • NO PostgreSQL    — no SQLAlchemy, no asyncpg, no migrations needed
+Talk2Tables — On-Premise Settings
+=================================
+Loads configuration from environment variables or a .env file.
 """
 from __future__ import annotations
 
@@ -41,25 +20,28 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Firebase Service Account ───────────────────────────────────────────
-    # Paste the full service-account JSON as a single-line string.
-    # Download from: Firebase Console → Project Settings → Service Accounts
-    #                → Generate new private key → copy contents as one line.
-    firebase_credentials_json: Optional[str] = None
+    # ── Authentication (Local JWT) ──────────────────────────────────────────
+    jwt_secret_key: str = "your-default-secret-change-it"
+    jwt_algorithm:  str = "HS256"
+    access_token_expire_minutes:  int = 60
+    refresh_token_expire_days:    int = 7
 
-    firebase_project_id: str = ""
-
-    # ── Firestore collection names ─────────────────────────────────────────
-    firestore_users_collection:    str = "users"
-    firestore_sessions_collection: str = "sessions"   # sub-collection under each user doc
-
-    # ── Session TTL ───────────────────────────────────────────────────────
-    session_expiry_seconds: int = 28800  # 8 hours
+    # ── MongoDB (Users, Chats, Sessions, Connections) ────────────────────────
+    mongo_uri:     str = "mongodb://localhost:27017"
+    mongo_db_name: str = "talk2tables_db"
 
     # ── Redis cache (optional) ────────────────────────────────────────────
-    # Leave blank/unset to disable — app works without Redis.
     # Format: redis://[:password@]host[:port][/db]
     redis_url: Optional[str] = None
+
+    # ── Database Password Encryption ────────────────────────────────────────
+    # AES-256 Key to encrypt your connected database passwords in MongoDB.
+    db_encryption_key: str = "your-64-char-hex-key-here"
+
+    # ── Local AI (Ollama) ───────────────────────────────────────────────────
+    llm_provider:    str = "ollama"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model:    str = "qwen2.5-coder:7b"
 
     # ── CORS ──────────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
