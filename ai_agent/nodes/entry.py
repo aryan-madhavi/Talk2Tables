@@ -101,8 +101,10 @@ async def node_entry(state: AgentState) -> AgentState:
             return {**state, "error_message": msg, "response_type": "error",
                     "final_response": {"error_message": msg}}
 
-        if not conn.get("is_active", True) is False:
-            pass  # is_active=False would block; active connections pass through
+        if conn.get("is_active", True) is False:
+            msg = f"Connection '{connection_id}' is inactive."
+            return {**state, "error_message": msg, "response_type": "error",
+                    "final_response": {"error_message": msg}}
 
     except Exception as exc:
         logger.error(f"[node_entry] Firestore connection fetch failed: {exc}")

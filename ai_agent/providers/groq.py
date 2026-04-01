@@ -33,6 +33,6 @@ class GroqProvider(LLMProvider):
         return ChatGroq(
             model       = self.model,
             api_key     = self.api_key,
-            temperature = 0,
+            temperature = 0.1,
             max_tokens  = 4096,
         )

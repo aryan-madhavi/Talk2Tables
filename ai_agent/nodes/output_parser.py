@@ -18,6 +18,8 @@ numerical_insights and narrative_insights are populated by Phase 2 (parallel Gem
 """
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import datetime
 import decimal
