@@ -103,11 +103,9 @@ async def node_react_agent(state: AgentState) -> AgentState:
     messages.append(HumanMessage(content=state["natural_language_query"]))
 
     # If this is a retry, add a nudge to fix the output format
-    # If this is a retry, add a nudge to fix the output format
     if state.get("retry_count", 0) > 0:
         messages.append(HumanMessage(
             content=(
-                "Your previous response was not formatted correctly. "
                 "Your previous response was not formatted correctly. "
                 "Use tools if needed, then return ONLY a valid JSON object with keys: "
                 "title, sql_query, summary, total_records, data. "
