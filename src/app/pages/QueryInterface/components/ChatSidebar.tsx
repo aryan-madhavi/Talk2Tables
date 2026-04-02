@@ -136,7 +136,7 @@ export function ChatSidebar({
   // ── Expanded state ────────────────────────────────────────────────────────
 
   return (
-    <div className="hidden md:flex flex-col h-full w-56 shrink-0 border-r border-gray-100 bg-gray-50/60">
+    <div className="flex flex-col h-full w-64 md:w-56 shrink-0 border-r border-gray-100 bg-gray-50/60 transition-all">
 
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-gray-100">

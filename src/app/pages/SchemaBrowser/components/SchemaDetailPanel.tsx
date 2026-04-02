@@ -22,7 +22,7 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white overflow-hidden">
+    <div className="flex-1 flex flex-col bg-white overflow-hidden min-h-0">
 
       {/* Header */}
       <div className="p-6 border-b border-gray-100 flex items-start justify-between bg-white shrink-0 gap-4">
@@ -35,17 +35,18 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
             {table.schema && <>Schema: <span className="font-medium text-gray-700">{table.schema}</span> · </>}
             {detail && <><span className="font-medium">{detail.column_count}</span> columns</>}
           </p>
-          {detail?.business_context && (
-            <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100 rounded-lg text-sm text-gray-700 leading-relaxed">
-              <strong className="text-blue-800 font-semibold mb-1 block">Business Context</strong>
-              {detail.business_context}
-            </div>
-          )}
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {detail?.business_context && (
+          <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg text-sm text-gray-700 leading-relaxed">
+            <strong className="text-blue-800 font-semibold mb-1 block">Business Context</strong>
+            {detail.business_context}
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" />

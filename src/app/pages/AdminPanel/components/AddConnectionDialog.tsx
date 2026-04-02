@@ -124,14 +124,14 @@ export function AddConnectionDialog({
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 pb-20 sm:p-4 pointer-events-none">
         <div
           className="pointer-events-auto w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-gray-100
-                     animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden"
+                     animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col max-h-[82dvh] sm:max-h-[95dvh] overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           {/* ── Header ── */}
-          <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:pt-6 sm:pb-4 border-b border-gray-100 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm">
                 <Database className="w-4 h-4 text-white" />
@@ -156,7 +156,7 @@ export function AddConnectionDialog({
           </div>
 
           {/* ── Body ── */}
-          <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4 sm:space-y-5">
 
             {/* DB Type Dropdown */}
             <Field
@@ -375,14 +375,14 @@ export function AddConnectionDialog({
           </div>
 
           {/* ── Footer ── */}
-          <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t border-gray-100 gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100 gap-3 shrink-0">
             {/* Test Connection — only functional in edit mode */}
             {onTest ? (
               <button
                 onClick={handleTest}
                 disabled={testStatus === 'testing' || saving}
                 className={cn(
-                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all',
+                  'flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all w-full sm:w-auto',
                   testStatus === 'testing' || saving
                     ? 'border-gray-200 text-gray-400 bg-white cursor-not-allowed'
                     : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-100 hover:border-gray-400',
@@ -399,12 +399,12 @@ export function AddConnectionDialog({
             )}
 
             {/* Cancel / Save */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={onClose}
                 disabled={saving}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600
-                           hover:bg-gray-200 transition-colors disabled:opacity-40"
+                           hover:bg-gray-200 transition-colors disabled:opacity-40 flex-1 sm:flex-none"
               >
                 Cancel
               </button>
@@ -412,14 +412,14 @@ export function AddConnectionDialog({
                 onClick={handleSave}
                 disabled={saving}
                 className={cn(
-                  'px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm',
+                  'px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm flex-1 sm:flex-none justify-center flex',
                   saving
                     ? 'bg-blue-400 cursor-not-allowed'
                     : 'bg-blue-600 hover:bg-blue-700 active:scale-95',
                 )}
               >
                 {saving
-                  ? <span className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>
+                  ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>
                   : isEditMode ? 'Save Changes' : 'Save Connection'
                 }
               </button>

@@ -28,7 +28,7 @@ export function AuditTab() {
   const [statusFilter,   setStatusFilter]   = useState('');
 
   const [logs,        setLogs]        = useState<AuditLogEntry[]>([]);
-  const [total,       setTotal]       = useState(0);
+  const [hasMore,     setHasMore]     = useState(false);
   const [offset,      setOffset]      = useState(0);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState<string | null>(null);
@@ -45,7 +45,7 @@ export function AuditTab() {
   }, []);
 
   // Fetch audit logs
-  const fetchLogs = useCallback((connId: string, status: string, pageOffset: number, append = false) => {
+  const fetchLogs = useCallback((connId: string, status: string, pageOffset: number) => {
     if (!connId) return;
     setLoading(true);
     setError(null);
@@ -55,8 +55,9 @@ export function AuditTab() {
       status: status || undefined,
     })
       .then(res => {
-        setTotal(res.total);
-        setLogs(prev => append ? [...prev, ...(res.audits ?? [])] : (res.audits ?? []));
+        const fetchedAudits = res.audits ?? [];
+        setLogs(fetchedAudits);
+        setHasMore(fetchedAudits.length === PAGE_SIZE);
       })
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load audit logs'))
       .finally(() => setLoading(false));
@@ -70,10 +71,16 @@ export function AuditTab() {
     fetchLogs(selectedConnId, statusFilter, 0);
   }, [selectedConnId, statusFilter, fetchLogs]);
 
-  const handleLoadMore = () => {
+  const handleNextPage = () => {
     const next = offset + PAGE_SIZE;
     setOffset(next);
-    fetchLogs(selectedConnId, statusFilter, next, true);
+    fetchLogs(selectedConnId, statusFilter, next);
+  };
+
+  const handlePrevPage = () => {
+    const prev = Math.max(0, offset - PAGE_SIZE);
+    setOffset(prev);
+    fetchLogs(selectedConnId, statusFilter, prev);
   };
 
   const selectedConn = connections.find(c => c.connection_id === selectedConnId);
@@ -85,9 +92,9 @@ export function AuditTab() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h3 className="text-lg font-bold text-gray-900">Audit Logs</h3>
-          {!loading && selectedConn && (
+          {!loading && selectedConn && logs.length > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
-              {total} record{total !== 1 ? 's' : ''} for <span className="font-medium text-gray-500">{selectedConn.name}</span>
+              Showing {offset + 1} to {offset + logs.length} records for <span className="font-medium text-gray-500">{selectedConn.name}</span>
             </p>
           )}
         </div>
@@ -232,28 +239,32 @@ export function AuditTab() {
         </div>
       )}
 
-      {/* Load more */}
-      {logs.length > 0 && logs.length < total && (
-        <div className="flex justify-center mt-6">
+      {/* Pagination Controls */}
+      {logs.length > 0 && (
+        <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100">
           <button
-            onClick={handleLoadMore}
-            disabled={loading}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-gray-200
-                       text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors
-                       disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handlePrevPage}
+            disabled={offset === 0 || loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200
+                       text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors
+                       disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
-            {loading
-              ? <><Loader2 className="w-4 h-4 animate-spin" /> Loading…</>
-              : `Load more (${total - logs.length} remaining)`
-            }
+            Previous
           </button>
-        </div>
-      )}
+          
+          <div className="text-sm text-gray-500">
+            Page {Math.floor(offset / PAGE_SIZE) + 1}
+          </div>
 
-      {/* Inline loading indicator for load-more */}
-      {loading && logs.length > 0 && (
-        <div className="flex justify-center mt-4">
-          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+          <button
+            onClick={handleNextPage}
+            disabled={!hasMore || loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200
+                       text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors
+                       disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            Next
+          </button>
         </div>
       )}
 

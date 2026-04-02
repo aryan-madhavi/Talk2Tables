@@ -625,122 +625,124 @@ export function UsersTab() {
               : 'No users found.'}
           </div>
         ) : (
-          <div className="rounded-xl border border-gray-100">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
-                <tr>
-                  <th className="w-10 pl-4 rounded-tl-xl" />
-                  <th className="px-6 py-3 font-medium">User</th>
-                  <th className="px-6 py-3 font-medium">Role</th>
-                  <th className="px-6 py-3 font-medium">Status</th>
-                  <th className="px-6 py-3 font-medium">Last Login</th>
-                  <th className="px-6 py-3 font-medium w-12 rounded-tr-xl" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {filtered.map(user => (
-                  <React.Fragment key={user.firebase_uid}>
-                    <tr className={cn(
-                      'transition-colors',
-                      expandedUid === user.firebase_uid
-                        ? 'bg-blue-50/40 border-l-2 border-l-blue-400'
-                        : 'hover:bg-gray-50',
-                      !user.is_active && 'opacity-50',
-                    )}>
+          <div className="rounded-xl border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-sm text-left min-w-[800px]">
+                <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                  <tr>
+                    <th className="w-10 pl-4 rounded-tl-xl" />
+                    <th className="px-6 py-3 font-medium">User</th>
+                    <th className="px-6 py-3 font-medium">Role</th>
+                    <th className="px-6 py-3 font-medium">Status</th>
+                    <th className="px-6 py-3 font-medium">Last Login</th>
+                    <th className="px-6 py-3 font-medium w-12 rounded-tr-xl" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {filtered.map(user => (
+                    <React.Fragment key={user.firebase_uid}>
+                      <tr className={cn(
+                        'transition-colors',
+                        expandedUid === user.firebase_uid
+                          ? 'bg-blue-50/40 border-l-2 border-l-blue-400'
+                          : 'hover:bg-gray-50',
+                        !user.is_active && 'opacity-50',
+                      )}>
 
-                      {/* Expand chevron */}
-                      <td className="pl-3 pr-1 py-4">
-                        <button
-                          onClick={() => toggleExpand(user.firebase_uid)}
-                          title="View database access"
-                          className="p-1 rounded-lg hover:bg-blue-100 text-gray-400
-                                     hover:text-blue-600 transition-all"
-                        >
-                          <ChevronRight className={cn(
-                            'w-4 h-4 transition-transform duration-200',
-                            expandedUid === user.firebase_uid && 'rotate-90 text-blue-500',
-                          )} />
-                        </button>
-                      </td>
+                        {/* Expand chevron */}
+                        <td className="pl-3 pr-1 py-4">
+                          <button
+                            onClick={() => toggleExpand(user.firebase_uid)}
+                            title="View database access"
+                            className="p-1 rounded-lg hover:bg-blue-100 text-gray-400
+                                       hover:text-blue-600 transition-all"
+                          >
+                            <ChevronRight className={cn(
+                              'w-4 h-4 transition-transform duration-200',
+                              expandedUid === user.firebase_uid && 'rotate-90 text-blue-500',
+                            )} />
+                          </button>
+                        </td>
 
-                      {/* Avatar + Name + Email */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center
-                                          justify-center text-blue-700 font-bold text-xs shrink-0">
-                            {getInitials(user)}
+                        {/* Avatar + Name + Email */}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center
+                                            justify-center text-blue-700 font-bold text-xs shrink-0">
+                              {getInitials(user)}
+                            </div>
+                            <div>
+                              <button
+                                onClick={() => setEditingUser(user)}
+                                className="font-bold text-gray-900 hover:text-blue-600 transition-colors text-left"
+                                title="Edit display name"
+                              >
+                                {user.display_name ?? '—'}
+                              </button>
+                              <div className="text-xs text-gray-500">{user.email}</div>
+                            </div>
                           </div>
-                          <div>
-                            <button
-                              onClick={() => setEditingUser(user)}
-                              className="font-bold text-gray-900 hover:text-blue-600 transition-colors text-left"
-                              title="Edit display name"
-                            >
-                              {user.display_name ?? '—'}
-                            </button>
-                            <div className="text-xs text-gray-500">{user.email}</div>
-                          </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Role */}
-                      <td className="px-6 py-4">
-                        <RoleDropdown
-                          user={user}
-                          currentUid={currentUser?.firebase_uid ?? ''}
-                          onChange={role => handleRoleChange(user, role)}
-                          loading={roleLoadingUid === user.firebase_uid}
-                          canEdit={isAdmin}
-                        />
-                      </td>
+                        {/* Role */}
+                        <td className="px-6 py-4">
+                          <RoleDropdown
+                            user={user}
+                            currentUid={currentUser?.firebase_uid ?? ''}
+                            onChange={role => handleRoleChange(user, role)}
+                            loading={roleLoadingUid === user.firebase_uid}
+                            canEdit={isAdmin}
+                          />
+                        </td>
 
-                      {/* Status */}
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          'flex items-center gap-1.5 text-xs font-medium w-fit',
-                          user.is_active ? 'text-green-600' : 'text-gray-400',
-                        )}>
+                        {/* Status */}
+                        <td className="px-6 py-4">
                           <span className={cn(
-                            'w-1.5 h-1.5 rounded-full',
-                            user.is_active ? 'bg-green-500 animate-pulse' : 'bg-gray-300',
-                          )} />
-                          {user.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
+                            'flex items-center gap-1.5 text-xs font-medium w-fit',
+                            user.is_active ? 'text-green-600' : 'text-gray-400',
+                          )}>
+                            <span className={cn(
+                              'w-1.5 h-1.5 rounded-full',
+                              user.is_active ? 'bg-green-500 animate-pulse' : 'bg-gray-300',
+                            )} />
+                            {user.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
 
-                      {/* Last login */}
-                      <td className="px-6 py-4 text-xs text-gray-500">
-                        {formatDate(user.last_login_at)}
-                      </td>
+                        {/* Last login */}
+                        <td className="px-6 py-4 text-xs text-gray-500">
+                          {formatDate(user.last_login_at)}
+                        </td>
 
-                      {/* ⋮ Actions */}
-                      <td className="px-6 py-4 text-right">
-                        <ActionsMenu
+                        {/* ⋮ Actions */}
+                        <td className="px-6 py-4 text-right">
+                          <ActionsMenu
+                            user={user}
+                            currentUid={currentUser?.firebase_uid ?? ''}
+                            onActivate={() => handleActivate(user)}
+                            onDeactivate={() => handleDeactivate(user)}
+                            onDelete={() => handleDelete(user)}
+                            onForceLogout={() => handleForceLogout(user)}
+                            onEdit={() => setEditingUser(user)}
+                            onViewLogs={() => setAuditUser(user)}
+                            loading={actionLoadingUid === user.firebase_uid}
+                          />
+                        </td>
+                      </tr>
+
+                      {/* Expandable access panel */}
+                      {expandedUid === user.firebase_uid && (
+                        <UserAccessPanel
                           user={user}
+                          allConnections={allConnections}
                           currentUid={currentUser?.firebase_uid ?? ''}
-                          onActivate={() => handleActivate(user)}
-                          onDeactivate={() => handleDeactivate(user)}
-                          onDelete={() => handleDelete(user)}
-                          onForceLogout={() => handleForceLogout(user)}
-                          onEdit={() => setEditingUser(user)}
-                          onViewLogs={() => setAuditUser(user)}
-                          loading={actionLoadingUid === user.firebase_uid}
                         />
-                      </td>
-                    </tr>
-
-                    {/* Expandable access panel */}
-                    {expandedUid === user.firebase_uid && (
-                      <UserAccessPanel
-                        user={user}
-                        allConnections={allConnections}
-                        currentUid={currentUser?.firebase_uid ?? ''}
-                      />
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 text-xs
                             text-gray-400 flex justify-between items-center">

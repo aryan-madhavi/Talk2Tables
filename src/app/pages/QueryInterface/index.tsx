@@ -11,6 +11,7 @@ import { ChatMessages } from './components/ChatMessages';
 import { ChatInput }    from './components/ChatInput';
 import { ResultPanel }  from './components/ResultPanel';
 import { MessageOut }   from '../../../lib/chatService';
+import { Sheet, SheetContent } from '../../components/ui/sheet';
 
 export interface ConnectionOption {
   connection_id: string;
@@ -158,25 +159,63 @@ export default function QueryInterface() {
     setIsFavourited(f => !f);
   }, [currentResult, chatId, selectedDb, isFavourited]);
 
+  // ── Mobile Drawer States ───────────────────────────────────────────────────
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileResultsOpen, setMobileResultsOpen] = useState(false);
+
+  // Close sidebars on navigation actions automatically
+  useEffect(() => { setMobileSidebarOpen(false); }, [selectedDb, chatId]);
+  // Open mobile results automatically when a new result finishes running
+  useEffect(() => { if (currentResult) setMobileResultsOpen(true); }, [currentResult]);
+
   return (
-    <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row">
+    <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row relative">
 
-      <ChatSidebar
-        connectionId={selectedDb}
-        activeChatId={chatId}
-        executingChatId={executingChatId}
-        refreshTrigger={refreshTrigger}
-        onNewChat={newChat}
-        onSelectChat={(id, msgs, meta) => loadChat(id, msgs, meta)}
-      />
-
-      <div className="flex flex-col h-full relative flex-1 min-w-0 border-r border-gray-200">
-        <ChatHeader
-          connections={connections}
-          selectedDb={selectedDb}
-          onSelectDb={setSelectedDb}
-          currentResult={currentResult}
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex h-full">
+        <ChatSidebar
+          connectionId={selectedDb}
+          activeChatId={chatId}
+          executingChatId={executingChatId}
+          refreshTrigger={refreshTrigger}
+          onNewChat={newChat}
+          onSelectChat={(id, msgs, meta) => loadChat(id, msgs, meta)}
         />
+      </div>
+
+      {/* Mobile Sidebar (Sheet) */}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent side="left" className="p-0 w-64 border-r-0">
+          <ChatSidebar
+            connectionId={selectedDb}
+            activeChatId={chatId}
+            executingChatId={executingChatId}
+            refreshTrigger={refreshTrigger}
+            onNewChat={newChat}
+            onSelectChat={(id, msgs, meta) => loadChat(id, msgs, meta)}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <div className="flex flex-col h-full relative flex-1 min-w-0 md:border-r border-gray-200">
+        <div className="relative">
+          <ChatHeader
+            connections={connections}
+            selectedDb={selectedDb}
+            onSelectDb={setSelectedDb}
+            currentResult={currentResult}
+            onMobileMenuClick={() => setMobileSidebarOpen(true)}
+          />
+          {currentResult && (
+            <button
+              onClick={() => setMobileResultsOpen(true)}
+              className="md:hidden absolute right-4 top-1/2 -translate-y-1/2 px-3 py-1 bg-blue-50 text-blue-700 text-xs font-medium rounded-lg border border-blue-200 shadow-sm"
+            >
+              View Results
+            </button>
+          )}
+        </div>
+        
         <ChatMessages
           messages={messages}
           isTyping={isTyping && executingChatId === chatId}
@@ -196,7 +235,8 @@ export default function QueryInterface() {
         />
       </div>
 
-      <div className="hidden md:flex flex-col h-full w-[38%] shrink-0 bg-white border-l border-gray-100">
+      {/* Desktop Result Panel */}
+      <div className="hidden md:flex flex-col h-full w-[38%] shrink-0 bg-white border-l border-gray-100 relative">
         <ResultPanel
           result={currentResult}
           chartType={chartType}
@@ -208,6 +248,22 @@ export default function QueryInterface() {
           onInsightsGenerated={updateCurrentResultInsights}
         />
       </div>
+      
+      {/* Mobile Result Overlay (Sheet) */}
+      <Sheet open={mobileResultsOpen} onOpenChange={setMobileResultsOpen}>
+        <SheetContent side="bottom" className="p-0 h-[85vh] rounded-t-xl sm:hidden flex flex-col">
+          <ResultPanel
+            result={currentResult}
+            chartType={chartType}
+            setChartType={setChartType}
+            onCopy={copyToClipboard}
+            onDownload={downloadCSV}
+            onSave={handleSaveToggle}
+            isFavourited={isFavourited}
+            onInsightsGenerated={updateCurrentResultInsights}
+          />
+        </SheetContent>
+      </Sheet>
 
     </div>
   );

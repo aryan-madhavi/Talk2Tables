@@ -84,7 +84,7 @@ export function HistoryCard({ item, onOpen, onRun, onToggleFavourite }: HistoryC
         </div>
 
         {/* Action buttons */}
-        <div className="flex flex-col items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <div className="flex flex-col items-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
           <button
             onClick={() => onRun(item)}
             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"

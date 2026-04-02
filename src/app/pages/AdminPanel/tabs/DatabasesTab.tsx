@@ -260,10 +260,10 @@ export function DatabasesTab() {
         </div>
         <button
           onClick={openAddDialog}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg
-                     text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg
+                     text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm shrink-0"
         >
-          <Plus className="w-4 h-4" /> Add Connection
+          <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Add Connection
         </button>
       </div>
 
@@ -368,17 +368,17 @@ export function DatabasesTab() {
               </p>
 
               {/* Card footer */}
-              <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                <span className="text-xs text-gray-400 font-medium">{db.type}</span>
+              <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pt-4 border-t border-gray-100 mt-4">
+                <span className="text-xs text-gray-400 font-medium shrink-0">{db.type}</span>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 lg:flex lg:items-center gap-2 w-full 2xl:w-auto">
                   {/* Activate / Deactivate */}
                   <button
                     onClick={() => handleToggleActive(db)}
                     disabled={togglingId === db.connection_id}
                     title={db.is_active ? 'Deactivate' : 'Activate'}
                     className={cn(
-                      'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-all',
+                      'flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all w-full lg:w-auto',
                       db.is_active
                         ? 'border-orange-200 text-orange-600 hover:bg-orange-50'
                         : 'border-green-200 text-green-600 hover:bg-green-50',
@@ -386,10 +386,10 @@ export function DatabasesTab() {
                     )}
                   >
                     {togglingId === db.connection_id
-                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       : db.is_active
-                        ? <PowerOff className="w-3 h-3" />
-                        : <Power    className="w-3 h-3" />
+                        ? <PowerOff className="w-3.5 h-3.5" />
+                        : <Power    className="w-3.5 h-3.5" />
                     }
                     {db.is_active ? 'Disable' : 'Enable'}
                   </button>
@@ -400,20 +400,20 @@ export function DatabasesTab() {
                     disabled={refreshingSchemaId === db.connection_id}
                     title="Refresh schema cache"
                     className={cn(
-                      'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium border transition-all',
+                      'flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-all w-full lg:w-auto',
                       'border-purple-200 text-purple-600 hover:bg-purple-50',
                       refreshingSchemaId === db.connection_id && 'opacity-50 cursor-not-allowed',
                     )}
                   >
-                    <RefreshCw className={cn('w-3 h-3', refreshingSchemaId === db.connection_id && 'animate-spin')} />
+                    <RefreshCw className={cn('w-3.5 h-3.5', refreshingSchemaId === db.connection_id && 'animate-spin')} />
                     {refreshingSchemaId === db.connection_id ? 'Refreshing…' : 'Sync Schema'}
                   </button>
 
                   {/* Configure */}
                   <button
                     onClick={() => openConfigureDialog(db)}
-                    className="flex items-center gap-1.5 text-sm font-medium text-blue-700
-                               hover:text-blue-900 transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 lg:border-transparent text-sm font-medium text-blue-700
+                               hover:bg-blue-50 hover:border-blue-200 transition-colors w-full lg:w-auto"
                   >
                     <Settings2 className="w-3.5 h-3.5" />
                     Configure
@@ -423,8 +423,8 @@ export function DatabasesTab() {
                   <button
                     onClick={() => setDocsDb(db)}
                     title="Business Documentation"
-                    className="flex items-center gap-1.5 text-sm font-medium text-violet-600
-                               hover:text-violet-800 transition-colors"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 lg:border-transparent text-sm font-medium text-violet-600
+                               hover:bg-violet-50 hover:border-violet-200 transition-colors w-full lg:w-auto"
                   >
                     <FileText className="w-3.5 h-3.5" />
                     Docs
