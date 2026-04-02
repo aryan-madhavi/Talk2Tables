@@ -11,7 +11,7 @@ class QueryRequest(BaseModel):
     """POST /api/v1/query"""
     connection_id: str = Field(
         ...,
-        description="Firestore document ID from database_connections collection."
+        description="Connection ID."
     )
     chat_input: str = Field(
         ..., min_length=1, max_length=2000,
@@ -47,12 +47,7 @@ class QueryResult(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    """Unified response model for POST /api/v1/query.
-
-    data is a list so the frontend can do response.data[0].sql_query etc.
-    On success:  data = [{ sql_query, summary, total_records, numerical_insights, data }]
-    On error:    data = [{ error_message }]
-    """
+    """Unified response model for POST /api/v1/query."""
     response_type:  str           # "results" | "error"
     chat_id:        str
     data:           list[dict[str, Any]]
@@ -62,42 +57,48 @@ class SchemaTable(BaseModel):
     table:       str
     schema_name: Optional[str] = Field(default=None, alias="schema")
     columns:     int = 0
+    description: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 
 
 class SchemaResponse(BaseModel):
-    """Response for GET /api/v1/schema/{connection_id}
-
-    schemas: tables grouped by schema name  e.g. {"public": ["users", "orders"]}
-    tables:  flat list kept for backwards-compat (schema explorer sidebar)
-    cached:  True if result was served from Firestore cache
-    cached_at: ISO timestamp of when the cache was last populated (None if live fetch)
-    """
+    """Response for GET /api/v1/schema/{connection_id}"""
     connection_id: str
     schemas:       dict[str, list[str]]
     tables:        list[SchemaTable]
     table_count:   int
     cached:        bool = False
     cached_at:     Optional[str] = None
-    stale:         bool = False  # True = served from stale cache; background refresh triggered
+    stale:         bool = False
 
 
 class ColumnInfo(BaseModel):
-    name:     str = Field(alias="column_name")
-    type:     str = Field(alias="data_type")
-    nullable: bool = True
-    pk:       bool = Field(default=False, alias="primary_key")
+    column_name:          str
+    data_type:            str
+    nullable:             bool = True
+    primary_key:          bool = False
+    default:              Optional[str] = None
+    references:           Optional[str] = None
+    sample_values:        Optional[list[str]] = None
+    business_description: Optional[str] = None
 
-    model_config = {"populate_by_name": True}
+    # For backward compatibility with some frontend components
+    @property
+    def name(self) -> str: return self.column_name
+    @property
+    def type(self) -> str: return self.data_type
+    @property
+    def pk(self) -> bool: return self.primary_key
 
 
 class TableSchemaResponse(BaseModel):
-    connection_id: str
-    schema_name:   str = Field(alias="schema")
-    table_name:    str = Field(alias="table")
-    columns:       list[ColumnInfo]
-    cached:        bool = False
-    cached_at:     Optional[str] = None
+    connection_id:    str
+    schema_name:      str = Field(alias="schema")
+    table_name:       str = Field(alias="table")
+    business_context: Optional[str] = None
+    columns:          list[ColumnInfo]
+    cached:           bool = False
+    cached_at:        Optional[str] = None
 
     model_config = {"populate_by_name": True}

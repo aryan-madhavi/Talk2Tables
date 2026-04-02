@@ -18,11 +18,11 @@ Endpoints:
     GET    /api/v1/connections/{id}/stats          — usage statistics (query counts, success rate, top users, daily chart)
     POST   /api/v1/connections/{id}/schema/refresh — force-invalidate schema cache
 """
-from __future__ import annotations
+
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -69,6 +69,7 @@ router = APIRouter(
 )
 async def create_connection_route(
     body: CreateConnectionRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_db_manager),
 ):
     logger.info(
@@ -76,6 +77,9 @@ async def create_connection_route(
         f"by={current_user['firebase_uid']}"
     )
     connection = await create_connection(body, created_by_uid=current_user["firebase_uid"])
+    # Pre-warm schema cache in the background so first query is cache-hot
+    from ai_agent.tools.schema_tools import warm_schema_cache
+    background_tasks.add_task(warm_schema_cache, connection["connection_id"])
     return connection
 
 
@@ -133,6 +137,7 @@ async def get_connection_route(
 async def update_connection_route(
     connection_id: str,
     body: UpdateConnectionRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_db_manager),
 ):
     logger.info(f"[PATCH /connections/{connection_id}] by={current_user['firebase_uid']}")
@@ -142,6 +147,13 @@ async def update_connection_route(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Connection '{connection_id}' not found.",
         )
+    # If connectivity-critical fields changed, invalidate + re-warm the schema cache
+    _schema_fields = {"host", "port", "database_name", "password"}
+    if any(getattr(body, f, None) is not None for f in _schema_fields):
+        from ai_agent.tools.schema_tools import invalidate_schema_cache, warm_schema_cache
+        invalidate_schema_cache(connection_id)
+        background_tasks.add_task(warm_schema_cache, connection_id)
+        logger.info(f"[PATCH /connections/{connection_id}] Schema cache invalidated + re-warm queued")
     return connection
 
 
@@ -281,12 +293,24 @@ async def connection_stats_route(
 async def refresh_schema_cache_route(
     request: Request,
     connection_id: str,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_db_manager),
 ):
     logger.info(f"[POST /connections/{connection_id}/schema/refresh] by={current_user['firebase_uid']}")
-    from ai_agent.tools.schema_tools import invalidate_schema_cache
+    from ai_agent.tools.schema_tools import invalidate_schema_cache, warm_schema_cache
     invalidate_schema_cache(connection_id)
-    return MessageResponse(message=f"Schema cache cleared for connection '{connection_id}'.")
+    background_tasks.add_task(warm_schema_cache, connection_id)
+
+    # Re-process business docs with updated table list (picks up new tables)
+    async def _reprocess_docs_bg():
+        try:
+            from connections.services.doc_service import reprocess_docs
+            await reprocess_docs(connection_id)
+        except Exception as exc:
+            logger.warning(f"[schema/refresh] Doc reprocessing failed (non-fatal): {exc}")
+    background_tasks.add_task(_reprocess_docs_bg)
+
+    return MessageResponse(message=f"Schema cache cleared and re-warm started for connection '{connection_id}'.")
 
 
 # ── PATCH /api/v1/connections/{id}/activate ───────────────────────────────────

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth.routes.dependencies import require_analyst
 from auth.core.mongo import get_database
@@ -89,8 +89,6 @@ async def list_workspaces(
     user_id = current_user["uid"]
     try:
         db = get_database()
-        # MongoDB: Get unique connection_ids for this user from chats or workspaces collection
-        # Assuming we have a 'workspaces' collection as well for metadata
         cursor = db["workspaces"].find({"user_id": user_id})
         workspaces = []
         async for d in cursor:
@@ -100,7 +98,6 @@ async def list_workspaces(
                 created_at      = d.get("created_at", ""),
             ))
         
-        # If workspaces collection is empty, fall back to chats collection to find connections
         if not workspaces:
             pipeline = [
                 {"$match": {"user_id": user_id}},
@@ -163,27 +160,42 @@ async def list_chats(
 @router.get(
     "/workspaces/{connection_id}/chats/{chat_id}/messages",
     response_model=MessagesResponse,
-    summary="Get all messages in a chat",
+    summary="Get paginated messages in a chat",
 )
 async def get_messages(
     connection_id: str,
     chat_id:       str,
-    current_user:  dict = Depends(require_analyst),
+    limit:         int      = Query(default=30, ge=1, le=100),
+    before_seq:    int|None = Query(default=None, ge=1),
+    current_user:  dict     = Depends(require_analyst),
 ):
     user_id = current_user["uid"]
     try:
         db = get_database()
-        cursor = db["messages"].find({
-            "user_id": user_id,
-            "chat_id": chat_id
-        }).sort("seq", 1)
+        query = {"user_id": user_id, "chat_id": chat_id}
+        if before_seq is not None:
+            query["seq"] = {"$lt": before_seq}
+            
+        cursor = db["messages"].find(query).sort("seq", -1).limit(limit + 1)
         
         messages = [_to_message_out(d) async for d in cursor]
+        
+        has_more = len(messages) > limit
+        if has_more:
+            messages = messages[:limit]
+            
+        # Reverse back to ascending order (oldest → newest)
+        messages.reverse()
+        
+        next_before_seq = messages[0]["seq"] if has_more and messages else None
+        
         return MessagesResponse(
-            chat_id       = chat_id,
-            connection_id = connection_id,
-            messages      = messages,
-            total         = len(messages),
+            chat_id         = chat_id,
+            connection_id   = connection_id,
+            messages        = messages,
+            total           = len(messages),
+            has_more        = has_more,
+            next_before_seq = next_before_seq,
         )
     except Exception as exc:
         logger.error(f"[GET messages] chat={chat_id} uid={user_id} error: {exc}")
@@ -245,19 +257,16 @@ async def favourite_message(
             return_document=True
         )
         if not result:
-            # Check if it exists but is user role
             doc = await db["messages"].find_one({"user_id": user_id, "chat_id": chat_id, "msg_id": msg_id})
             if not doc:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
             
-        # MongoDB: Sync with audits collection
         await db["audits"].update_one(
             {"audit_id": msg_id},
             {"$set": {"favourited": True}}
         )
 
-        # Bust cache
         try:
             from core.redis_client import redis_delete
             from core.cache_keys import key_history
@@ -297,13 +306,11 @@ async def unfavourite_message(
         if not result:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
             
-        # MongoDB: Sync with audits collection
         await db["audits"].update_one(
             {"audit_id": msg_id},
             {"$set": {"favourited": False}}
         )
 
-        # Bust cache
         try:
             from core.redis_client import redis_delete
             from core.cache_keys import key_history

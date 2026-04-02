@@ -103,11 +103,9 @@ async def node_react_agent(state: AgentState) -> AgentState:
     messages.append(HumanMessage(content=state["natural_language_query"]))
 
     # If this is a retry, add a nudge to fix the output format
-    # If this is a retry, add a nudge to fix the output format
     if state.get("retry_count", 0) > 0:
         messages.append(HumanMessage(
             content=(
-                "Your previous response was not formatted correctly. "
                 "Your previous response was not formatted correctly. "
                 "Use tools if needed, then return ONLY a valid JSON object with keys: "
                 "title, sql_query, summary, total_records, data. "
@@ -311,6 +309,28 @@ async def run_agent(
 
     try:
         final_state = await agent.ainvoke(initial_state)
+        
+        # ── Phase 2: Parallel Insights Generation ─────────────────────────────
+        # If the query was a SELECT and returned data, generate insights.
+        final_resp = final_state.get("final_response")
+        if (
+            final_state.get("response_type") == "results" 
+            and final_resp 
+            and final_resp.get("data")
+        ):
+            from ai_agent.nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+            
+            logger.info(f"[run_agent] Launching Phase 2 insights for {len(final_resp['data'])} rows")
+            
+            # Run in parallel
+            num_task = _generate_numerical_insights(natural_language_query, final_resp["data"])
+            nar_task = _generate_narrative_insights(natural_language_query, final_resp["data"])
+            
+            num_ins, nar_ins = await asyncio.gather(num_task, nar_task)
+            
+            final_resp["numerical_insights"] = num_ins
+            final_resp["narrative_insights"] = nar_ins
+            
     except Exception as exc:
         logger.error(f"[run_agent] Unhandled error: {exc}", exc_info=True)
         return {
@@ -433,6 +453,24 @@ async def run_agent_stream(
 
         if final_result is None:
             final_result = {"response_type": "error", "final_response": {"error_message": "No response received from agent."}}
+        
+        # ── Phase 2: Parallel Insights Generation (Streaming) ─────────────────
+        final_resp = final_result.get("final_response")
+        if final_result.get("response_type") == "results" and final_resp and final_resp.get("data"):
+            from ai_agent.nodes.output_parser import _generate_numerical_insights, _generate_narrative_insights
+            
+            yield _emit_progress("insights", "Generating data insights...")
+            
+            num_task = _generate_numerical_insights(natural_language_query, final_resp["data"])
+            nar_task = _generate_narrative_insights(natural_language_query, final_resp["data"])
+            
+            num_ins, nar_ins = await asyncio.gather(num_task, nar_task)
+            
+            final_resp["numerical_insights"] = num_ins
+            final_resp["narrative_insights"] = nar_ins
+            
+            # Emit insights specifically
+            yield f"event: insights\ndata: {_json.dumps({'numerical_insights': num_ins, 'narrative_insights': nar_ins})}\n\n"
 
     except Exception as exc:
         logger.error(f"[run_agent_stream] Error: {exc}", exc_info=True)

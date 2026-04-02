@@ -54,7 +54,9 @@ class ChatListResponse(BaseModel):
 
 
 class MessagesResponse(BaseModel):
-    chat_id:       str
-    connection_id: str
-    messages:      list[MessageOut]
-    total:         int
+    chat_id:          str
+    connection_id:    str
+    messages:         list[MessageOut]
+    total:            int          # count in this page
+    has_more:         bool         # True if older messages exist
+    next_before_seq:  int | None   # pass as ?before_seq= to fetch the previous page

@@ -121,6 +121,7 @@ async def query(
             await log_query(
                 user_id           = user_id,
                 connection_id     = body.connection_id,
+                connection_name   = _conn_name,
                 chat_id           = chat_id,
                 sql_query         = final_response.get("sql_query"),
                 summary           = final_response.get("summary"),
@@ -204,9 +205,15 @@ async def query_stream(
         finally:
             exec_ms = round((_time.perf_counter() - _t0) * 1000, 1)
             async def _bg():
+                _conn_name = ""
                 try:
-                    ai_msg_id = await append_messages(user_id, body.connection_id, chat_id, body.chat_input, final_response)
-                    await log_query(user_id, body.connection_id, chat_id, final_response.get("sql_query"), final_response.get("summary"), final_response.get("total_records", 0), exec_ms, status="success" if response_type == "results" else response_type, audit_id=ai_msg_id)
+                    from connections.services.connection_service import get_connection_by_id
+                    _c = await get_connection_by_id(body.connection_id)
+                    _conn_name = (_c or {}).get("name", "")
+                except Exception: pass
+                try:
+                    ai_msg_id = await append_messages(user_id, body.connection_id, chat_id, body.chat_input, final_response, connection_name=_conn_name)
+                    await log_query(user_id, body.connection_id, chat_id, final_response.get("sql_query"), final_response.get("summary"), final_response.get("total_records", 0), exec_ms, status="success" if response_type == "results" else response_type, audit_id=ai_msg_id, connection_name=_conn_name)
                 except Exception: pass
             asyncio.ensure_future(_bg())
 
@@ -216,8 +223,9 @@ async def query_stream(
 # ── GET /api/v1/query/history ──────────────────────────────────────────────────
 
 @router.get("/query/history")
+@router.get("/query/audits")
 async def query_history(
-    limit:           int = Query(20, ge=1, le=100),
+    limit:           int = Query(20, ge=1, le=1000),
     offset:          int = Query(0, ge=0),
     favourites_only: bool = Query(False, alias="favourites_only"),
     current_user:    dict = Depends(require_analyst),
@@ -233,7 +241,8 @@ async def query_history(
     )
     
     return {
-        "history": history,
+        "audits": history, # Frontend expects "audits"
+        "history": history, # Maintain backward compatibility
         "total":   len(history),
         "limit":   limit,
         "offset":  offset
@@ -273,7 +282,7 @@ async def list_schema(
                 s = row.get("table_schema") or "default"
                 t = row.get("table_name", "")
                 schemas_grouped.setdefault(s, []).append(t)
-                flat_tables.append(SchemaTable(table=t, schema_name=s, columns=row.get("column_count", 0)))
+                flat_tables.append(SchemaTable(table=t, schema_name=s, columns=row.get("column_count", 0), description=row.get("description")))
             return SchemaResponse(connection_id=connection_id, schemas=schemas_grouped, tables=flat_tables, table_count=len(flat_tables), cached=True, stale=False, cached_at=doc.get("cached_at"))
 
         # 2. Cold start
@@ -287,7 +296,7 @@ async def list_schema(
             s = row.get("table_schema") or "default"
             t = row.get("table_name", "")
             schemas_grouped.setdefault(s, []).append(t)
-            flat_tables.append(SchemaTable(table=t, schema_name=s, columns=row.get("column_count", 0)))
+            flat_tables.append(SchemaTable(table=t, schema_name=s, columns=row.get("column_count", 0), description=row.get("description")))
             
         return SchemaResponse(connection_id=connection_id, schemas=schemas_grouped, tables=flat_tables, table_count=len(flat_tables), cached=False, stale=False)
     except Exception as exc:
@@ -301,43 +310,70 @@ async def get_table_schema(
     table_name:    str,
     current_user:  dict = Depends(require_analyst),
 ):
-    from connections.services.connection_service import get_connection_with_password
-    from ai_agent.nodes.entry import _build_connection_string
-    from ai_agent.tools.schema_tools import make_schema_tools, _mongo_get, _is_fresh, _table_doc_id
+    try:
+        from connections.services.connection_service import get_connection_with_password
+        from ai_agent.nodes.entry import _build_connection_string
+        from ai_agent.tools.schema_tools import make_schema_tools, _mongo_get, _is_fresh, _table_doc_id
 
-    conn = await get_connection_with_password(connection_id)
-    if not conn: raise HTTPException(status_code=404, detail="Connection not found")
-    
-    # 1. Check MongoDB cache
-    doc_id = _table_doc_id(schema_name, table_name)
-    doc = await _mongo_get(connection_id, doc_id)
-    if doc and _is_fresh(doc.get("cached_at", "")):
+        conn = await get_connection_with_password(connection_id)
+        if not conn: raise HTTPException(status_code=404, detail="Connection not found")
+        
+        # 1. Check MongoDB cache
+        doc_id = _table_doc_id(schema_name, table_name)
+        doc = await _mongo_get(connection_id, doc_id)
+        
+        business_context = None
+        columns_data = []
+        cached_at = None
+        is_cached = False
+
+        if doc and _is_fresh(doc.get("cached_at", "")):
+            columns_data = doc["columns"]
+            cached_at = doc.get("cached_at")
+            is_cached = True
+            # Try to get business doc enrichment
+            from connections.services.doc_service import get_table_summary_sync
+            summary = get_table_summary_sync(connection_id, schema_name, table_name)
+            if summary:
+                business_context = summary.get("business_context")
+                col_descs = summary.get("column_descriptions", {})
+                for col in columns_data:
+                    col["business_description"] = col_descs.get(col.get("column_name"))
+        else:
+            # 2. Live fetch
+            conn_str = _build_connection_string(conn)
+            tools = make_schema_tools(conn_str, connection_id)
+            result_raw = await tools[1].ainvoke({"table_name": table_name, "schema_name": schema_name})
+            
+            if result_raw.startswith("Error"):
+                raise HTTPException(status_code=500, detail=result_raw)
+                
+            parsed = _json.loads(result_raw)
+            if isinstance(parsed, dict):
+                business_context = parsed.get("business_context")
+                columns_data = parsed.get("columns", [])
+            else:
+                columns_data = parsed
+
         return TableSchemaResponse(
             connection_id=connection_id,
             schema=schema_name,
             table=table_name,
-            columns=doc["columns"],
-            cached=True,
-            cached_at=doc.get("cached_at")
+            business_context=business_context,
+            columns=columns_data,
+            cached=is_cached,
+            cached_at=cached_at
         )
-
-    # 2. Live fetch
-    conn_str = _build_connection_string(conn)
-    tools = make_schema_tools(conn_str, connection_id)
-    # tools[1] is get_table_definition
-    result_raw = await tools[1].ainvoke({"table_name": table_name, "schema_name": schema_name})
-    
-    if result_raw.startswith("Error"):
-        raise HTTPException(status_code=500, detail=result_raw)
-        
-    columns = _json.loads(result_raw)
-    return TableSchemaResponse(
-        connection_id=connection_id,
-        schema=schema_name,
-        table=table_name,
-        columns=columns,
-        cached=False
-    )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[GET /schema/{connection_id}/{schema_name}/{table_name}] Failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[GET /schema/{connection_id}/{schema_name}/{table_name}] Failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/query/suggestions")

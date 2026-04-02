@@ -18,6 +18,8 @@ numerical_insights and narrative_insights are populated by Phase 2 (parallel Gem
 """
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import datetime
 import decimal
@@ -162,7 +164,7 @@ async def _generate_narrative_insights(
             "analyst_note":     str(result.get("analyst_note", "")),
         }
     except Exception as exc:
-        logger.warning(f"[NarrativeInsights] Gemini call failed (non-fatal): {exc}")
+        logger.warning(f"[NarrativeInsights] LLM call failed (non-fatal): {exc}")
         return None
 
 
@@ -208,10 +210,10 @@ async def _generate_numerical_insights(question: str, data: list[dict]) -> dict:
         if "total_records" not in result or "aggregations" not in result:
             raise ValueError("missing required keys")
         result["total_records"] = total  # always use exact count
-        logger.info(f"[NumericalInsights] Gemini OK | cols={len(result['aggregations'])}")
+        logger.info(f"[NumericalInsights] LLM OK | cols={len(result['aggregations'])}")
         return result
     except Exception as exc:
-        logger.warning(f"[NumericalInsights] Gemini failed: {exc}")
+        logger.warning(f"[NumericalInsights] LLM failed: {exc}")
         return {"total_records": total, "aggregations": {}}
 
 
@@ -361,8 +363,12 @@ async def node_output_parser(state: AgentState) -> AgentState:
             
         total = len(data)
         parsed["total_records"]      = total
-        parsed["numerical_insights"] = None
-        parsed["narrative_insights"] = None
+        parsed["numerical_insights"] = {"total_records": total, "aggregations": {}}
+        parsed["narrative_insights"] = {
+            "key_finding": "",
+            "business_insight": "",
+            "analyst_note": ""
+        }
 
         # Auto-generate title if LLM omitted it
         if not parsed.get("title"):

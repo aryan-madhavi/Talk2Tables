@@ -40,6 +40,7 @@ async def log_query(
     status:            str = "results",
     error_message:     Optional[str] = None,
     audit_id:          Optional[str] = None, # Added
+    connection_name:   str = "",
 ) -> str:
     """
     Append a query record to the 'audits' collection.
@@ -51,6 +52,7 @@ async def log_query(
         "user_id":           user_id,
         "firebase_uid":      user_id, # Compatibility field
         "connection_id":     connection_id,
+        "connection_name":   connection_name,
         "chat_id":           chat_id,
         "sql_query":         sql_query or "",
         "summary":           summary   or "",
@@ -92,7 +94,6 @@ async def get_query_history(
         db = get_database()
         query = {"user_id": user_id}
         if favourites_only:
-            # Check for both True and also the existence of the field to be safe
             query["favourited"] = True
 
         cursor = db["audits"].find(query).sort("created_at", -1).skip(offset).limit(limit)
@@ -100,6 +101,17 @@ async def get_query_history(
         async for doc in cursor:
             # Add some fields for frontend compatibility
             doc["msg_id"] = doc.get("audit_id")
+            
+            # If title is missing, try to generate one from SQL or summary
+            if not doc.get("title"):
+                summary = doc.get("summary", "")
+                doc["title"] = summary.split(".")[0].strip()[:80] or "Query result"
+            
+            # Detect query type if missing
+            if not doc.get("query_type"):
+                from ai_agent.services.chat_service import _detect_query_type
+                doc["query_type"] = _detect_query_type(doc.get("sql_query", ""))
+
             if "_id" in doc: doc.pop("_id")
             results.append(doc)
         return results

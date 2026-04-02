@@ -34,7 +34,7 @@ class CreateUserRequest(BaseModel):
         default=None,
         max_length=100,
         description="Full name shown in the UI.",
-        examples=["Aryan Madhavi"],
+        examples=["John Doe"],
     )
     role: RoleType = Field(
         default="analyst",

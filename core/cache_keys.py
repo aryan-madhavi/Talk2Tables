@@ -84,3 +84,13 @@ TTL_HISTORY = 2 * 60  # 2 minutes
 def key_history(user_id: str, favourites_only: bool = False) -> str:
     suffix = ":favourites" if favourites_only else ""
     return f"history:{user_id}{suffix}"
+
+# Business doc summaries (per-connection, loaded by schema tools)
+TTL_DOC_SUMMARIES = 60 * 60  # 1 hour — same as schema cache
+
+def key_doc_summary_index(connection_id: str) -> str:
+    """Lightweight index of schema__table -> description for a connection."""
+    return f"docs:index:{connection_id}"
+
+def key_doc_table_summary(connection_id: str, schema: str, table: str) -> str:
+    return f"docs:summary:{connection_id}:{schema}__{table}"

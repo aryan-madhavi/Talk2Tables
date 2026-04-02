@@ -1,8 +1,8 @@
 # ai_agent/providers/__init__.py
 """
-LLM Provider factory with automatic cascading fallback.
+LLM Provider factory — Ollama only (Local).
 
-Priority order: openrouter → groq → gemini → ollama
+Priority order: ollama
 Override with LLM_PROVIDER env var.
 """
 from __future__ import annotations
@@ -12,19 +12,13 @@ from typing import Optional
 
 from auth.core.config import settings
 from .base import LLMProvider
-from .openrouter import OpenRouterProvider
-from .groq import GroqProvider
-from .gemini import GeminiProvider
 from .ollama import OllamaProvider
 
 logger = logging.getLogger(__name__)
 
-_PRIORITY = ["openrouter", "groq", "gemini", "ollama"]
+_PRIORITY = ["ollama"]
 
 _PROVIDER_MAP: dict[str, type[LLMProvider]] = {
-    "openrouter": OpenRouterProvider,
-    "groq":       GroqProvider,
-    "gemini":     GeminiProvider,
     "ollama":     OllamaProvider,
 }
 

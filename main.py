@@ -20,7 +20,7 @@ from auth import auth_router
 from auth.core.config import settings
 # Updated Import: Firebase replaced by MongoDB
 from auth.core.mongo import connect_to_mongo, close_mongo_connection
-from connections import connections_router
+from connections import connections_router, docs_router
 from users import users_router
 from access import access_router
 from query import query_router
@@ -118,12 +118,17 @@ app.add_middleware(
 
 @app.middleware("http")
 async def limit_request_body(request: Request, call_next):
-    max_bytes      = 1 * 1024 * 1024  # 1 MB
+    # Doc upload endpoint allows up to 100 MB; everything else is 1 MB
+    path = request.url.path
+    if "/docs" in path and request.method == "POST":
+        max_bytes = 100 * 1024 * 1024  # 100 MB
+    else:
+        max_bytes = 1 * 1024 * 1024    # 1 MB
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > max_bytes:
         return JSONResponse(
             status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content     = {"error": "Request body too large. Maximum size is 1 MB."},
+            content     = {"error": f"Request body too large. Maximum size is {max_bytes // (1024*1024)} MB."},
         )
     return await call_next(request)
 
@@ -171,7 +176,8 @@ app.include_router(connections_router)
 app.include_router(users_router)        
 app.include_router(access_router)       
 app.include_router(query_router)        
-app.include_router(chat_router)         
+app.include_router(chat_router)
+app.include_router(docs_router)         
 
 # ── Health ────────────────────────────────────────────────────────────────────
 

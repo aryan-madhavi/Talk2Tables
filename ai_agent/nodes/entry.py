@@ -36,7 +36,7 @@ def _build_connection_string(conn: dict) -> str:
         "postgresql": f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
         "postgres":   f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
         "mssql":      f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?driver=ODBC+Driver+17+for+SQL+Server",
-        "oracle":     f"oracle+cx_oracle://{user}:{password}@{host}:{port}/{database}",
+        "oracle":     f"oracle+oracledb://{user}:{password}@{host}:{port}/{database}",
     }
 
     conn_str = _DRIVER_MAP.get(db_type)
@@ -102,8 +102,10 @@ async def node_entry(state: AgentState) -> AgentState:
             return {**state, "error_message": msg, "response_type": "error",
                     "final_response": {"error_message": msg}}
 
-        if not conn.get("is_active", True) is False:
-            pass  # is_active=False would block; active connections pass through
+        if conn.get("is_active", True) is False:
+            msg = f"Connection '{connection_id}' is inactive."
+            return {**state, "error_message": msg, "response_type": "error",
+                    "final_response": {"error_message": msg}}
 
     except Exception as exc:
         logger.error(f"[node_entry] Firestore connection fetch failed: {exc}")
