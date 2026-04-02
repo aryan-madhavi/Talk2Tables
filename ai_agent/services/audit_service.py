@@ -39,18 +39,15 @@ async def log_query(
     execution_time_ms: float,
     status:            str = "results",
     error_message:     Optional[str] = None,
+    audit_id:          Optional[str] = None, # Added
 ) -> str:
     """
     Append a query record to the 'audits' collection.
-
-    Non-fatal — any MongoDB error is logged but NOT raised.
-
-    Returns:
-        The generated audit_id string, or empty string on failure.
     """
-    audit_id = str(uuid.uuid4())
+    final_id = audit_id or str(uuid.uuid4())
     doc = {
-        "audit_id":          audit_id,
+        "_id":               str(uuid.uuid4()), # Always unique DB primary key
+        "audit_id":          final_id,          # Links to the chat message (a_0001, etc)
         "user_id":           user_id,
         "firebase_uid":      user_id, # Compatibility field
         "connection_id":     connection_id,
@@ -61,6 +58,7 @@ async def log_query(
         "execution_time_ms": round(execution_time_ms, 1),
         "status":            status,
         "error_message":     error_message,
+        "favourited":        False,
         "created_at":        _now_iso(),
     }
 
@@ -94,6 +92,7 @@ async def get_query_history(
         db = get_database()
         query = {"user_id": user_id}
         if favourites_only:
+            # Check for both True and also the existence of the field to be safe
             query["favourited"] = True
 
         cursor = db["audits"].find(query).sort("created_at", -1).skip(offset).limit(limit)

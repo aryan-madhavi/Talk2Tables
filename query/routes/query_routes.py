@@ -104,8 +104,9 @@ async def query(
             _conn_name = (_c or {}).get("name", "")
         except Exception: pass
 
+        ai_msg_id = None
         try:
-            await append_messages(
+            ai_msg_id = await append_messages(
                 user_id            = user_id,
                 connection_id      = body.connection_id,
                 chat_id            = chat_id,
@@ -127,6 +128,7 @@ async def query(
                 execution_time_ms = exec_ms,
                 status            = "success" if response_type == "results" else response_type,
                 error_message     = final_response.get("error_message"),
+                audit_id          = ai_msg_id, # Use same ID
             )
         except Exception as exc:
             logger.warning(f"[POST /api/v1/query] log_query failed: {exc}")
@@ -203,8 +205,8 @@ async def query_stream(
             exec_ms = round((_time.perf_counter() - _t0) * 1000, 1)
             async def _bg():
                 try:
-                    await append_messages(user_id, body.connection_id, chat_id, body.chat_input, final_response)
-                    await log_query(user_id, body.connection_id, chat_id, final_response.get("sql_query"), final_response.get("summary"), final_response.get("total_records", 0), exec_ms, status="success" if response_type == "results" else response_type)
+                    ai_msg_id = await append_messages(user_id, body.connection_id, chat_id, body.chat_input, final_response)
+                    await log_query(user_id, body.connection_id, chat_id, final_response.get("sql_query"), final_response.get("summary"), final_response.get("total_records", 0), exec_ms, status="success" if response_type == "results" else response_type, audit_id=ai_msg_id)
                 except Exception: pass
             asyncio.ensure_future(_bg())
 

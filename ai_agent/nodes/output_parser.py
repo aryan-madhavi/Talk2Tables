@@ -237,17 +237,22 @@ def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
     _ct    = {"connect_args": {"connect_timeout": 10}}
     engine = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
     try:
-        with engine.connect() as cx:
+        # Use .begin() to ensure a transaction is started and COMMITTED
+        with engine.begin() as cx:
             result  = cx.execute(sa_text(sql))
-            columns = list(result.keys())
-            rows    = result.fetchmany(_MAX_ROWS)
+            # For SELECT/SHOW, fetch rows. For INSERT/UPDATE, result.returns_rows is False.
+            if result.returns_rows:
+                columns = list(result.keys())
+                rows    = result.fetchmany(_MAX_ROWS)
+                res = [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
+            else:
+                res = [] # Write operation succeeded
             
-        res = [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
-        logger.info(f"[FetchData] Success | Columns: {columns} | Rows: {len(res)}")
+        logger.info(f"[FetchData] Success | Rows: {len(res)}")
         return res
     except Exception as exc:
         logger.error(f"[FetchData] Failed: {exc}")
-        return []
+        raise # Raise so node_output_parser can catch it and retry
     finally:
         engine.dispose()
 
@@ -291,6 +296,12 @@ async def node_output_parser(state: AgentState) -> AgentState:
     # ── Attempt to parse ──────────────────────────────────────────────────
     try:
         cleaned  = _extract_json(raw)
+        
+        # ── Detect Hallucinations (Special check for 3B models) ───────────
+        hallucination_patterns = [r"column\d", r"value\d", r"random_value", r"your_table"]
+        if any(re.search(p, cleaned, re.IGNORECASE) for p in hallucination_patterns):
+            raise ValueError("Placeholder detected (e.g. 'column1'). You MUST use get_table_definition to find ACTUAL column names before writing SQL.")
+
         parsed   = json.loads(cleaned)
         
         if isinstance(parsed, list):
@@ -311,29 +322,32 @@ async def node_output_parser(state: AgentState) -> AgentState:
         conn_str = state.get("db_connection_string")
         
         # If model provided sql but no data (or placeholder data), try to fetch it
+        # CRITICAL: For WRITE operations, we ALWAYS fetch (execute) to ensure the 
+        # database change actually happens, even if the LLM provided a "fake" data array.
+        sql_upper = sql.upper()
+        is_write  = any(sql_upper.startswith(w) for w in ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER"])
+        
         has_real_data = isinstance(parsed.get("data"), list) and len(parsed["data"]) > 0 and not any("<" in str(v) for v in parsed["data"][0].values() if isinstance(v, str))
         
-        if sql and conn_str and (not has_real_data):
-            first_word = sql.upper().split()[0] if sql.split() else ""
-            if first_word in {"SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"}:
-                try:
-                    import hashlib as _hashlib
-                    from ai_agent.tools.query_tools import _full_result_cache, _full_result_lock
-                    _cache_key = _hashlib.md5(f"{conn_str}:{sql}".encode()).hexdigest()
-                    with _full_result_lock:
-                        _cached = _full_result_cache.pop(_cache_key, None)
-                    if _cached is not None:
-                        full_data = _cached
-                        logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
-                    else:
-                        full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
-                        logger.info(f"[node_output_parser] Full data re-fetched | rows={len(full_data)}")
-                    parsed["data"] = full_data
-                except Exception as exc:
-                    logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
-                    # CRITICAL: If SQL fails, don't just return 0 rows. 
-                    # Raise an error to trigger a RE-TRY so the agent can fix its mistake.
-                    raise ValueError(f"SQL Error: {exc}. Please use get_schema_list to find the correct table names.")
+        # Force execution if it's a write OR if there is no real data
+        if sql and conn_str and (is_write or not has_real_data):
+            try:
+                import hashlib as _hashlib
+                from ai_agent.tools.query_tools import _full_result_cache, _full_result_lock
+                _cache_key = _hashlib.md5(f"{conn_str}:{sql}".encode()).hexdigest()
+                with _full_result_lock:
+                    _cached = _full_result_cache.pop(_cache_key, None)
+                if _cached is not None:
+                    full_data = _cached
+                    logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
+                else:
+                    full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
+                    logger.info(f"[node_output_parser] Data executed/fetched | rows={len(full_data)}")
+                parsed["data"] = full_data
+            except Exception as exc:
+                logger.warning(f"[node_output_parser] Database execution failed: {exc}")
+                # Raise to trigger a retry so the AI can fix the SQL
+                raise ValueError(f"Database Error: {exc}. Ensure your SQL is correct for the current database and use get_schema_list.")
         
         if has_real_data and not parsed.get("data"):
              # Edge case: LLM provided real-looking preview but we want the full set if available

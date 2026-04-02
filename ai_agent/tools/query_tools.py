@@ -166,8 +166,10 @@ def make_query_tools(connection_string: str, user_role: str) -> list:
                         result      = conn.execute(sa_text(sql))
                         affected    = result.rowcount
                     elapsed_ms = (time.perf_counter() - t_start) * 1000
+                    msg = f"SUCCESS: {affected} row(s) affected. The change has been committed to the database."
                     logger.info(f"[execute_sql] Write OK | affected={affected} | {elapsed_ms:.0f}ms")
                     return json.dumps({
+                        "message":          msg,
                         "rows":             [],
                         "row_count":        affected,
                         "execution_time_ms": round(elapsed_ms, 1),

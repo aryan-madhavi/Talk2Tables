@@ -203,6 +203,8 @@ async def append_messages(
 
         await db["messages"].insert_many(messages)
         logger.debug(f"[ChatService] Messages appended | chat_id={chat_id}")
+        return messages[1]["msg_id"]
 
     except Exception as exc:
         logger.warning(f"[ChatService] append_messages failed: {exc}")
+        return None
