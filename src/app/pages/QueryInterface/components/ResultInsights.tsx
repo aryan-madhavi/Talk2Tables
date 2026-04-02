@@ -148,7 +148,10 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
 
   const narrative = result.narrativeInsights;
   const insights  = result.insights;
-  const hasStats  = insights && Object.keys(insights.aggregations).length > 0;
+  
+  // A result has stats if aggregations is not empty OR key_finding exists
+  const hasNarrative = !!(narrative?.key_finding || narrative?.business_insight || narrative?.analyst_note);
+  const hasStats = !!(insights && Object.keys(insights.aggregations || {}).length > 0);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -166,42 +169,34 @@ export function ResultInsights({ result, onInsightsGenerated }: ResultInsightsPr
     }
   };
 
-  // Show spinner while Phase 2 parallel insights are being generated
-  if (result.insightsLoading && !narrative && !hasStats) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
-        <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
-        <p className="text-sm text-gray-500">Generating insights…</p>
-      </div>
-    );
-  }
-
-  if (!narrative && !hasStats) {
+  if (!hasNarrative && !hasStats) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4 text-gray-400">
-        <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center">
-          <Sparkles className="w-5 h-5 opacity-40" />
+        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-2">
+          <Sparkles className="w-8 h-8 text-blue-400 opacity-60" />
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-gray-600 mb-1">No insights available</p>
-          <p className="text-xs text-gray-400 max-w-xs">AI-powered insights could not be generated for this query.</p>
+          <h3 className="text-sm font-semibold text-gray-900 mb-1">AI Data Insights</h3>
+          <p className="text-xs text-gray-500 max-w-[200px] mx-auto leading-relaxed">
+            Generate AI-powered summaries and statistical analysis for this query.
+          </p>
         </div>
         {genError && <p className="text-xs text-red-500 text-center max-w-xs">{genError}</p>}
         <button
           onClick={handleGenerate}
           disabled={generating}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-bold rounded-xl shadow-md shadow-blue-100 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           {generating
-            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-            : <><Sparkles className="w-3.5 h-3.5" /> Retry</>
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing…</>
+            : <><Sparkles className="w-4 h-4" /> Generate Insights</>
           }
         </button>
       </div>
     );
   }
 
-  const entries         = hasStats ? Object.entries(insights!.aggregations) : [];
+  const entries         = hasStats ? Object.entries(insights!.aggregations || {}) : [];
   const numericCols     = entries.filter(([, s]) => s.type === 'numeric');
   const categoricalCols = entries.filter(([, s]) => s.type === 'categorical');
 

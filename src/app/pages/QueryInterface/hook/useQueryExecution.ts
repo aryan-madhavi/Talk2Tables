@@ -20,6 +20,9 @@ function buildResultFromMessage(m: MessageOut): QueryResult | null {
     executionTime: 0,
     rowCount:      m.total_records ?? m.data.length,
     msgId:         m.msg_id,
+    insights:          m.numerical_insights as any,
+    narrativeInsights: m.narrative_insights as any,
+    insightsLoading:   false,
     chartData:     m.data.slice(0, 10).map(item => {
       const keys = Object.keys(item);
       return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -215,7 +218,7 @@ export function useQueryExecution(selectedConnectionId: string) {
               summary:           payload.summary,
               insights:          (payload as any).numerical_insights  ?? undefined,
               narrativeInsights: (payload as any).narrative_insights  ?? undefined,
-              insightsLoading:   true,
+              insightsLoading:   false,
               chartData:     (payload.data || []).slice(0, 10).map(item => {
                 const keys = Object.keys(item);
                 return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };

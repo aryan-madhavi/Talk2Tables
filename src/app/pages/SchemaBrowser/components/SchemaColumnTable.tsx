@@ -21,8 +21,11 @@ export function SchemaColumnTable({ columns }: SchemaColumnTableProps) {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {columns.map(col => {
-            const isPK = col.constraint_type === 'PRIMARY KEY';
-            const isFK = col.constraint_type === 'FOREIGN KEY';
+            const isPK = col.primary_key || col.is_primary_key || col.constraint_type === 'PRIMARY KEY';
+            const isFK = col.constraint_type === 'FOREIGN KEY' || !!col.references;
+            const isUnique = col.unique || col.is_unique;
+            const refTable = col.referenced_table || col.references;
+
             return (
               <tr key={col.column_name} className="hover:bg-gray-50 transition-colors">
                 <td className="px-5 py-3 text-sm">
@@ -35,29 +38,37 @@ export function SchemaColumnTable({ columns }: SchemaColumnTableProps) {
                 </td>
                 <td className="px-5 py-3 font-mono text-xs text-gray-600">{col.data_type}</td>
                 <td className="px-5 py-3 text-xs">
-                  <span className={col.is_nullable === 'YES' ? 'text-gray-400' : 'text-gray-700 font-medium'}>
-                    {col.is_nullable === 'YES' ? 'nullable' : 'NOT NULL'}
+                  <span className={(col.is_nullable === 'YES' || col.nullable === true) ? 'text-gray-400' : 'text-gray-700 font-medium'}>
+                    {(col.is_nullable === 'YES' || col.nullable === true) ? 'nullable' : 'NOT NULL'}
                   </span>
                 </td>
                 <td className="px-5 py-3">
-                  {isPK && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
-                                     bg-amber-50 text-amber-700 text-xs font-medium border border-amber-100">
-                      <Key className="w-3 h-3" /> PK
-                    </span>
-                  )}
-                  {isFK && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
-                                     bg-blue-50 text-blue-700 text-xs font-medium border border-blue-100">
-                      <Link2 className="w-3 h-3" /> FK
-                      {col.referenced_table && (
-                        <span className="text-blue-500 font-normal">→ {col.referenced_table}</span>
-                      )}
-                    </span>
-                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {isPK && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                       bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-100 uppercase tracking-tight">
+                        <Key className="w-2.5 h-2.5" /> PK
+                      </span>
+                    )}
+                    {isUnique && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                       bg-purple-50 text-purple-700 text-[10px] font-bold border border-purple-100 uppercase tracking-tight">
+                        Unique
+                      </span>
+                    )}
+                    {isFK && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+                                       bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-100 uppercase tracking-tight">
+                        <Link2 className="w-2.5 h-2.5" /> FK
+                        {refTable && (
+                          <span className="text-blue-500 font-normal normal-case">→ {refTable}</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-5 py-3 text-xs text-gray-400 font-mono">
-                  {col.column_default ?? <span className="italic">—</span>}
+                  {col.column_default ?? col.default ?? <span className="italic">—</span>}
                 </td>
               </tr>
             );

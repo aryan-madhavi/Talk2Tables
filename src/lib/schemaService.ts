@@ -45,6 +45,12 @@ export interface ColumnOut {
   constraint_type:      string | null; // 'PRIMARY KEY' | 'FOREIGN KEY' | null
   referenced_table:     string | null;
   business_description?: string;
+  // New fields
+  primary_key?:         boolean;
+  unique?:              boolean;
+  references?:          string;
+  is_primary_key?:      boolean;
+  is_unique?:           boolean;
 }
 
 export interface TableDetailResponse {
