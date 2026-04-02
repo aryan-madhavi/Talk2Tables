@@ -34,6 +34,11 @@ interface AuthContextValue {
    * ProtectedRoute MUST wait for this to be false before redirecting.
    */
   loading:     boolean;
+  /**
+   * TRUE once onAuthStateChanged has fired AND /me check is done.
+   * Gate API calls behind this — never fires during the auth race window.
+   */
+  authReady:   boolean;
   /** Last error string from a failed login attempt. */
   error:       string | null;
   login:       (email: string, password: string) => Promise<void>;
@@ -50,9 +55,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user,    setUser]    = useState<BackendUser | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [user,      setUser]      = useState<BackendUser | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -60,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!token) {
         setUser(null);
         setLoading(false);
+        setAuthReady(true);
         return;
       }
 
@@ -72,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       } finally {
         setLoading(false);
+        setAuthReady(true);
       }
     };
 
@@ -82,15 +90,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     setLoading(true);
+    setAuthReady(false);
+    
     try {
       const data = await apiLogin(email, password);
       setUser(data.user);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed. Please try again.';
       setError(msg);
+      setAuthReady(true);
       throw err;
     } finally {
       setLoading(false);
+      setAuthReady(true);
     }
   }, []);
 
@@ -108,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     user,
     loading,
+    authReady,
     error,
     login,
     logout,
@@ -116,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isDbManager: user?.role === 'admin' || user?.role === 'db_manager',
     isPowerUser: user?.role === 'admin' || user?.role === 'db_manager' || user?.role === 'power_user',
     isAnalyst:   !!user,
-  }), [user, loading, error, login, logout, clearError]);
+  }), [user, loading, authReady, error, login, logout, clearError]);
 
   return (
     <AuthContext.Provider value={value}>

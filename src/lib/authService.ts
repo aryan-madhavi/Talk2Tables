@@ -67,6 +67,11 @@ function deleteCookie(name: string): void {
   document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Strict`;
 }
 
+/** Check if a backend session cookie exists */
+export function hasSession(): boolean {
+  return !!getAccessToken();
+}
+
 export function saveTokens(access: string, refresh: string): void {
   setCookie(ACCESS_TOKEN_KEY, access, 3600); // 1 hour for access
   setCookie(REFRESH_TOKEN_KEY, refresh, SESSION_MAX_AGE);

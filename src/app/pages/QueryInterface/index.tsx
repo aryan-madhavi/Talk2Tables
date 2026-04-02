@@ -69,7 +69,10 @@ export default function QueryInterface() {
         const found = opts.find(c => c.connection_id === connectionId);
         setSelectedDb(found ? connectionId : (opts[0]?.connection_id ?? ''));
         if (msgs) {
-          loadChat(pendingChatId, msgs.messages ?? []);
+          loadChat(pendingChatId, msgs.messages ?? [], {
+            has_more:        msgs.has_more,
+            next_before_seq: msgs.next_before_seq,
+          });
           openChatFired.current = true;
           pendingChat.current = null;
           navigate(location.pathname, { replace: true, state: null });
@@ -86,6 +89,7 @@ export default function QueryInterface() {
     chartType, setChartType, copyToClipboard, downloadCSV,
     chatId, loadChat, newChat, refreshTrigger, sendQuery,
     updateCurrentResultInsights, progressMessage,
+    hasMoreMessages, loadingEarlier, loadEarlierMessages,
   } = useQueryExecution(selectedDb);
 
   // Pre-fill input from Suggested Queries click (fires once, no auto-run)
@@ -119,7 +123,10 @@ export default function QueryInterface() {
     pendingChat.current = null;
     navigate(location.pathname, { replace: true, state: null });
     getMessages(selectedDb, chatId)
-      .then(res => loadChat(chatId, res.messages ?? []))
+      .then(res => loadChat(chatId, res.messages ?? [], {
+        has_more:        res.has_more,
+        next_before_seq: res.next_before_seq,
+      }))
       .catch(console.error);
   }, [selectedDb]);
 
@@ -160,7 +167,7 @@ export default function QueryInterface() {
         executingChatId={executingChatId}
         refreshTrigger={refreshTrigger}
         onNewChat={newChat}
-        onSelectChat={(id, msgs: MessageOut[]) => loadChat(id, msgs)}
+        onSelectChat={(id, msgs, meta) => loadChat(id, msgs, meta)}
       />
 
       <div className="flex flex-col h-full relative flex-1 min-w-0 border-r border-gray-200">
@@ -177,6 +184,9 @@ export default function QueryInterface() {
           messagesEndRef={messagesEndRef}
           onMessageClick={handleMessageClick}
           onRetry={sendQuery}
+          hasMore={hasMoreMessages}
+          loadingEarlier={loadingEarlier}
+          onLoadEarlier={loadEarlierMessages}
         />
         <ChatInput
           input={input}

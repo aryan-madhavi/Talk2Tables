@@ -58,9 +58,9 @@ export function RecentQueries() {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map(item => (
+          {items.map((item, index) => (
             <div
-              key={item.msg_id}
+              key={`${item.msg_id}_${index}`}
               className="flex items-center justify-between p-4 bg-gray-50 rounded-lg
                          hover:bg-gray-100 transition-colors group"
             >
