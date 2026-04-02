@@ -95,9 +95,12 @@ def get_firebase_app() -> firebase_admin.App:
     cred = credentials.Certificate(cred_dict)
     logger.info("[Firebase] Admin SDK: credentials loaded from FIREBASE_CREDENTIALS_JSON")
 
-    app = firebase_admin.initialize_app(cred, {
-        "projectId": settings.firebase_project_id,
-    })
+    init_opts = {"projectId": settings.firebase_project_id}
+    # Auto-derive Storage bucket from project ID (standard Firebase convention)
+    if settings.firebase_project_id:
+        init_opts["storageBucket"] = f"{settings.firebase_project_id}.firebasestorage.app"
+
+    app = firebase_admin.initialize_app(cred, init_opts)
     logger.info(f"[Firebase] Admin SDK + Service Account ready | project={settings.firebase_project_id}")
     return app
 
