@@ -95,6 +95,11 @@ function getSessionId(): string | null {
   return match ? decodeURIComponent(match.split('=')[1]) : null;
 }
 
+/** Check if a backend session cookie exists (used by AuthContext to avoid 401 spam). */
+export function hasSession(): boolean {
+  return !!getSessionId();
+}
+
 function clearSession(): void {
   // Max-Age=0 expires the cookie immediately
   document.cookie = `${SESSION_KEY}=; Max-Age=0; Path=/; SameSite=Strict`;

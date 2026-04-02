@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   Database, X, Eye, EyeOff, Loader2, Wifi,
-  Lock, Server, CheckCircle, XCircle, ChevronDown,
+  Lock, Server, CheckCircle, XCircle, ChevronDown, FileUp, FileText, Trash2,
 } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import {
@@ -30,6 +30,8 @@ interface AddConnectionDialogProps {
    * Returns { ok, message } from the backend test endpoint.
    */
   onTest?:      () => Promise<{ ok: boolean; message: string }>;
+  /** Called with the selected doc file after save (optional upload during connection creation) */
+  onDocFile?:   (file: File) => void;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ export function AddConnectionDialog({
   initialData,
   saving  = false,
   onTest,
+  onDocFile,
 }: AddConnectionDialogProps) {
   const isEditMode = !!initialData;
 
@@ -49,6 +52,8 @@ export function AddConnectionDialog({
   const [testStatus,   setTestStatus]   = useState<TestStatus>('idle');
   const [testMessage,  setTestMessage]  = useState('');
   const [errors,       setErrors]       = useState<ConnectionFormErrors>({});
+  const [docFile,      setDocFile]      = useState<File | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -102,6 +107,7 @@ export function AddConnectionDialog({
 
   const handleSave = () => {
     if (!validate()) return;
+    if (docFile && onDocFile) onDocFile(docFile);
     onSave(form);
   };
 
@@ -295,6 +301,60 @@ export function AddConnectionDialog({
                   form.ssl ? 'translate-x-4.5' : 'translate-x-0.5',
                 )} />
               </button>
+            </div>
+
+            {/* Business Documentation (Optional) */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center">
+                  <FileText className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">Business Documentation</div>
+                  <div className="text-xs text-gray-500">Optional — helps AI understand your data</div>
+                </div>
+              </div>
+              {docFile ? (
+                <div className="flex items-center justify-between mt-2 px-3 py-2 rounded-lg bg-white border border-gray-200">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileUp className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span className="text-sm text-gray-700 truncate">{docFile.name}</span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {(docFile.size / 1024 / 1024).toFixed(1)} MB
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDocFile(null)}
+                    className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg
+                             border-2 border-dashed border-gray-200 hover:border-violet-300
+                             hover:bg-violet-50/50 text-sm text-gray-500 hover:text-violet-600
+                             transition-all cursor-pointer"
+                >
+                  <FileUp className="w-4 h-4" />
+                  Choose file (PDF, DOCX, TXT, CSV, XLSX)
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setDocFile(f);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
             </div>
 
             {/* Test Status Banners */}

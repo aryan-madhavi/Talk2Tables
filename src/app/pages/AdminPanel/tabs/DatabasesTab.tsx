@@ -1,11 +1,12 @@
 // src/app/pages/AdminPanel/tabs/DatabasesTab.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { Database, Plus, Settings2, Power, PowerOff, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Database, Plus, Settings2, Power, PowerOff, Loader2, AlertCircle, RefreshCw, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../../lib/utils';
 import { DatabaseConnection } from '../../../types';
 import { ConnectionForm, dbConnectionToForm } from '../types';
 import { AddConnectionDialog } from '../components/AddConnectionDialog';
+import { DocsPanel } from '../components/DocsPanel';
 import {
   listConnections,
   createConnection,
@@ -14,6 +15,7 @@ import {
   deactivateConnection,
   testConnection,
   refreshSchemaCache,
+  uploadDoc,
   ConnectionOut,
 } from '../../../../lib/connectionService';
 
@@ -61,6 +63,10 @@ export function DatabasesTab() {
   const [togglingId, setTogglingId]           = useState<string | null>(null);
   // Per-card schema refresh
   const [refreshingSchemaId, setRefreshingSchemaId] = useState<string | null>(null);
+  // Docs panel state
+  const [docsDb, setDocsDb] = useState<DatabaseConnection | null>(null);
+  // Pending doc file for upload after connection creation
+  const pendingDocFile = React.useRef<File | null>(null);
 
   // ── Fetch connections on mount ─────────────────────────────────────────────
 
@@ -163,6 +169,23 @@ export function DatabasesTab() {
           .catch(() => {
             toast.warning(`"${created.name}" saved but connection test could not be reached.`);
           });
+
+        // Upload doc file if user selected one during creation
+        if (pendingDocFile.current) {
+          const file = pendingDocFile.current;
+          pendingDocFile.current = null;
+          uploadDoc(created.connection_id, file)
+            .then(result => {
+              toast.success(
+                result.table_count > 0
+                  ? `Doc "${file.name}" uploaded — ${result.table_count} table${result.table_count !== 1 ? 's' : ''} enriched`
+                  : `Doc "${file.name}" uploaded — will be processed on schema refresh`,
+              );
+            })
+            .catch(err => {
+              toast.warning(`Doc upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            });
+        }
       }
 
       handleClose();
@@ -395,6 +418,17 @@ export function DatabasesTab() {
                     <Settings2 className="w-3.5 h-3.5" />
                     Configure
                   </button>
+
+                  {/* Business Docs */}
+                  <button
+                    onClick={() => setDocsDb(db)}
+                    title="Business Documentation"
+                    className="flex items-center gap-1.5 text-sm font-medium text-violet-600
+                               hover:text-violet-800 transition-colors"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Docs
+                  </button>
                 </div>
               </div>
             </div>
@@ -414,7 +448,18 @@ export function DatabasesTab() {
           ? () => testConnection(configureDb.connection_id)
           : undefined
         }
+        onDocFile={(file) => { pendingDocFile.current = file; }}
       />
+
+      {/* Business Docs Panel */}
+      {docsDb && (
+        <DocsPanel
+          open={!!docsDb}
+          onClose={() => setDocsDb(null)}
+          connectionId={docsDb.connection_id}
+          connectionName={docsDb.name}
+        />
+      )}
     </div>
   );
 }

@@ -166,3 +166,56 @@ export async function refreshSchemaCache(id: string): Promise<{ message: string 
     method: 'POST',
   });
 }
+
+// ── Business Documentation API ─────────────────────────────────────────────
+
+export interface DocMetadata {
+  doc_id:          string;
+  filename:        string;
+  file_type:       string;
+  file_size_bytes: number;
+  table_count:     number;
+  tables_matched:  string[];
+  uploaded_by:     string;
+  uploaded_at:     string;
+}
+
+export interface DocListResponse {
+  docs:  DocMetadata[];
+  total: number;
+}
+
+/**
+ * POST /api/v1/connections/:id/docs — upload business documentation
+ * Uses raw fetch (not apiFetch) because multipart/form-data
+ * needs the browser to set the Content-Type boundary automatically.
+ */
+export async function uploadDoc(connectionId: string, file: File): Promise<DocMetadata> {
+  const token = await getIdToken();
+  const form = new FormData();
+  form.append('file', file);
+
+  const res = await fetch(`${API_BASE}/connections/${connectionId}/docs`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Upload failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** GET /api/v1/connections/:id/docs — list uploaded documentation */
+export async function listDocs(connectionId: string): Promise<DocListResponse> {
+  return apiFetch<DocListResponse>(`/connections/${connectionId}/docs`);
+}
+
+/** DELETE /api/v1/connections/:id/docs/:docId — delete a documentation file */
+export async function deleteDoc(connectionId: string, docId: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/connections/${connectionId}/docs/${docId}`, {
+    method: 'DELETE',
+  });
+}

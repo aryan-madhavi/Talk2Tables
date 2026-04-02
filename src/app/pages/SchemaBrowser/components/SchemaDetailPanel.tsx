@@ -25,8 +25,8 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
     <div className="flex-1 flex flex-col bg-white overflow-hidden">
 
       {/* Header */}
-      <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
-        <div>
+      <div className="p-6 border-b border-gray-100 flex items-start justify-between bg-white shrink-0 gap-4">
+        <div className="flex-1">
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <Table className="w-5 h-5 text-blue-600" />
             {table.table}
@@ -35,6 +35,12 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
             {table.schema && <>Schema: <span className="font-medium text-gray-700">{table.schema}</span> · </>}
             {detail && <><span className="font-medium">{detail.column_count}</span> columns</>}
           </p>
+          {detail?.business_context && (
+            <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100 rounded-lg text-sm text-gray-700 leading-relaxed">
+              <strong className="text-blue-800 font-semibold mb-1 block">Business Context</strong>
+              {detail.business_context}
+            </div>
+          )}
         </div>
       </div>
 

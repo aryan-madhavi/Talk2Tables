@@ -25,7 +25,14 @@ export function SchemaColumnTable({ columns }: SchemaColumnTableProps) {
             const isFK = col.constraint_type === 'FOREIGN KEY';
             return (
               <tr key={col.column_name} className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-900">{col.column_name}</td>
+                <td className="px-5 py-3 text-sm">
+                  <div className="font-medium text-gray-900">{col.column_name}</div>
+                  {col.business_description && (
+                    <div className="text-xs text-gray-500 mt-1 leading-snug">
+                      {col.business_description}
+                    </div>
+                  )}
+                </td>
                 <td className="px-5 py-3 font-mono text-xs text-gray-600">{col.data_type}</td>
                 <td className="px-5 py-3 text-xs">
                   <span className={col.is_nullable === 'YES' ? 'text-gray-400' : 'text-gray-700 font-medium'}>
