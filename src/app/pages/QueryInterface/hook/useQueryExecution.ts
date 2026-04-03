@@ -20,6 +20,9 @@ function buildResultFromMessage(m: MessageOut): QueryResult | null {
     executionTime: 0,
     rowCount:      m.total_records ?? m.data.length,
     msgId:         m.msg_id,
+    insights:          (m.numerical_insights as any) || undefined,
+    narrativeInsights: (m.narrative_insights as any) || undefined,
+    insightsLoading:   false,
     chartData:     m.data.slice(0, 10).map(item => {
       const keys = Object.keys(item);
       return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -232,6 +235,11 @@ export function useQueryExecution(selectedConnectionId: string) {
             }]);
 
             setRefreshTrigger(n => n + 1);
+            
+            // Release the chat UI block immediately so the user doesn't wait for insights
+            setIsTyping(false);
+            setProgressMessage(null);
+            setExecutingChatId(undefined);
           },
           onInsights: (payload) => {
             if (generationRef.current !== generation) return;

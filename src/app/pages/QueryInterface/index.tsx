@@ -70,13 +70,15 @@ export default function QueryInterface() {
         const found = opts.find(c => c.connection_id === connectionId);
         setSelectedDb(found ? connectionId : (opts[0]?.connection_id ?? ''));
         if (msgs) {
-          loadChat(pendingChatId, msgs.messages ?? [], {
-            has_more:        msgs.has_more,
-            next_before_seq: msgs.next_before_seq,
-          });
           openChatFired.current = true;
           pendingChat.current = null;
           navigate(location.pathname, { replace: true, state: null });
+          setTimeout(() => {
+            loadChat(pendingChatId, msgs.messages ?? [], {
+              has_more:        msgs.has_more,
+              next_before_seq: msgs.next_before_seq,
+            });
+          }, 50);
         }
       } else if (opts.length > 0) {
         setSelectedDb(opts[0].connection_id);
@@ -165,8 +167,12 @@ export default function QueryInterface() {
 
   // Close sidebars on navigation actions automatically
   useEffect(() => { setMobileSidebarOpen(false); }, [selectedDb, chatId]);
-  // Open mobile results automatically when a new result finishes running
-  useEffect(() => { if (currentResult) setMobileResultsOpen(true); }, [currentResult]);
+  // Open mobile results automatically when a new result finishes running (only on mobile)
+  useEffect(() => { 
+    if (currentResult && window.innerWidth < 768) {
+      setMobileResultsOpen(true); 
+    }
+  }, [currentResult]);
 
   return (
     <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row relative">

@@ -67,7 +67,7 @@ export default function Login() {
           >
             Forgot password?
           </a>
-          <span className="text-gray-400">v1.0.4</span>
+          <span className="text-gray-400">v0.0.1</span>
         </div>
 
       </div>
