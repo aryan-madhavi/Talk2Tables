@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Any
+
+from langchain_core.callbacks import AsyncCallbackHandler
 
 from .base import LLMProvider
 from .openrouter import OpenRouterProvider
@@ -18,6 +20,18 @@ from .gemini import GeminiProvider
 from .ollama import OllamaProvider
 
 logger = logging.getLogger(__name__)
+
+class LLMDebugLogHandler(AsyncCallbackHandler):
+    """Callback to print the exact messages being passed to the LLM at every step."""
+    async def on_chat_model_start(self, serialized: dict, messages: list, **kwargs: Any) -> None:
+        logger.info("\n" + "=" * 80)
+        logger.info("[DEBUG LOG] ====== EXACT MESSAGES PASSED TO LLM MODEL ======")
+        for msgs in messages:
+            for m in msgs:
+                role = getattr(m, "type", type(m).__name__)
+                content = getattr(m, "content", str(m))
+                logger.info(f"Role: {role}\nContent:\n{content}\n" + "-" * 80)
+        logger.info("================================================================================\n")
 
 _PRIORITY = ["openrouter", "groq", "gemini", "ollama"]
 
@@ -75,6 +89,10 @@ def get_llm(preferred: Optional[str] = None):
         try:
             provider = cls()
             model    = provider.get_model()
+            
+            # Attach debug logger for every single LLM call
+            model = model.with_config({"callbacks": [LLMDebugLogHandler()]})
+            
             logger.info(f"[LLMFactory] Using provider: {provider.name}")
             _llm_singleton     = model
             _llm_singleton_key = cache_key
@@ -90,4 +108,4 @@ def get_llm(preferred: Optional[str] = None):
     )
 
 
-__all__ = ["get_llm", "LLMProvider"]
+__all__ = ["get_llm", "LLMProvider", "LLMDebugLogHandler"]

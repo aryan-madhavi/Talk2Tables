@@ -216,6 +216,29 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 
 ---
 
+### 2.4 `database_connections/{connection_id}/business_docs/{doc_id}`
+
+**Document ID:** UUID
+Stores metadata for uploaded business documentation files. The raw files and extracted JSON are stored in Firebase Storage.
+
+| Field | Type | Description |
+|---|---|---|
+| `doc_id` | string | UUID — same as document ID |
+| `filename` | string | Original uploaded filename |
+| `file_type` | string | Extension (e.g. `"pdf"`, `"docx"`, `"csv"`) |
+| `file_size_bytes` | integer | File size |
+| `storage_path` | string | Path to the raw uploaded file in Firebase Storage |
+| `summaries_path` | string | Path to the per-table extracted `summaries.json` in Storage |
+| `table_count` | integer | Number of tables matched by Gemini |
+| `tables_matched` | array of strings | List of `{schema}.{table}` strings that Gemini extracted context for |
+| `uploaded_by` | string | Email or UID of the user who uploaded the doc |
+| `uploaded_at` | string (ISO 8601) | Upload timestamp |
+| `is_active` | boolean | Set to `false` when logically deleted |
+
+> **Note:** Whenever a doc is uploaded or deleted, the backend rebuilds `business_docs/{connection_id}/_all_summaries.json` in Firebase Storage by merging all active docs, and pushes the granular schema/table mappings to Redis.
+
+---
+
 ## 3. `user_db_access/{access_id}`
 
 **Document ID:** UUID
@@ -252,6 +275,8 @@ One document per table. Populated on cache miss; TTL = 1 hour.
 | `access:grant:{id}` | 2 min | Single grant by access_id |
 | `schema:tables:{conn_id}` | 1 h | Table list for a connection (`_tables` doc mirror) |
 | `schema:def:{conn_id}:{schema}:{table}` | 1 h | Column definitions including `sample_values` for a specific table |
+| `docs:index:{conn_id}` | 1 h | Lightweight index of table to description for schema listings |
+| `docs:table:{conn_id}:{schema}__{table}` | 1 h | Full extracted business context and column rules for a specific table |
 
 > Passwords are **never** stored in Redis.
 > Access revocation immediately deletes `access:{uid}:{conn_id}` — no TTL wait.

@@ -35,6 +35,7 @@ class MessageOut(BaseModel):
     summary:             Optional[str]            = None
     total_records:       Optional[int]            = None
     numerical_insights:  Optional[dict[str, Any]] = None
+    narrative_insights:  Optional[dict[str, Any]] = None
     data:                Optional[list[Any]]      = None
     error_message:       Optional[str]            = None
     favourited:          bool                     = False

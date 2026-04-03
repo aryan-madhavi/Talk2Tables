@@ -110,7 +110,7 @@ app = FastAPI(
         "Built with FastAPI + LangGraph. UX4G compliant. "
         "Diploma Final Year Project — Mumbai, 2025-26."
     ),
-    version   = "2.0.0",
+    version   = "0.0.1",
     docs_url  = "/docs"  if settings.debug else None,
     redoc_url = "/redoc" if settings.debug else None,
     lifespan  = lifespan,

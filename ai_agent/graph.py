@@ -27,7 +27,7 @@ from .config import agent_config
 from .state import AgentState
 from .nodes import node_entry, node_output_parser
 from .prompts import build_system_prompt
-from .providers import get_llm
+from .providers import get_llm, LLMDebugLogHandler
 from .tools import get_tools
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,10 @@ async def node_react_agent(state: AgentState) -> AgentState:
 
     # ── Run react agent ────────────────────────────────────────────────────
     try:
-        result = await agent.ainvoke({"messages": messages})
+        result = await agent.ainvoke(
+            {"messages": messages},
+            config={"callbacks": [LLMDebugLogHandler()]}
+        )
 
         # The last message in the output is the final AI response
         output_messages = result.get("messages", [])
@@ -308,7 +311,10 @@ async def run_agent(
     }
 
     try:
-        final_state = await agent.ainvoke(initial_state)
+        final_state = await agent.ainvoke(
+            initial_state,
+            config={"callbacks": [LLMDebugLogHandler()]}
+        )
     except Exception as exc:
         logger.error(f"[run_agent] Unhandled error: {exc}", exc_info=True)
         return {
@@ -404,7 +410,11 @@ async def run_agent_stream(
         return f"event: progress\ndata: {_json.dumps({'stage': stage, 'message': message})}\n\n"
 
     try:
-        async for event in agent.astream_events(initial_state, version="v2"):
+        async for event in agent.astream_events(
+            initial_state, 
+            version="v2",
+            config={"callbacks": [LLMDebugLogHandler()]}
+        ):
             kind = event.get("event", "")
             name = event.get("name", "")
 

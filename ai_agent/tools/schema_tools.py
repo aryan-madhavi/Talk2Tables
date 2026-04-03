@@ -391,7 +391,7 @@ def _enrich_schema_list(tables: list, connection_id: str) -> str:
                     entry["description"] = index[key]
     except Exception:
         pass
-    return json.dumps(tables)
+    return json.dumps(tables, separators=(',', ':'))
 
 
 def _enrich_table_def(columns: list, connection_id: str, schema_name: str, table_name: str) -> str:
@@ -412,7 +412,7 @@ def _enrich_table_def(columns: list, connection_id: str, schema_name: str, table
             }
     except Exception:
         pass
-    return json.dumps(response, indent=2)
+    return json.dumps(response, separators=(',', ':'))
 
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
