@@ -107,3 +107,8 @@ class UpdateProfileRequest(BaseModel):
         max_length=128,
         description="New display name for the current user.",
     )
+
+class SignupRequest(BaseModel):
+    firebase_id_token: str
+    display_name:      str
+ 

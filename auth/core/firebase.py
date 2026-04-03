@@ -93,15 +93,17 @@ def get_firebase_app() -> firebase_admin.App:
         )
     cred_dict = json.loads(settings.firebase_credentials_json)
     cred = credentials.Certificate(cred_dict)
-    logger.info("[Firebase] Admin SDK: credentials loaded from FIREBASE_CREDENTIALS_JSON")
+    
+    project_id = settings.firebase_project_id or cred_dict.get("project_id")
+    logger.info(f"[Firebase] Admin SDK: credentials loaded. Project ID: {project_id}")
 
-    init_opts = {"projectId": settings.firebase_project_id}
+    init_opts = {"projectId": project_id}
     # Auto-derive Storage bucket from project ID (standard Firebase convention)
-    if settings.firebase_project_id:
-        init_opts["storageBucket"] = f"{settings.firebase_project_id}.firebasestorage.app"
+    if project_id:
+        init_opts["storageBucket"] = f"{project_id}.firebasestorage.app"
 
     app = firebase_admin.initialize_app(cred, init_opts)
-    logger.info(f"[Firebase] Admin SDK + Service Account ready | project={settings.firebase_project_id}")
+    logger.info(f"[Firebase] Admin SDK + Service Account ready | project={project_id}")
     return app
 
 
@@ -469,3 +471,53 @@ def fs_revoke_all_sessions(firebase_uid: str) -> int:
     batch.commit()
     logger.info(f"[Firestore] All sessions revoked | uid={firebase_uid} count={len(sessions)}")
     return len(sessions)
+
+# ------- SignUp -------
+def fs_create_admin_user(
+    firebase_uid:     str,
+    email:            str,
+    display_name:     str,
+    photo_url:        str,
+    email_verified:   bool,
+    sign_in_provider: str,
+) -> dict:
+    """
+    Create a brand-new Firestore user document with role = "admin".
+    Called exclusively from the /signup endpoint.
+    If the document already exists, we ensure it has the admin role.
+    """
+    db  = get_firestore_client()
+    ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
+    doc = ref.get()
+
+    now = _now_iso()
+    user_data = {
+        "firebase_uid":     firebase_uid,
+        "email":            email,
+        "display_name":     display_name or email.split("@")[0],
+        "photo_url":        photo_url or None,
+        "email_verified":   email_verified,
+        "sign_in_provider": sign_in_provider,
+        "role":             "admin",   # ← always admin for /signup
+        "is_active":        True,
+        "last_login_at":    now,
+    }
+
+    if not doc.exists:
+        user_data["created_at"] = now
+        ref.set(user_data)
+        logger.info(f"[Firestore] Admin user created | uid={firebase_uid} email={email}")
+    else:
+        # User already exists in Firestore (perhaps created by a trigger or previous /login).
+        # We allow this and promote them to admin role as requested by /signup.
+        ref.update({
+            "role":          "admin",
+            "last_login_at": now,
+            "updated_at":    now,
+        })
+        user_data = ref.get().to_dict()
+        logger.info(f"[Firestore] Existing user promoted to admin | uid={firebase_uid} email={email}")
+
+    user_data["id"] = firebase_uid
+    return user_data
+
