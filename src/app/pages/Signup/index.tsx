@@ -44,12 +44,12 @@ export default function Signup() {
 
         <div className="p-8">
 
-          {/* Logo */}
-          <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-md">
-              <MessageSquare className="w-8 h-8 text-white" />
-            </div>
-          </div>
+        {/* Logo */}
+	<div className="flex justify-center mb-6">
+  		<div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-md">
+    			<span className="text-white text-lg font-extrabold tracking-tight">T2T</span>
+  		</div>
+	</div>
 
           {/* Heading */}
           <div className="text-center mb-8">
