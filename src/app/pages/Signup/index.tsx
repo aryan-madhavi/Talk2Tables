@@ -74,7 +74,7 @@ export default function Signup() {
 
         {/* Footer */}
         <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 flex justify-center items-center text-sm">
-          <span className="text-gray-400">v1.0.4</span>
+          <span className="text-gray-400">v0.0.1</span>
         </div>
 
       </div>
