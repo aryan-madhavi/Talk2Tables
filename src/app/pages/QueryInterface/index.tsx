@@ -134,8 +134,10 @@ export default function QueryInterface() {
   // ── Favourite toggle ───────────────────────────────────────────────────────
   const [isFavourited,   setIsFavourited]   = useState(false);
 
-  // Reset favourite state when result changes
-  useEffect(() => { setIsFavourited(false); }, [currentResult?.id]);
+  // Sync favourite state with current result
+  useEffect(() => { 
+    setIsFavourited(!!currentResult?.favourited); 
+  }, [currentResult?.id, currentResult?.favourited]);
 
   const handleSaveToggle = useCallback(async () => {
     if (!currentResult || !chatId) return;
@@ -151,12 +153,21 @@ export default function QueryInterface() {
       if (!msgId) return;
     }
 
-    if (isFavourited) {
-      await unfavouriteMessage(selectedDb, chatId, msgId);
-    } else {
-      await favouriteMessage(selectedDb, chatId, msgId);
+    try {
+      if (isFavourited) {
+        await unfavouriteMessage(selectedDb, chatId, msgId);
+      } else {
+        await favouriteMessage(selectedDb, chatId, msgId);
+      }
+      setIsFavourited(f => !f);
+      
+      // Update the current result object locally so the UI stays in sync without a reload
+      if (currentResult) {
+        currentResult.favourited = !isFavourited;
+      }
+    } catch (err) {
+      console.error('Toggle favourite failed:', err);
     }
-    setIsFavourited(f => !f);
   }, [currentResult, chatId, selectedDb, isFavourited]);
 
   return (

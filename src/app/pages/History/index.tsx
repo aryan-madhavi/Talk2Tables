@@ -98,15 +98,17 @@ export default function History() {
   const term = searchTerm.toLowerCase();
 
   const filteredHistory = historyItems.filter(h =>
-    !term || h.title.toLowerCase().includes(term) ||
-    h.connection_name.toLowerCase().includes(term) ||
-    h.sql_query.toLowerCase().includes(term)
+    !term || 
+    (h.title?.toLowerCase() || '').includes(term) ||
+    (h.connection_name?.toLowerCase() || '').includes(term) ||
+    (h.sql_query?.toLowerCase() || '').includes(term)
   );
 
   const filteredSaved = savedItems.filter(s =>
-    !term || s.title.toLowerCase().includes(term) ||
-    s.connection_name.toLowerCase().includes(term) ||
-    s.sql_query.toLowerCase().includes(term)
+    !term || 
+    (s.title?.toLowerCase() || '').includes(term) ||
+    (s.connection_name?.toLowerCase() || '').includes(term) ||
+    (s.sql_query?.toLowerCase() || '').includes(term)
   );
 
   const TABS = [

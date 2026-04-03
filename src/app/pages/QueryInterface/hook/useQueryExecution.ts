@@ -20,6 +20,7 @@ function buildResultFromMessage(m: MessageOut): QueryResult | null {
     executionTime: 0,
     rowCount:      m.total_records ?? m.data.length,
     msgId:         m.msg_id,
+    favourited:    !!m.favourited,
     insights:          m.numerical_insights as any,
     narrativeInsights: m.narrative_insights as any,
     insightsLoading:   false,

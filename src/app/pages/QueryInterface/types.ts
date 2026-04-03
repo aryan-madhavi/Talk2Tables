@@ -56,6 +56,7 @@ export interface QueryResult {
   narrativeInsights?: NarrativeInsights;
   insightsLoading?:   boolean;
   msgId?:        string;
+  favourited?:   boolean;
   chartData?:    { name: string; value: number }[];
 }
 
