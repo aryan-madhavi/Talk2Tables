@@ -1,1 +1,0 @@
-"use strict";const n=require("electron");n.contextBridge.exposeInMainWorld("electronAPI",{sendMessageToMain:e=>n.ipcRenderer.send("react-message",e),onReplyFromMain:e=>{n.ipcRenderer.on("main-reply",e)}});

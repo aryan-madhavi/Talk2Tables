@@ -1,2 +1,0 @@
-git fetch origin frontend/react && \
-git merge FETCH_HEAD
