@@ -102,15 +102,26 @@ async def get_query_history(
             # Add some fields for frontend compatibility
             doc["msg_id"] = doc.get("audit_id")
             
+            # Ensure connection_name exists
+            if "connection_name" not in doc:
+                doc["connection_name"] = ""
+
+            # Detect query type if missing
+            q_type = doc.get("query_type")
+            if not q_type:
+                from ai_agent.services.chat_service import _detect_query_type
+                q_type = _detect_query_type(doc.get("sql_query", ""))
+                doc["query_type"] = q_type
+            
             # If title is missing, try to generate one from SQL or summary
             if not doc.get("title"):
                 summary = doc.get("summary", "")
-                doc["title"] = summary.split(".")[0].strip()[:80] or "Query result"
-            
-            # Detect query type if missing
-            if not doc.get("query_type"):
-                from ai_agent.services.chat_service import _detect_query_type
-                doc["query_type"] = _detect_query_type(doc.get("sql_query", ""))
+                base_title = summary.split(".")[0].strip()[:80] or "Query result"
+                # Add type prefix if it's not a SELECT to help distinguish
+                if q_type and q_type != "SELECT":
+                    doc["title"] = f"[{q_type}] {base_title}"
+                else:
+                    doc["title"] = base_title
 
             if "_id" in doc: doc.pop("_id")
             results.append(doc)

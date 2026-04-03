@@ -217,10 +217,11 @@ async def get_message(
     user_id = current_user["uid"]
     try:
         db = get_database()
+        # Try both msg_id and internal _id
         doc = await db["messages"].find_one({
             "user_id": user_id,
             "chat_id": chat_id,
-            "msg_id":  msg_id
+            "$or": [{"msg_id": msg_id}, {"_id": msg_id}]
         })
         if not doc:
             raise HTTPException(
@@ -251,21 +252,45 @@ async def favourite_message(
     user_id = current_user["uid"]
     try:
         db = get_database()
-        result = await db["messages"].find_one_and_update(
-            {"user_id": user_id, "chat_id": chat_id, "msg_id": msg_id, "role": "assistant"},
+        
+        # 1. Update in 'messages' collection
+        msg_filter = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "$or": [{"msg_id": msg_id}, {"_id": msg_id}],
+            "role": "assistant"
+        }
+        msg_doc = await db["messages"].find_one_and_update(
+            msg_filter,
             {"$set": {"favourited": True}},
             return_document=True
         )
-        if not result:
-            doc = await db["messages"].find_one({"user_id": user_id, "chat_id": chat_id, "msg_id": msg_id})
-            if not doc:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
-            
-        await db["audits"].update_one(
-            {"audit_id": msg_id},
+        
+        # 2. Update in 'audits' collection
+        # Audits might have msg_id as 'audit_id' or it might be a UUID
+        audit_filter = {
+            "user_id": user_id,
+            "$or": [{"audit_id": msg_id}, {"_id": msg_id}]
+        }
+        # Only add chat_id to filter if it's provided and looks valid
+        if chat_id:
+            audit_filter["chat_id"] = chat_id
+        
+        # If msg_doc was found, also try matching audits by SQL query to be extra safe
+        if msg_doc and msg_doc.get("sql_query"):
+            audit_filter["$or"].append({"sql_query": msg_doc["sql_query"]})
+
+        audit_result = await db["audits"].update_many(
+            audit_filter,
             {"$set": {"favourited": True}}
         )
+
+        if not msg_doc and audit_result.matched_count == 0:
+            # Last ditch effort: find any assistant message in this chat with this ID
+            exists = await db["messages"].find_one({"user_id": user_id, "chat_id": chat_id, "$or": [{"msg_id": msg_id}, {"_id": msg_id}]})
+            if not exists:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only assistant messages can be favourited.")
 
         try:
             from core.redis_client import redis_delete
@@ -298,18 +323,25 @@ async def unfavourite_message(
     user_id = current_user["uid"]
     try:
         db = get_database()
-        result = await db["messages"].find_one_and_update(
-            {"user_id": user_id, "chat_id": chat_id, "msg_id": msg_id},
-            {"$set": {"favourited": False}},
-            return_document=True
-        )
-        if not result:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Message '{msg_id}' not found.")
-            
-        await db["audits"].update_one(
-            {"audit_id": msg_id},
-            {"$set": {"favourited": False}}
-        )
+        
+        # 1. Update messages
+        msg_filter = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "$or": [{"msg_id": msg_id}, {"_id": msg_id}]
+        }
+        msg_doc = await db["messages"].find_one_and_update(msg_filter, {"$set": {"favourited": False}})
+        
+        # 2. Update audits
+        audit_filter = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "$or": [{"audit_id": msg_id}, {"_id": msg_id}]
+        }
+        if msg_doc and msg_doc.get("sql_query"):
+            audit_filter["$or"].append({"sql_query": msg_doc["sql_query"]})
+
+        await db["audits"].update_many(audit_filter, {"$set": {"favourited": False}})
 
         try:
             from core.redis_client import redis_delete
@@ -319,8 +351,6 @@ async def unfavourite_message(
         except Exception: pass
         
         return {"msg_id": msg_id, "favourited": False}
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error(f"[DELETE favourite/{msg_id}] chat={chat_id} uid={user_id} error: {exc}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
