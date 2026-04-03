@@ -26,18 +26,18 @@ from __future__ import annotations
 import base64
 import logging
 import os
-
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from auth.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 # ── Load key ──────────────────────────────────────────────────────────────────
 
 def _load_key() -> bytes:
-    raw = os.environ.get("DB_ENCRYPTION_KEY", "")
+    raw = settings.db_encryption_key
     if not raw:
         raise RuntimeError(
-            "DB_ENCRYPTION_KEY is not set. "
+            "DB_ENCRYPTION_KEY is not set in .env. "
             "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
     try:
