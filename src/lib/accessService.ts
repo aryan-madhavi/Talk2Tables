@@ -1,5 +1,6 @@
 // src/lib/accessService.ts
 import { auth } from './firebaseConfig';
+import { handleApiErrorSignal } from './errorHandler';
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/auth', '') ??
@@ -55,6 +56,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       ...options.headers,
     },
   });
+
+  await handleApiErrorSignal(res);
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Request failed: ${res.status}`);

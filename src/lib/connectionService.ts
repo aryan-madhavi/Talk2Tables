@@ -3,6 +3,7 @@
 // Mirrors backend connection_routes.py exactly.
 
 import { auth } from './firebaseConfig';
+import { handleApiErrorSignal } from './errorHandler';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       ...options.headers,
     },
   });
+
+  await handleApiErrorSignal(res);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };

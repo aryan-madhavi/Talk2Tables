@@ -8,6 +8,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth } from './firebaseConfig';
+import { handleApiErrorSignal } from './errorHandler';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -123,9 +124,13 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   let res = await makeReq(await getIdToken());
 
+  // Signal specific errors (413, 429) globally
+  await handleApiErrorSignal(res);
+
   // Token stale — refresh once and retry
   if (res.status === 401) {
     res = await makeReq(await getIdToken(true));
+    await handleApiErrorSignal(res);
   }
 
   if (!res.ok) {
@@ -155,6 +160,8 @@ export async function login(email: string, password: string): Promise<LoginRespo
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ firebase_id_token: idToken }),
   });
+
+  await handleApiErrorSignal(res);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
@@ -211,6 +218,7 @@ export async function checkTokenActive(): Promise<TokenActiveResponse> {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ firebase_id_token: idToken }),
     });
+    await handleApiErrorSignal(res);
     return res.json() as Promise<TokenActiveResponse>;
   } catch {
     return { active: false, reason: 'Network error during session check' };

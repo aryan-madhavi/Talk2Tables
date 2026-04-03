@@ -2,6 +2,7 @@
 // POST /api/v1/query — natural language → SQL → results
 
 import { auth } from './firebaseConfig';
+import { handleApiErrorSignal } from './errorHandler';
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/auth', '') ??
@@ -72,6 +73,8 @@ export async function executeQuery(payload: QueryRequest): Promise<QueryResponse
     body: JSON.stringify(payload),
   });
 
+  await handleApiErrorSignal(res);
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Query failed: ${res.status}`);
@@ -108,6 +111,8 @@ export async function executeQueryStream(
     },
     body: JSON.stringify(payload),
   });
+
+  await handleApiErrorSignal(res);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
@@ -163,7 +168,11 @@ export async function getSuggestions(connectionId: string): Promise<SuggestionsR
   const res = await fetch(`${API_BASE}/query/suggestions?connection_id=${encodeURIComponent(connectionId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+
+  await handleApiErrorSignal(res);
+
   if (!res.ok) {
+
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Request failed: ${res.status}`);
   }
@@ -191,6 +200,7 @@ export async function generateInsights(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body:    JSON.stringify({ data, question }),
   });
+  await handleApiErrorSignal(res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Request failed: ${res.status}`);
@@ -234,6 +244,7 @@ export async function getQueryHistory(params?: {
   if (params?.favouritesOnly)   qs.set('favourites_only', 'true');
   const url = `${API_BASE}/query/history${qs.toString() ? '?' + qs.toString() : ''}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  await handleApiErrorSignal(res);
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
     throw new Error(body.detail ?? `Request failed: ${res.status}`);
