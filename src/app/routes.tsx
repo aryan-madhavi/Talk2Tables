@@ -14,6 +14,7 @@ import SchemaBrowser      from './pages/SchemaBrowser';
 import AdminPanel         from './pages/AdminPanel';
 import Settings           from './pages/Settings';
 import Reports            from './pages/Reports';
+import Signup from './pages/Signup';
 
 const NotFound = () => (
   <div className="p-8 text-center text-gray-500">Page Not Found</div>
@@ -26,6 +27,10 @@ export const ComingSoon = () => (
 export const router = createBrowserRouter([
 
   // ── Public ─────────────────────────────────────────────────────────────────
+   {
+    path: '/signup',
+    element: <Signup />,
+   },
   {
     path: '/login',
     element: <Login />,
