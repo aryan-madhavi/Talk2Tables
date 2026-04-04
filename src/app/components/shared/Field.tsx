@@ -2,7 +2,7 @@ import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 interface FieldProps {
-  label: string;
+  label: React.ReactNode;
   error?: string;
   required?: boolean;
   children: React.ReactNode;

@@ -35,20 +35,20 @@ export default function AdminPanel() {
         </div>
 
         {/* Tab Bar */}
-        <div className="flex gap-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
+        <div className="grid grid-cols-2 lg:flex gap-1.5 lg:gap-2 bg-white p-1 sm:p-1.5 rounded-lg border border-gray-200 shadow-sm w-full md:w-auto">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'px-3 py-2 text-sm font-medium rounded-md flex items-center gap-2 transition-all',
+                'px-2 py-2 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium rounded-md flex items-center justify-center lg:justify-start gap-1.5 sm:gap-2 transition-all',
                 activeTab === tab.id
                   ? 'bg-blue-50 text-blue-700 shadow-sm'
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
               )}
             >
-              <tab.icon className="w-4 h-4" />
-              <span className="hidden md:inline">{tab.label}</span>
+              <tab.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>

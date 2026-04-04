@@ -22,11 +22,11 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-white overflow-hidden">
+    <div className="flex-1 flex flex-col bg-white overflow-hidden min-h-0">
 
       {/* Header */}
-      <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white shrink-0">
-        <div>
+      <div className="p-6 border-b border-gray-100 flex items-start justify-between bg-white shrink-0 gap-4">
+        <div className="flex-1">
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <Table className="w-5 h-5 text-blue-600" />
             {table.table}
@@ -39,7 +39,14 @@ export function SchemaDetailPanel({ table, detail, loading }: SchemaDetailPanelP
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {detail?.business_context && (
+          <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg text-sm text-gray-700 leading-relaxed">
+            <strong className="text-blue-800 font-semibold mb-1 block">Business Context</strong>
+            {detail.business_context}
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
             <Loader2 className="w-5 h-5 animate-spin" />

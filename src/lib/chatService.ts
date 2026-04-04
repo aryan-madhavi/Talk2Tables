@@ -45,6 +45,7 @@ export interface MessageOut {
   summary:              string | null;
   total_records:        number | null;
   numerical_insights:   Record<string, unknown> | null;
+  narrative_insights:   Record<string, unknown> | null;
   data:                 Record<string, unknown>[] | null;
   error_message:        string | null;
   created_at:           string;

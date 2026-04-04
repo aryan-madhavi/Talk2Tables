@@ -70,7 +70,7 @@ export default function SchemaBrowser() {
   const selectedConnName = connections.find(c => c.connection_id === selectedConnId)?.name ?? '';
 
   return (
-    <div className="h-[calc(100vh-6rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+    <div className="h-[calc(100dvh-9rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
 
       {/* ── DB selector bar ── */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-100 bg-gray-50/60 shrink-0">
@@ -97,7 +97,7 @@ export default function SchemaBrowser() {
       </div>
 
       {/* ── Main content ── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
         <SchemaTableList
           tables={filteredTables}
           selectedTable={selectedTable}
