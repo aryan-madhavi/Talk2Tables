@@ -321,7 +321,7 @@ export function useQueryExecution(selectedConnectionId: string) {
     insights:         QueryResult['insights'],
     narrativeInsights: QueryResult['narrativeInsights'],
   ) => {
-    setCurrentResult(prev => prev ? { ...prev, insights, narrativeInsights } : prev);
+    setCurrentResult(prev => prev ? { ...prev, insights, narrativeInsights, insightsLoading: false } : prev);
   };
 
   return {

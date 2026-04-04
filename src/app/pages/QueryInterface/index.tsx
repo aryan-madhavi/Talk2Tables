@@ -238,6 +238,7 @@ export default function QueryInterface() {
           onChange={setInput}
           onKeyDown={handleKeyDown}
           onSend={handleSend}
+          isLoading={isTyping && executingChatId === chatId}
         />
       </div>
 

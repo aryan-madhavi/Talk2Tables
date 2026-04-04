@@ -4,9 +4,9 @@
 import React, { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { MessageSquare } from 'lucide-react';
-import { LoginForm }  from './components/LoginForm';
+import { LoginForm } from './components/LoginForm';
 import { SSOButtons } from './components/SSOButtons';
-import { useAuth }    from '../../../context/AuthContext';
+import { useAuth } from '../../../context/AuthContext';
 
 export default function Login() {
   const { user, login, loading, error, clearError } = useAuth();
@@ -60,13 +60,13 @@ export default function Login() {
 
         {/* Footer */}
         <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center text-sm">
-          <a
+          {/* <a
             href="#"
             onClick={e => e.preventDefault()}  // TODO: forgot password flow
             className="text-blue-700 hover:text-blue-800 font-medium"
           >
             Forgot password?
-          </a>
+          </a> */}
           <span className="text-gray-400">v0.0.1</span>
         </div>
 
