@@ -2,10 +2,10 @@
 // Login page — reads from AuthContext, redirects if already authenticated.
 
 import React, { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router';
+import { useNavigate, useLocation, Link } from 'react-router';
 import { MessageSquare } from 'lucide-react';
 import { LoginForm }  from './components/LoginForm';
-import { SSOButtons } from './components/SSOButtons';
+// import { SSOButtons } from './components/SSOButtons';
 import { useAuth }    from '../../../context/AuthContext';
 
 export default function Login() {
@@ -55,7 +55,14 @@ export default function Login() {
           />
 
           {/* SSO */}
-          <SSOButtons />
+          {/* <SSOButtons /> */}
+
+          <div className="mt-6 text-center text-sm text-gray-500">
+            Don't have an account?{' '}
+            <Link to="/signup" className="text-blue-700 hover:text-blue-800 font-medium">
+              Sign Up
+            </Link>
+          </div>
         </div>
 
         {/* Footer */}
