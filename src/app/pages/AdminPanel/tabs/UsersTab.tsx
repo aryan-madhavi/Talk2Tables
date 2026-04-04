@@ -427,12 +427,18 @@ export function UsersTab() {
 
   // ── Filtered list ──────────────────────────────────────────────────────────
 
-  const filtered = users.filter(u => {
+  const filtered = users
+  .filter(u => {
     const q = search.toLowerCase();
     const matchSearch = !q || u.email.toLowerCase().includes(q) ||
       (u.display_name ?? '').toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
     const matchRole = !roleFilter || u.role === roleFilter;
     return matchSearch && matchRole;
+  })
+  .sort((a, b) => {
+    // active first
+    if (a.is_active === b.is_active) return 0;
+    return a.is_active ? -1 : 1;
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────────

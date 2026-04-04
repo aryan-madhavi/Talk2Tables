@@ -5,18 +5,22 @@
   "description": "Talk2Tables Desktop App",
   "author": {
     "name": "Carbonari",
-    "email": "carbonari.solutions0.com"
+    "email": "carbonari.solutions0gmail.com"
   },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "compile:bytecode": "tsx src/scripts/compile-bytecode.ts",
-    "build:desktop": "npm run build && electron-builder",
-    "package:win": "npm run build && electron-builder --win",
-    "package:linux": "npm run build && electron-builder --linux",
-    "package:all": "npm run build && electron-builder --win --linux"
+
+    "dev:electron": "cross-env ELECTRON=true vite",
+
+    "build:electron": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder",
+    "build:electron -w": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --win",
+    "build:electron -l": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --linux",
+    "build:electron -a": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --win --linux",
+
+    "compile:bytecode": "tsx src/scripts/compile-bytenode.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -120,7 +124,15 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
     ],
     "linux": {
       "target": ["AppImage", "deb", "rpm"],
@@ -128,7 +140,7 @@
       "icon": "build/icons"
     },
     "win": {
-      "target": [ 
+      "target": [
         {
           "target": "nsis",
           "arch": ["x64", "ia32"]
@@ -139,7 +151,6 @@
     },
     "mac": {
       "target": "dmg"
-    },
-    "asar": true
+    }
   }
 }
