@@ -2,11 +2,8 @@
 // Google button is UI-only — wire it up when ready.
 
 import React from 'react';
-import { useNavigate } from 'react-router';
 
 export function SSOButtons() {
-  const navigate = useNavigate();
-
   return (
     <div className="mt-6">
 
@@ -16,20 +13,29 @@ export function SSOButtons() {
           <div className="w-full border-t border-gray-200" />
         </div>
         <div className="relative flex justify-center text-sm">
-          <span className="px-2 bg-white text-gray-500">New to Talk2Tables?</span>
+          <span className="px-2 bg-white text-gray-500">Or continue with</span>
         </div>
       </div>
 
-      {/* Register Redirect */}
+      {/* Google — disabled until wired */}
       <div className="mt-4">
         <button
           type="button"
-          onClick={() => navigate('/signup')}
+          disabled
+          title="Google sign-in — coming soon"
           className="w-full inline-flex justify-center items-center py-2.5 px-4
-                     border border-gray-200 rounded-lg bg-white
-                     text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                     border border-gray-200 rounded-lg bg-gray-50
+                     text-sm font-medium text-gray-400 cursor-not-allowed"
         >
-          Register an Account
+          <img
+            className="h-5 w-5 mr-2 opacity-40"
+            src="https://www.svgrepo.com/show/475656/google-color.svg"
+            alt="Google"
+          />
+          Login with Google
+          <span className="ml-2 text-xs bg-gray-200 text-gray-400 px-1.5 py-0.5 rounded">
+            Coming soon
+          </span>
         </button>
       </div>
 
