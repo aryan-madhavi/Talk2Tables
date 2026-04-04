@@ -38,3 +38,11 @@ next-env.d.ts
 
 #firebase congifuration file
 src/components/firebase
+
+# Electron build output
+release/
+dist/
+*.AppImage
+*.asar
+
+

@@ -1,11 +1,22 @@
 {
-  "name": "@talk2tables",
+  "name": "talk2tables",
   "private": true,
   "version": "0.0.1",
+  "description": "Talk2Tables Desktop App",
+  "author": {
+    "name": "Carbonari",
+    "email": "carbonari.solutions0.com"
+  },
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
-    "dev": "vite"
+    "compile:bytecode": "tsx src/scripts/compile-bytecode.ts",
+    "build:desktop": "npm run build && electron-builder",
+    "package:win": "npm run build && electron-builder --win",
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:all": "npm run build && electron-builder --win --linux"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -67,9 +78,22 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "4.7.0",
+    "bytenode": "^1.5.7",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.0.4",
+    "electron-builder": "^26.8.1",
+    "javascript-obfuscator": "^5.4.1",
     "tailwindcss": "4.1.12",
-    "vite": "^6.4.1"
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.3",
+    "vite": "^6.4.1",
+    "vite-plugin-electron": "^0.29.1",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "wait-on": "^9.0.4"
   },
   "peerDependencies": {
     "react": "18.3.1",
@@ -85,7 +109,37 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "6.3.5"
+      "vite": "6.4.1"
     }
+  },
+  "build": {
+    "appId": "com.carbonari.talk2tables",
+    "productName": "Talk2Tables",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "linux": {
+      "target": ["AppImage", "deb", "rpm"],
+      "category": "Utility",
+      "icon": "build/icons"
+    },
+    "win": {
+      "target": [ 
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        },
+        "portable"
+      ],
+      "icon": "build/icons/icon.ico"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "asar": true
   }
 }
