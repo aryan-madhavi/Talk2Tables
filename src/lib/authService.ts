@@ -2,21 +2,31 @@
 // All backend auth calls — JWT-based MongoDB backend.
 // Fully typed to match backend auth_routes.py exactly.
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
-const API_BASE =
+declare global {
+  interface Window {
+    electronAPI: {
+      saveEnv: (data: any) => Promise<{ success: boolean; error?: string }>;
+      encrypt: (text: string) => Promise<string>;
+      decrypt: (cipher: string) => Promise<string | null>;
+    };
+  }
+}
+
+const API_BASE = (
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  'http://localhost:8000/api/v1/auth';
+  'http://localhost:8000/api/v1'
+).replace(/\/auth$/, '').replace(/\/$/, '');
 
-// ── Response types (mirror backend auth_routes.py) ────────────────────────────
+const AUTH_BASE = `${API_BASE}/auth`;
 
 export interface BackendUser {
   uid:            string;
-  firebase_uid:   string; // Added for compatibility
+  firebase_uid:   string; 
   email:          string;
   display_name?:  string | null;
   photo_url?:     string | null;
-  /** RBAC role — set by admin, never overwritten on login */
   role:           'admin' | 'db_manager' | 'power_user' | 'analyst';
   is_active?:     boolean;
   email_verified?: boolean;
@@ -39,61 +49,68 @@ export interface SessionEntry {
   expires_at:   string | null;
 }
 
-// ── Session storage — secure cookie (replaces localStorage) ──────────────────
+// ── Secure Session storage — Electron Hardware Encryption ────────────────────
 
-const ACCESS_TOKEN_KEY  = 't2t_access_token';
-const REFRESH_TOKEN_KEY = 't2t_refresh_token';
-const SESSION_MAX_AGE   = 604800; // 7 days (matches backend refresh token)
+const ACCESS_TOKEN_KEY  = 't2t_access_token_secure';
+const REFRESH_TOKEN_KEY = 't2t_refresh_token_secure';
 
-function setCookie(name: string, value: string, maxAge: number): void {
-  const secure = location.protocol === 'https:' ? '; Secure' : '';
-  document.cookie = [
-    `${name}=${encodeURIComponent(value)}`,
-    `Max-Age=${maxAge}`,
-    'Path=/',
-    'SameSite=Strict',
-    secure,
-  ].join('; ');
+/** Check if a backend session exists */
+export async function hasSession(): Promise<boolean> {
+  const token = await getAccessToken();
+  return !!token;
 }
 
-function getCookie(name: string): string | null {
-  const match = document.cookie
-    .split('; ')
-    .find(row => row.trim().startsWith(`${name}=`));
-  return match ? decodeURIComponent(match.trim().split('=')[1]) : null;
+export async function saveTokens(access: string, refresh: string): Promise<void> {
+  // Encrypt tokens using OS-level keys before saving to disk (Electron)
+  // Or use direct storage in browser (dev/web mode)
+  if (window.electronAPI && window.electronAPI.encrypt) {
+    const encryptedAccess = await window.electronAPI.encrypt(access);
+    const encryptedRefresh = await window.electronAPI.encrypt(refresh);
+    localStorage.setItem(ACCESS_TOKEN_KEY, encryptedAccess);
+    localStorage.setItem(REFRESH_TOKEN_KEY, encryptedRefresh);
+  } else {
+    // Fallback for browser/dev mode - store as-is (less secure but functional)
+    localStorage.setItem(ACCESS_TOKEN_KEY, access);
+    localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+  }
 }
 
-function deleteCookie(name: string): void {
-  document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Strict`;
+export async function getAccessToken(): Promise<string | null> {
+  const encrypted = localStorage.getItem(ACCESS_TOKEN_KEY);
+  if (!encrypted) return null;
+  
+  // Decrypt using OS-level keys (Electron) or return as-is (browser/dev mode)
+  if (window.electronAPI && window.electronAPI.decrypt) {
+    return await window.electronAPI.decrypt(encrypted);
+  } else {
+    // Fallback for browser/dev mode
+    return encrypted;
+  }
 }
 
-/** Check if a backend session cookie exists */
-export function hasSession(): boolean {
-  return !!getAccessToken();
-}
-
-export function saveTokens(access: string, refresh: string): void {
-  setCookie(ACCESS_TOKEN_KEY, access, 3600); // 1 hour for access
-  setCookie(REFRESH_TOKEN_KEY, refresh, SESSION_MAX_AGE);
-}
-
-export function getAccessToken(): string | null {
-  return getCookie(ACCESS_TOKEN_KEY);
-}
-
-export function getRefreshToken(): string | null {
-  return getCookie(REFRESH_TOKEN_KEY);
+export async function getRefreshToken(): Promise<string | null> {
+  const encrypted = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!encrypted) return null;
+  
+  // Decrypt using OS-level keys (Electron) or return as-is (browser/dev mode)
+  if (window.electronAPI && window.electronAPI.decrypt) {
+    return await window.electronAPI.decrypt(encrypted);
+  } else {
+    // Fallback for browser/dev mode
+    return encrypted;
+  }
 }
 
 export function clearTokens(): void {
-  deleteCookie(ACCESS_TOKEN_KEY);
-  deleteCookie(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
-// ── Authenticated fetch (auto-refresh on 401) ─────────────────────────────────
+// ── Authenticated fetch ──────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAccessToken();
+  const token = await getAccessToken();
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
   
   const headers = {
     'Content-Type': 'application/json',
@@ -101,14 +118,10 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     ...options.headers,
   };
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${AUTH_BASE}${cleanPath}`, {
     ...options,
     headers,
   });
-
-  if (res.status === 401 && getRefreshToken()) {
-     // TODO: Implement refresh token logic if needed
-  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { detail?: string };
@@ -121,7 +134,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 // ── Login / Signup ──────────────────────────────────────────────────────────
 
 export async function signup(email: string, password: string, displayName: string): Promise<{ message: string; uid: string }> {
-  const res = await fetch(`${API_BASE}/signup`, {
+  const res = await fetch(`${AUTH_BASE}/signup`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ email, password, display_name: displayName }),
@@ -132,11 +145,15 @@ export async function signup(email: string, password: string, displayName: strin
     throw new Error(body.detail ?? 'Signup failed.');
   }
 
-  return res.json() as Promise<{ message: string; uid: string }>;
+  const data = await res.json() as { message: string; uid: string; access_token?: string; refresh_token?: string };
+  if (data.access_token && data.refresh_token) {
+    await saveTokens(data.access_token, data.refresh_token);
+  }
+  return data;
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const res = await fetch(`${API_BASE}/login`, {
+  const res = await fetch(`${AUTH_BASE}/login`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ email, password }),
@@ -148,7 +165,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
   }
 
   const data = await res.json() as LoginResponse;
-  saveTokens(data.access_token, data.refresh_token);
+  await saveTokens(data.access_token, data.refresh_token);
   return data;
 }
 
@@ -156,7 +173,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
 
 export async function logout(): Promise<void> {
   try {
-    await apiFetch<{ message: string }>('/logout', { method: 'POST' });
+    await apiFetch('/logout', { method: 'POST' });
   } finally {
     clearTokens();
   }
@@ -165,7 +182,8 @@ export async function logout(): Promise<void> {
 // ── Profile ───────────────────────────────────────────────────────────────────
 
 export async function getMe(): Promise<BackendUser> {
-  if (!getAccessToken()) throw new Error('No access token');
+  const token = await getAccessToken();
+  if (!token) throw new Error('No access token');
   return apiFetch<BackendUser>('/me');
 }
 
@@ -183,7 +201,7 @@ export async function getSessions(): Promise<SessionEntry[]> {
 }
 
 export async function revokeSession(sessionId: string): Promise<void> {
-  await apiFetch<{ message: string }>(`/sessions/${sessionId}`, { method: 'DELETE' });
+  await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
 export async function forceLogoutUser(uid: string): Promise<{ message: string }> {
@@ -192,7 +210,7 @@ export async function forceLogoutUser(uid: string): Promise<{ message: string }>
 
 /** compatibility export */
 export async function checkTokenActive() {
-    const token = getAccessToken();
+    const token = await getAccessToken();
     if (!token) return { active: false };
     try {
         await getMe();

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk2Tables - Enterprise Setup</title>
+    <style>
+        :root { --primary: #0f172a; --accent: #3b82f6; --bg: #f1f5f9; --border: #e2e8f0; }
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background-color: var(--bg); color: var(--primary); margin: 0; padding: 2rem; display: flex; justify-content: center; }
+        .container { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); width: 100%; max-width: 600px; border: 1px solid var(--border); }
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 2px solid var(--bg); }
+        .logo-box { width: 40px; height: 40px; background: linear-gradient(135deg, #2dd4bf, #3b82f6); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px; }
+        h1 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+        
+        section { margin-bottom: 2rem; }
+        h2 { font-size: 0.875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 1rem; display: flex; align-items: center; gap: 8px; }
+        h2::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .field { margin-bottom: 1rem; }
+        .field.full { grid-column: span 2; }
+        
+        label { display: block; margin-bottom: 0.4rem; font-weight: 600; font-size: 0.75rem; color: #475569; }
+        input, select { width: 100%; padding: 0.6rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 0.875rem; font-family: inherit; }
+        input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        
+        .hint { font-size: 0.7rem; color: #94a3b8; margin-top: 0.25rem; }
+        
+        button { width: 100%; padding: 0.8rem; background-color: var(--primary); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; margin-top: 1rem; }
+        button:hover { background-color: #1e293b; transform: translateY(-1px); }
+        
+        .footer { margin-top: 2rem; text-align: center; color: #94a3b8; font-size: 0.7rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-box">T2T</div>
+            <h1>Talk2Tables Installation</h1>
+        </div>
+
+        <form id="setupForm">
+  <section>
+    <h2>Backend Connection</h2>
+    <div class="field">
+      <label for="api_url">Backend API URL</label>
+      <input type="text" id="api_url" name="VITE_API_BASE_URL" 
+             value="http://localhost:8000/api/v1" required>
+      <div class="hint">The Talk2Tables backend server address.</div>
+    </div>
+  </section>
+  <button type="submit">Connect & Launch</button>
+</form>
+</div>
+<script>
+  document.getElementById('setupForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const envData = Object.fromEntries(formData.entries());
+  const result = await window.electronAPI.saveEnv(envData);
+  if (!result.success) {
+   alert('Error saving configuration: ' + result.error);
+  }
+  });
+</script>
+</body>
+</html>

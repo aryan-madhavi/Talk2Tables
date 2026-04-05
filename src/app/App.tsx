@@ -2,17 +2,20 @@
 // Root — AuthProvider must wrap RouterProvider so every route has auth state.
 
 import React from 'react';
-import { RouterProvider } from 'react-router';
+import { RouterProvider, createHashRouter } from 'react-router';
 import { Toaster }        from 'sonner';
-import { router }         from './routes';
+import { routes }         from './routes';
 import { AuthProvider }   from '../context/AuthContext';
 import '../styles/fonts.css';
 import '../styles/theme.css';
 
+// Using HashRouter for Electron production stability
+const hashRouter = createHashRouter(routes);
+
 export default function App() {
   return (
     <AuthProvider>
-      <RouterProvider router={router} />
+      <RouterProvider router={hashRouter} />
       {/* Global toast container — position matches UX4G top-right convention */}
       <Toaster
         position="top-right"

@@ -1,9 +1,10 @@
 // src/lib/userService.ts
 import { getAccessToken } from './authService';
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace('/auth', '') ??
-  'http://localhost:8000/api/v1';
+const API_BASE = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  'http://localhost:8000/api/v1'
+).replace(/\/auth$/, '').replace(/\/$/, '');
 
 export type UserRole = 'analyst' | 'power_user' | 'db_manager' | 'admin';
 
@@ -33,14 +34,16 @@ export interface CreateUserPayload {
 }
 
 async function getIdToken(): Promise<string> {
-  const token = getAccessToken();
+  const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
   return token;
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getIdToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  
+  const res = await fetch(`${API_BASE}${cleanPath}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

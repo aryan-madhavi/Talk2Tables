@@ -64,7 +64,9 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
 
   // ── Not authenticated ──────────────────────────────────────────────────────
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    const isDefaultAdmin = import.meta.env.MODE === 'admin';
+    const target = isDefaultAdmin ? '/signup' : '/login';
+    return <Navigate to={target} state={{ from: location }} replace />;
   }
 
   // ── Role check ─────────────────────────────────────────────────────────────

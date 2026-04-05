@@ -9,7 +9,7 @@ const API_BASE =
   'http://localhost:8000/api/v1';
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAccessToken();
+  const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,

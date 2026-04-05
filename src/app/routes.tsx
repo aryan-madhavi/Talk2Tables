@@ -1,7 +1,3 @@
-// src/app/routes.tsx
-// All routes under "/" require authentication via ProtectedRoute.
-// AdminPanel additionally requires role = "admin".
-
 import React from 'react';
 import { createBrowserRouter } from 'react-router';
 import { AppLayout }      from './components/layout/AppLayout';
@@ -24,17 +20,15 @@ export const ComingSoon = () => (
   <div className="p-8 text-2xl font-bold text-gray-900 text-center">Coming Soon</div>
 );
 
-export const router = createBrowserRouter([
+// ── Conditionally include signup route based on build mode ──────────────────
+const signupRoute = import.meta.env.VITE_ALLOW_SIGNUP !== 'false'
+  ? [{ path: '/signup', element: <Signup /> }]
+  : [];
 
+export const routes = [
   // ── Public ─────────────────────────────────────────────────────────────────
-  {
-    path: '/login',
-    element: <Login />,
-  },
-  {
-    path: '/signup',
-    element: <Signup />,
-  },
+  { path: '/login', element: <Login /> },
+  ...signupRoute,
 
   // ── Protected — valid session required for everything under "/" ────────────
   {
@@ -52,8 +46,6 @@ export const router = createBrowserRouter([
       { path: 'settings',   element: <Settings /> },
       { path: 'reports',    element: <Reports /> },
       { path: 'comingsoon', element: <ComingSoon /> },
-
-      // Admin-only — ProtectedRoute checks role hierarchy
       {
         path: 'admin',
         element: (
@@ -62,8 +54,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-
       { path: '*', element: <NotFound /> },
     ],
   },
-]);
+];

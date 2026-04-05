@@ -64,7 +64,7 @@ export interface UpdateConnectionPayload {
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
 async function getIdToken(): Promise<string> {
-  const token = getAccessToken();
+  const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
   return token;
 }

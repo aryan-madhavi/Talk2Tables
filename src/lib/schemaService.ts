@@ -5,7 +5,7 @@ const API_BASE =
   'http://localhost:8000/api/v1';
 
 async function getIdToken(): Promise<string> {
-  const token = getAccessToken();
+  const token = await getAccessToken();
   if (!token) throw new Error('Not signed in');
   return token;
 }
@@ -58,7 +58,7 @@ export interface TableDetailResponse {
   schema:           string;
   table:            string;
   column_count:     number;
-  business_context?: string;
+  business_context: string;
   columns:          ColumnOut[];
 }
 

@@ -57,21 +57,21 @@ export default function Login() {
           {/* SSO */}
 	  {/*<SSOButtons />*/}
 
-	  <div className="mt-6 text-center text-sm text-gray-500">
-            Don't have an account?{' '}
-            <Link to="/signup" className="text-blue-700 hover:text-blue-800 font-medium">
-              Sign Up
-            </Link>
-          </div>
-
-
+	  {import.meta.env.VITE_ALLOW_SIGNUP !== 'false' && (
+  	  <div className="mt-6 text-center text-sm text-gray-500">
+    		Don't have an account?{' '}
+    		<Link to="/signup" className="text-blue-700 hover:text-blue-800 font-medium">
+      		Sign Up
+    		</Link>
+  	  </div>
+	  )}
         </div>
 
         {/* Footer */}
         <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center text-sm">
           <a
             href="#"
-            onClick={e => e.preventDefault()}  // TODO: forgot password flow
+            onClick={e => e.preventDefault()} 
             className="text-blue-700 hover:text-blue-800 font-medium"
           >
             Forgot password?

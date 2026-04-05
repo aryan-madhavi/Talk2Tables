@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initAuth = async () => {
-      const token = getAccessToken();
+      const token = await getAccessToken();
       if (!token) {
         setUser(null);
         setLoading(false);
@@ -116,6 +116,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
+
+  // ── Auto-Lock (30 mins inactivity) ─────────────────────────────────────────
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      if (user) {
+        timeoutId = setTimeout(() => {
+          console.log('Session locked due to inactivity.');
+          logout();
+        }, 30 * 60 * 1000); // 30 mins
+      }
+    };
+
+    if (user) {
+      window.addEventListener('mousemove', resetTimer);
+      window.addEventListener('keydown', resetTimer);
+      window.addEventListener('click', resetTimer);
+      window.addEventListener('scroll', resetTimer);
+      resetTimer();
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('keydown', resetTimer);
+      window.removeEventListener('click', resetTimer);
+      window.removeEventListener('scroll', resetTimer);
+    };
+  }, [user, logout]);
 
   const value = useMemo(() => ({
     user,
