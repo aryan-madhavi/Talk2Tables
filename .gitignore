@@ -44,5 +44,4 @@ release/
 dist/
 *.AppImage
 *.asar
-
-
+dist-electron/

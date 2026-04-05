@@ -5,22 +5,20 @@
   "description": "Talk2Tables Desktop App",
   "author": {
     "name": "Carbonari",
-    "email": "carbonari.solutions0gmail.com"
+    "email": "carbonari.solutions0@gmail.com"
   },
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-
     "dev:electron": "cross-env ELECTRON=true vite",
-
-    "build:electron": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder",
-    "build:electron -w": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --win",
-    "build:electron -l": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --linux",
-    "build:electron -a": "cross-env ELECTRON=true vite build && npm run compile:bytecode && electron-builder --win --linux",
-
-    "compile:bytecode": "tsx src/scripts/compile-bytenode.ts"
+    "build:electron": "npm run build:electron:main && electron-builder",
+    "build:electron:win": "npm run build:electron:main && electron-builder --win",
+    "build:electron:linux": "npm run build:electron:main && electron-builder --linux",
+    "build:electron:all": "npm run build:electron:main && electron-builder --win --linux",
+    "build:electron:main": "cross-env ELECTRON=true vite build && node src/electron/build-electron.mjs && npm run compile:bytecode",
+    "compile:bytecode": "tsx src/electron/electron-bytecode.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -55,6 +53,7 @@
     "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
     "@tanstack/react-virtual": "^3.13.23",
+    "bytenode": "^1.5.7",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
@@ -81,17 +80,17 @@
     "vaul": "1.1.2"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.1.12",
+    "@tailwindcss/vite": "^4.1.12",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "4.7.0",
-    "bytenode": "^1.5.7",
+    "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^41.0.4",
     "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0",
     "javascript-obfuscator": "^5.4.1",
-    "tailwindcss": "4.1.12",
+    "tailwindcss": "^4.1.12",
     "tsx": "^4.21.0",
     "typescript": "^5.5.3",
     "vite": "^6.4.1",
@@ -124,18 +123,39 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
+      "dist-electron/main.cjs",
+      "dist-electron/main.jsc",
       "package.json"
     ],
     "extraMetadata": {
-      "main": "dist-electron/main.js"
+      "main": "dist-electron/main.cjs"
     },
+    "extraResources": [
+      {
+        "from": "node_modules/bytenode",
+        "to": "node_modules/bytenode"
+      },
+      {
+        "from": "dist-electron/preload.js",
+        "to": "preload/preload.js"
+      },
+      {
+        "from": "dist-electron/preload.jsc",
+        "to": "preload/preload.jsc"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "dist-electron/main.cjs",
+      "dist-electron/main.jsc"
     ],
     "linux": {
-      "target": ["AppImage", "deb", "rpm"],
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
       "category": "Utility",
       "icon": "build/icons"
     },
@@ -143,7 +163,10 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "ia32"]
+          "arch": [
+            "x64",
+            "ia32"
+          ]
         },
         "portable"
       ],

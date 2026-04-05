@@ -97,6 +97,7 @@ export interface AuditLogEntry {
 export interface IElectronAPI {
   sendMessageToMain: (message: string) => void;
   onReplyFromMain: (callback: (event: any, response: string) => void) => void;
+  onDevToolsBlocked: (callback: () => void) => void;
 }
 
 declare global {
