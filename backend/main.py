@@ -29,7 +29,7 @@ load_dotenv()
 from auth import auth_router
 from auth.core.config import settings
 from auth.core.firebase import get_firebase_app, get_firestore_client
-from connections import connections_router
+from connections import connections_router, docs_router
 from users import users_router
 from access import access_router
 from query import query_router
@@ -110,7 +110,7 @@ app = FastAPI(
         "Built with FastAPI + LangGraph. UX4G compliant. "
         "Diploma Final Year Project — Mumbai, 2025-26."
     ),
-    version   = "2.0.0",
+    version   = "0.0.1",
     docs_url  = "/docs"  if settings.debug else None,
     redoc_url = "/redoc" if settings.debug else None,
     lifespan  = lifespan,
@@ -134,12 +134,17 @@ app.add_middleware(
 
 @app.middleware("http")
 async def limit_request_body(request: Request, call_next):
-    max_bytes      = 1 * 1024 * 1024  # 1 MB
+    # Doc upload endpoint allows up to 100 MB; everything else is 1 MB
+    path = request.url.path
+    if "/docs" in path and request.method == "POST":
+        max_bytes = 100 * 1024 * 1024  # 100 MB
+    else:
+        max_bytes = 1 * 1024 * 1024    # 1 MB
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > max_bytes:
         return JSONResponse(
             status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content     = {"error": "Request body too large. Maximum size is 1 MB."},
+            content     = {"error": f"Request body too large. Maximum size is {max_bytes // (1024*1024)} MB."},
         )
     return await call_next(request)
 
@@ -184,6 +189,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.include_router(auth_router)         # /api/v1/auth/*
 app.include_router(connections_router)  # /api/v1/connections/*
+app.include_router(docs_router)         # /api/v1/connections/*/docs
 app.include_router(users_router)        # /api/v1/users/*
 app.include_router(access_router)       # /api/v1/access-grants/*
 app.include_router(query_router)        # /api/v1/query, /api/v1/schema/*

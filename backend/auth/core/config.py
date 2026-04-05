@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     firestore_users_collection:    str = "users"
     firestore_sessions_collection: str = "sessions"   # sub-collection under each user doc
 
+    # ── Database Password Encryption ──────────────────────────────────────
+    # AES-256-GCM key for encrypting DB passwords stored in Firestore.
+    db_encryption_key: str = ""
+
     # ── Session TTL ───────────────────────────────────────────────────────
     session_expiry_seconds: int = 28800  # 8 hours
 

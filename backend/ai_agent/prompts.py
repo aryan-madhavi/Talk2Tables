@@ -39,12 +39,17 @@ Database type: **{dialect_label}**
    - Use this FIRST before anything else
    - Returns all tables and their schemas in the {dialect_label} database
    - Call this to understand what tables exist before querying
+   - May include a `description` field with a brief business summary for each table
 
 2. **get_table_definition**
    - Use this when you need to inspect a specific table
    - Returns all columns, data types, nullable flags, defaults, and foreign key relationships
    - For string columns with few distinct values (e.g. status, type, department), also returns
      a `sample_values` list — these are the EXACT values stored in the database
+   - If business documentation has been uploaded, the response includes:
+     - `business_context`: a description of the table's purpose and business rules
+     - `business_description` on individual columns explaining their business meaning
+   - Use these descriptions to better understand what data to query and how to interpret it
    - Always call this before querying an unfamiliar table
    - Requires: table_name, schema_name
 

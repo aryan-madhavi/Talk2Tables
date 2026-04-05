@@ -65,6 +65,7 @@ def _to_message_out(doc_id: str, data: dict) -> dict:
         "summary":            data.get("summary"),
         "total_records":      data.get("total_records"),
         "numerical_insights": data.get("numerical_insights"),
+        "narrative_insights": data.get("narrative_insights"),
         "data":               data.get("data"),
         "error_message":      data.get("error_message"),
         "favourited":         data.get("favourited", False),

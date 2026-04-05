@@ -503,16 +503,23 @@ async def get_table_schema(
 
         import json
         try:
-            columns = json.loads(result)
+            parsed = json.loads(result)
+            if isinstance(parsed, dict) and "columns" in parsed:
+                columns = parsed["columns"]
+                business_context = parsed.get("business_context", "")
+            else:
+                columns = parsed
+                business_context = ""
         except Exception:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result)
 
         return {
-            "connection_id": connection_id,
-            "schema":        schema_name,
-            "table":         table_name,
-            "columns":       columns,
-            "column_count":  len(columns),
+            "connection_id":    connection_id,
+            "schema":           schema_name,
+            "table":            table_name,
+            "columns":          columns,
+            "column_count":     len(columns),
+            "business_context": business_context,
         }
 
     except HTTPException:

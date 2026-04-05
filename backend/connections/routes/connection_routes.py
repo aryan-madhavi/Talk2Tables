@@ -406,6 +406,16 @@ async def refresh_schema_cache_route(
     from ai_agent.tools.schema_tools import invalidate_schema_cache, warm_schema_cache
     invalidate_schema_cache(connection_id)
     background_tasks.add_task(warm_schema_cache, connection_id)
+
+    # Re-process business docs with updated table list (picks up new tables)
+    async def _reprocess_docs_bg():
+        try:
+            from connections.services.doc_service import reprocess_docs
+            await reprocess_docs(connection_id)
+        except Exception as exc:
+            logger.warning(f"[schema/refresh] Doc reprocessing failed (non-fatal): {exc}")
+    background_tasks.add_task(_reprocess_docs_bg)
+
     return MessageResponse(message=f"Schema cache cleared and re-warm started for connection '{connection_id}'.")
 
 

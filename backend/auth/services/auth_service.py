@@ -290,3 +290,67 @@ async def get_user_by_firebase_uid(firebase_uid: str) -> Optional[dict]:
 async def get_all_sessions(firebase_uid: str) -> list[dict]:
     """Return all active (non-revoked) sessions for a user."""
     return fs_get_active_sessions(firebase_uid)
+
+# ------- Signup -------
+async def signup(
+    id_token:     str,
+    display_name: str,
+    device_info:  str,
+    ip_address:   str,
+) -> dict:
+    """
+    Register a new admin user.
+ 
+    Steps:
+      1. Verify Firebase ID token.
+      2. Create Firestore doc with role = "admin".
+      3. Issue custom token with admin role claim.
+      4. Create Firestore session.
+      5. Return same shape as login() — frontend reuses same post-login flow.
+    """
+    from auth.core.firebase import (
+        verify_id_token,
+        fs_create_admin_user,
+        create_custom_token,
+        fs_create_session,
+    )
+    from datetime import datetime, timedelta, timezone
+ 
+    import asyncio as _asyncio
+    claims = await _asyncio.to_thread(verify_id_token, id_token)
+    uid    = claims["uid"]
+ 
+    user = await _asyncio.to_thread(
+        fs_create_admin_user,
+        firebase_uid     = uid,
+        email            = claims.get("email", ""),
+        display_name     = display_name or claims.get("name", ""),
+        photo_url        = claims.get("picture", ""),
+        email_verified   = claims.get("email_verified", False),
+        sign_in_provider = claims.get("firebase", {}).get("sign_in_provider", "password"),
+    )
+ 
+    custom_token = await _asyncio.to_thread(create_custom_token, uid, {"role": "admin"})
+ 
+    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    session    = await _asyncio.to_thread(
+        fs_create_session,
+        firebase_uid = uid,
+        device_info  = device_info,
+        ip_address   = ip_address,
+        expires_at   = expires_at,
+    )
+ 
+    return {
+        "custom_token": custom_token,
+        "session_id":   session["session_id"],
+        "user": {
+            "firebase_uid":   user["firebase_uid"],
+            "email":          user["email"],
+            "display_name":   user["display_name"],
+            "photo_url":      user.get("photo_url"),
+            "role":           user["role"],
+            "is_active":      user["is_active"],
+            "email_verified": user.get("email_verified", False),
+        },
+    }

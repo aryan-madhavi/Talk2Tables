@@ -377,6 +377,44 @@ def _sample_enum_values(
         return []
 
 
+# ── Business doc enrichment helpers ────────────────────────────────────────────
+
+def _enrich_schema_list(tables: list, connection_id: str) -> str:
+    """Merge business doc descriptions into schema list results. Non-fatal."""
+    try:
+        from connections.services.doc_service import get_summary_index_sync
+        index = get_summary_index_sync(connection_id)
+        if index:
+            for entry in tables:
+                key = f"{entry.get('table_schema', 'default')}__{entry.get('table_name', '')}"
+                if key in index:
+                    entry["description"] = index[key]
+    except Exception:
+        pass
+    return json.dumps(tables, separators=(',', ':'))
+
+
+def _enrich_table_def(columns: list, connection_id: str, schema_name: str, table_name: str) -> str:
+    """Merge business doc context into table definition results. Non-fatal."""
+    response = columns  # default: plain column array
+    try:
+        from connections.services.doc_service import get_table_summary_sync
+        summary = get_table_summary_sync(connection_id, schema_name or 'default', table_name)
+        if summary:
+            col_descs = summary.get("column_descriptions", {})
+            for entry in columns:
+                desc = col_descs.get(entry.get("column_name", ""))
+                if desc:
+                    entry["business_description"] = desc
+            response = {
+                "business_context": summary.get("business_context", ""),
+                "columns": columns,
+            }
+    except Exception:
+        pass
+    return json.dumps(response, separators=(',', ':'))
+
+
 # ── Tool factory ───────────────────────────────────────────────────────────────
 
 def make_schema_tools(connection_string: str, connection_id: str) -> list:
@@ -408,7 +446,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         cached = _redis_get_sync(redis_key)
         if cached is not None:
             logger.info(f"[SchemaCache] Redis HIT tables | conn={connection_id}")
-            return json.dumps(cached)
+            return _enrich_schema_list(cached, connection_id)
 
         # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
@@ -422,7 +460,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                     tables = data["tables"]
                     logger.info(f"[SchemaCache] Firestore HIT tables | conn={connection_id}")
                     _redis_set_sync(redis_key, tables, TTL_SCHEMA)
-                    return json.dumps(tables)
+                    return _enrich_schema_list(tables, connection_id)
                 logger.info(f"[SchemaCache] STALE tables | conn={connection_id}")
         except Exception as exc:
             logger.warning(f"[SchemaCache] Firestore read failed (non-fatal): {exc}")
@@ -483,7 +521,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             except Exception as exc:
                 logger.warning(f"[SchemaCache] Firestore write failed (non-fatal): {exc}")
 
-            return json.dumps(results)
+            return _enrich_schema_list(results, connection_id)
 
         except Exception as exc:
             logger.error(f"[get_schema_list] Failed: {exc}")
@@ -512,7 +550,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
         cached = _redis_get_sync(redis_key)
         if cached is not None:
             logger.info(f"[SchemaCache] Redis HIT {schema_name}.{table_name} | conn={connection_id}")
-            return json.dumps(cached)
+            return _enrich_table_def(cached, connection_id, schema_name, table_name)
 
         # ── 2. Firestore cache ─────────────────────────────────────────────
         try:
@@ -526,7 +564,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
                     columns = data["columns"]
                     logger.info(f"[SchemaCache] Firestore HIT {schema_name}.{table_name} | conn={connection_id}")
                     _redis_set_sync(redis_key, columns, TTL_SCHEMA)
-                    return json.dumps(columns, indent=2)
+                    return _enrich_table_def(columns, connection_id, schema_name, table_name)
                 logger.info(f"[SchemaCache] STALE {schema_name}.{table_name}")
         except Exception as exc:
             logger.warning(f"[SchemaCache] Firestore read failed (non-fatal): {exc}")
@@ -622,7 +660,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             except Exception as exc:
                 logger.warning(f"[SchemaCache] Firestore write failed (non-fatal): {exc}")
 
-            return json.dumps(result_rows, indent=2)
+            return _enrich_table_def(result_rows, connection_id, schema_name, table_name)
 
         except Exception as exc:
             logger.error(f"[get_table_definition] Failed for {schema_name}.{table_name}: {exc}")

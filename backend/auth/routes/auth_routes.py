@@ -51,6 +51,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 from auth.services.auth_service import (
     login,
+    signup,
     check_token_active,
     logout,
     logout_all,
@@ -63,6 +64,7 @@ from auth.routes.schemas import (
     FirebaseTokenRequest,
     LoginResponse,
     LogoutRequest,
+    SignupRequest,
     MeResponse,
     MessageResponse,
     SessionOut,
@@ -270,3 +272,37 @@ async def revoke_session_route(
         )
     logger.info(f"[DELETE /auth/sessions/{session_id}] uid={current_user['firebase_uid']}")
     return {"message": f"Session {session_id} revoked."}
+
+# ------- Signup -------
+@router.post(
+    "/signup",
+    response_model=LoginResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Signup — create a new admin user in Firestore",
+    description=(
+        "Client calls createUserWithEmailAndPassword() + getIdToken(), "
+        "sends the ID token here with display_name. "
+        "Server creates a Firestore doc with role='admin' and returns "
+        "a custom token — same response shape as /login."
+    ),
+)
+@limiter.limit("5/minute")
+async def signup_route(body: SignupRequest, request: Request):
+    try:
+        result = await signup(
+            id_token     = body.firebase_id_token,
+            display_name = body.display_name,
+            device_info  = request.headers.get("User-Agent", "")[:512],
+            ip_address   = request.client.host if request.client else "",
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        code = (
+            status.HTTP_409_CONFLICT
+            if "already exists" in detail
+            else status.HTTP_401_UNAUTHORIZED
+        )
+        raise HTTPException(status_code=code, detail=detail)
+ 
+    logger.info(f"[POST /auth/signup] email={result['user']['email']} role=admin")
+    return result
