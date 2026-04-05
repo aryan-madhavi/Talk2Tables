@@ -14,39 +14,6 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-
-      // Dev only — prod uses src/electron/build-electron.mjs via esbuild
-      ...(isElectron && isDev
-        ? [
-            electron({
-              main: {
-                entry: path.resolve(__dirname, './src/electron/main.ts'),
-                vite: {
-                  build: {
-                    target: 'node18',
-                    outDir: 'dist-electron',
-                    minify: false,
-                    rollupOptions: {
-                      output: { format: 'es', entryFileNames: '[name].js' },
-                    },
-                  },
-                },
-              },
-              preload: {
-                input: path.resolve(__dirname, './src/electron/preload.ts'),
-                vite: {
-                  build: {
-                    target: 'node18',
-                    outDir: 'dist-electron',
-                    rollupOptions: {
-                      output: { format: 'es', entryFileNames: '[name].js' },
-                    },
-                  },
-                },
-              },
-            }),
-          ]
-        : []),
     ],
 
     resolve: {
