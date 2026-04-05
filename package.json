@@ -11,6 +11,8 @@
   "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "dev:admin": "vite --mode admin",
+"dev:user": "vite --mode user",
     "build": "vite build",
     "dev:electron": "cross-env ELECTRON=true VITE_DEV_SERVER_URL=http://localhost:5173 concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && node src/electron/build-electron.mjs --watch\"",
     "build:electron": "npm run build:electron:main && electron-builder",
@@ -20,10 +22,10 @@
     "build:electron:main": "cross-env ELECTRON=true vite build && node src/electron/build-electron.mjs && npm run compile:bytecode",
     "compile:bytecode": "tsx src/electron/electron-bytecode.ts",
     "build:admin": "vite build --mode admin",
-    "build:admin:electron": "npm run build:electron:main -- --mode admin && electron-builder",
-    "build:user": "vite build --mode user",
-    "build:user:electron": "npm run build:electron:main -- --mode user && electron-builder"
-  },
+    "build:admin:electron": "cp build/icon.admin.svg build/icon.svg && npm run build:electron:main -- --mode admin && electron-builder",
+    "build:user:electron": "cp build/icon.user.svg build/icon.svg && npm run build:electron:main -- --mode user && electron-builder",
+    "build:user": "vite build --mode user"
+    },
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",

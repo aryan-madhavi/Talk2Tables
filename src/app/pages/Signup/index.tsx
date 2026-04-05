@@ -8,6 +8,8 @@ import { SignupForm } from './components/SignupForm';
 import { useAuth }    from '../../../context/AuthContext';
 import { signup as apiSignup } from '../../../lib/authService';
 import { toast } from 'sonner';
+import { Logo } from '../../components/shared/Logo';
+
 
 export default function Signup() {
   const { user, login, clearError } = useAuth();
@@ -45,11 +47,10 @@ export default function Signup() {
         <div className="p-8">
 
         {/* Logo */}
-	<div className="flex justify-center mb-6">
-  		<div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-md">
-    			<span className="text-white text-lg font-extrabold tracking-tight">T2T</span>
-  		</div>
-	</div>
+          <div className="flex justify-center mb-6">
+            <Logo size={64} />
+          </div>
+
 
           {/* Heading */}
           <div className="text-center mb-8">
