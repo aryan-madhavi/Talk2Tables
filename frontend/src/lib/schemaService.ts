@@ -42,20 +42,22 @@ export interface SchemaListResponse {
 }
 
 export interface ColumnOut {
-  column_name:      string;
-  data_type:        string;
-  is_nullable:      string;       // 'YES' | 'NO'
-  column_default:   string | null;
-  constraint_type:  string | null; // 'PRIMARY KEY' | 'FOREIGN KEY' | null
-  referenced_table: string | null;
+  column_name:          string;
+  data_type:            string;
+  is_nullable:          string;       // 'YES' | 'NO'
+  column_default:       string | null;
+  constraint_type:      string | null; // 'PRIMARY KEY' | 'FOREIGN KEY' | null
+  referenced_table:     string | null;
+  business_description?: string;
 }
 
 export interface TableDetailResponse {
-  connection_id: string;
-  schema:        string;
-  table:         string;
-  column_count:  number;
-  columns:       ColumnOut[];
+  connection_id:    string;
+  schema:           string;
+  table:            string;
+  column_count:     number;
+  business_context?: string;
+  columns:          ColumnOut[];
 }
 
 /** GET /api/v1/schema/{connection_id} */

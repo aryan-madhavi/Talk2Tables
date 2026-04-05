@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   Database, X, Eye, EyeOff, Loader2, Wifi,
-  Lock, Server, CheckCircle, XCircle, ChevronDown,
+  Lock, Server, CheckCircle, XCircle, ChevronDown, FileUp, FileText, Trash2,
 } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 import {
@@ -30,6 +30,8 @@ interface AddConnectionDialogProps {
    * Returns { ok, message } from the backend test endpoint.
    */
   onTest?:      () => Promise<{ ok: boolean; message: string }>;
+  /** Called with the selected doc file after save (optional upload during connection creation) */
+  onDocFile?:   (file: File) => void;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ export function AddConnectionDialog({
   initialData,
   saving  = false,
   onTest,
+  onDocFile,
 }: AddConnectionDialogProps) {
   const isEditMode = !!initialData;
 
@@ -49,6 +52,8 @@ export function AddConnectionDialog({
   const [testStatus,   setTestStatus]   = useState<TestStatus>('idle');
   const [testMessage,  setTestMessage]  = useState('');
   const [errors,       setErrors]       = useState<ConnectionFormErrors>({});
+  const [docFile,      setDocFile]      = useState<File | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -102,6 +107,7 @@ export function AddConnectionDialog({
 
   const handleSave = () => {
     if (!validate()) return;
+    if (docFile && onDocFile) onDocFile(docFile);
     onSave(form);
   };
 
@@ -118,14 +124,14 @@ export function AddConnectionDialog({
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 pb-20 sm:p-4 pointer-events-none">
         <div
           className="pointer-events-auto w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-gray-100
-                     animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300 overflow-hidden"
+                     animate-in fade-in zoom-in-95 slide-in-from-bottom-4 duration-300 flex flex-col max-h-[82dvh] sm:max-h-[95dvh] overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           {/* ── Header ── */}
-          <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-4 sm:pt-6 sm:pb-4 border-b border-gray-100 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm">
                 <Database className="w-4 h-4 text-white" />
@@ -150,7 +156,7 @@ export function AddConnectionDialog({
           </div>
 
           {/* ── Body ── */}
-          <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4 sm:space-y-5">
 
             {/* DB Type Dropdown */}
             <Field
@@ -297,6 +303,60 @@ export function AddConnectionDialog({
               </button>
             </div>
 
+            {/* Business Documentation (Optional) */}
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center">
+                  <FileText className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-800">Business Documentation</div>
+                  <div className="text-xs text-gray-500">Optional — helps AI understand your data</div>
+                </div>
+              </div>
+              {docFile ? (
+                <div className="flex items-center justify-between mt-2 px-3 py-2 rounded-lg bg-white border border-gray-200">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileUp className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span className="text-sm text-gray-700 truncate">{docFile.name}</span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {(docFile.size / 1024 / 1024).toFixed(1)} MB
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDocFile(null)}
+                    className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg
+                             border-2 border-dashed border-gray-200 hover:border-violet-300
+                             hover:bg-violet-50/50 text-sm text-gray-500 hover:text-violet-600
+                             transition-all cursor-pointer"
+                >
+                  <FileUp className="w-4 h-4" />
+                  Choose file (PDF, DOCX, TXT, CSV, XLSX)
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setDocFile(f);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+            </div>
+
             {/* Test Status Banners */}
             {testStatus === 'success' && (
               <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-green-50 border border-green-200
@@ -315,14 +375,14 @@ export function AddConnectionDialog({
           </div>
 
           {/* ── Footer ── */}
-          <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t border-gray-100 gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between px-4 sm:px-6 py-4 bg-gray-50 border-t border-gray-100 gap-3 shrink-0">
             {/* Test Connection — only functional in edit mode */}
             {onTest ? (
               <button
                 onClick={handleTest}
                 disabled={testStatus === 'testing' || saving}
                 className={cn(
-                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all',
+                  'flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-all w-full sm:w-auto',
                   testStatus === 'testing' || saving
                     ? 'border-gray-200 text-gray-400 bg-white cursor-not-allowed'
                     : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-100 hover:border-gray-400',
@@ -339,12 +399,12 @@ export function AddConnectionDialog({
             )}
 
             {/* Cancel / Save */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={onClose}
                 disabled={saving}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600
-                           hover:bg-gray-200 transition-colors disabled:opacity-40"
+                           hover:bg-gray-200 transition-colors disabled:opacity-40 flex-1 sm:flex-none"
               >
                 Cancel
               </button>
@@ -352,14 +412,14 @@ export function AddConnectionDialog({
                 onClick={handleSave}
                 disabled={saving}
                 className={cn(
-                  'px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm',
+                  'px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm flex-1 sm:flex-none justify-center flex',
                   saving
                     ? 'bg-blue-400 cursor-not-allowed'
                     : 'bg-blue-600 hover:bg-blue-700 active:scale-95',
                 )}
               >
                 {saving
-                  ? <span className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>
+                  ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>
                   : isEditMode ? 'Save Changes' : 'Save Connection'
                 }
               </button>

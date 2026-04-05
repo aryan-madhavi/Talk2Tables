@@ -3,7 +3,8 @@
 // AdminPanel additionally requires role = "admin".
 
 import React from 'react';
-import { createBrowserRouter } from 'react-router';
+// import { createBrowserRouter } from 'react-router';
+import { createHashRouter } from 'react-router';
 import { AppLayout }      from './components/layout/AppLayout';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import Login              from './pages/Login';
@@ -14,6 +15,7 @@ import SchemaBrowser      from './pages/SchemaBrowser';
 import AdminPanel         from './pages/AdminPanel';
 import Settings           from './pages/Settings';
 import Reports            from './pages/Reports';
+import Signup from './pages/Signup';
 
 const NotFound = () => (
   <div className="p-8 text-center text-gray-500">Page Not Found</div>
@@ -23,9 +25,13 @@ export const ComingSoon = () => (
   <div className="p-8 text-2xl font-bold text-gray-900 text-center">Coming Soon</div>
 );
 
-export const router = createBrowserRouter([
-
+// export const router = createBrowserRouter([
+  export const router = createHashRouter([
   // ── Public ─────────────────────────────────────────────────────────────────
+   {
+    path: '/signup',
+    element: <Signup />,
+   },
   {
     path: '/login',
     element: <Login />,

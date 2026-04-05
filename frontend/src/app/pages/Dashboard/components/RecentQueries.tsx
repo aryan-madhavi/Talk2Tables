@@ -58,9 +58,9 @@ export function RecentQueries() {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map(item => (
+          {items.map((item, index) => (
             <div
-              key={item.msg_id}
+              key={`${item.msg_id}_${index}`}
               className="flex items-center justify-between p-4 bg-gray-50 rounded-lg
                          hover:bg-gray-100 transition-colors group"
             >
@@ -89,7 +89,7 @@ export function RecentQueries() {
                   state: { query: item.title, connectionId: item.connection_id },
                 })}
                 className="p-2 text-blue-700 hover:bg-blue-100 rounded-full
-                           opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                           opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all shrink-0"
                 title="Run Again"
               >
                 <Play className="w-4 h-4 fill-current" />

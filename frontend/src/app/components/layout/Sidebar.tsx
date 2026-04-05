@@ -6,6 +6,7 @@ import {
   Home, MessageSquare, History, Database,
   Shield, Settings, LogOut, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { Logo } from '../../components/shared/Logo';
 import { cn }      from '../../../lib/utils';
 import { useAuth } from '../../../context/AuthContext';
 
@@ -60,9 +61,7 @@ export function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
       {/* ── Logo ──────────────────────────────────────────────────────────── */}
       <div className="p-4 flex items-center justify-between border-b border-gray-100 h-16">
         <div className={cn('flex items-center gap-3 overflow-hidden', collapsed && 'justify-center w-full')}>
-          <div className="w-8 h-8 bg-blue-700 rounded-lg flex items-center justify-center shrink-0">
-            <MessageSquare className="w-5 h-5 text-white" />
-          </div>
+          <Logo size={32} />
           {!collapsed && (
             <span className="font-bold text-lg text-gray-900 truncate">Talk2Tables</span>
           )}

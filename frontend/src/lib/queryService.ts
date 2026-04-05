@@ -128,15 +128,22 @@ export async function executeQueryStream(
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+    }
 
-    buffer += decoder.decode(value, { stream: true });
+    if (done && buffer.trim()) {
+      buffer += '\n\n'; // force flush
+    }
+
     const lines = buffer.split('\n\n');
     buffer = lines.pop() ?? '';
 
     for (const block of lines) {
+      if (!block.trim()) continue;
       const eventMatch = block.match(/^event:\s*(\w+)/m);
-      const dataMatch  = block.match(/^data:\s*(.+)/ms);
+      const dataMatch  = block.match(/^data:\s*(.*)/ms);
       if (!eventMatch || !dataMatch) continue;
 
       const eventType = eventMatch[1];
@@ -153,6 +160,8 @@ export async function executeQueryStream(
         callbacks.onError((data as { message: string }).message ?? 'Unknown error');
       }
     }
+
+    if (done) break;
   }
 }
 

@@ -58,6 +58,12 @@ export interface SessionEntry {
   expires_at:   string | null;
 }
 
+export interface SignupResponse {
+  custom_token: string;
+  session_id:   string;
+  user:         BackendUser;
+}
+
 // ── Session storage — secure cookie (replaces localStorage) ──────────────────
 //
 // Why cookies over localStorage?
@@ -78,7 +84,7 @@ export interface SessionEntry {
 const SESSION_KEY     = 't2t_session_id';
 const SESSION_MAX_AGE = 28800; // seconds — 8 hours (matches backend session_expiry_seconds)
 
-function saveSession(id: string): void {
+export function saveSession(id: string): void {
   const secure = location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = [
     `${SESSION_KEY}=${encodeURIComponent(id)}`,
@@ -94,6 +100,11 @@ function getSessionId(): string | null {
     .split('; ')
     .find(row => row.startsWith(`${SESSION_KEY}=`));
   return match ? decodeURIComponent(match.split('=')[1]) : null;
+}
+
+/** Check if a backend session cookie exists (used by AuthContext to avoid 401 spam). */
+export function hasSession(): boolean {
+  return !!getSessionId();
 }
 
 function clearSession(): void {
@@ -169,6 +180,38 @@ export async function login(email: string, password: string): Promise<LoginRespo
   }
 
   const data = await res.json() as LoginResponse;
+
+  // Step 3 — Exchange custom token so subsequent ID tokens carry role claim
+  await signInWithCustomToken(auth, data.custom_token);
+
+  saveSession(data.session_id);
+  return data;
+}
+
+// ── Signup ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Register a new admin user.
+ *   1. Firebase SDK → Firebase ID token
+ *   2. POST /signup → backend creates Firestore doc → custom token
+ *   3. signInWithCustomToken → fresh ID token with role='admin'
+ */
+export async function signup(idToken: string, displayName: string): Promise<SignupResponse> {
+  const res = await fetch(`${API_BASE}/signup`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      firebase_id_token: idToken,
+      display_name:      displayName,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { detail?: string };
+    throw new Error(body.detail ?? 'Registration failed. Please try again.');
+  }
+
+  const data = await res.json() as SignupResponse;
 
   // Step 3 — Exchange custom token so subsequent ID tokens carry role claim
   await signInWithCustomToken(auth, data.custom_token);

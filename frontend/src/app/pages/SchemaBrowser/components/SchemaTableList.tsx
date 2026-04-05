@@ -17,7 +17,7 @@ export function SchemaTableList({
   tables, selectedTable, searchTerm, loading, connName, onSearch, onSelect,
 }: SchemaTableListProps) {
   return (
-    <div className="w-full md:w-64 border-r border-gray-100 flex flex-col bg-gray-50/50 shrink-0">
+    <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col bg-gray-50/50 shrink-0 h-[40vh] md:h-full">
 
       {/* Search */}
       <div className="p-4 border-b border-gray-100 bg-white">

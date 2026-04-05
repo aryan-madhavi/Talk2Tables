@@ -27,7 +27,7 @@ export function ResultTable({ result }: { result: QueryResult }) {
       <div className="px-3 py-1.5 bg-gray-50 border-b text-xs text-gray-400 shrink-0">
         {result.data.length.toLocaleString()} row{result.data.length !== 1 ? 's' : ''}
       </div>
-      <div ref={parentRef} className="overflow-auto flex-1">
+      <div ref={parentRef} className="overflow-x-auto overflow-y-auto flex-1 h-full w-full">
         <table className="min-w-full divide-y divide-gray-200 text-sm text-left">
           <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>

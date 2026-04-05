@@ -175,9 +175,9 @@ export default function Reports() {
           </div>
         ) : (
           <div className="space-y-3">
-            {savedItems.map(item => (
+            {savedItems.map((item, index) => (
               <div
-                key={item.msg_id}
+                key={`${item.msg_id}_${index}`}
                 className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg
                            hover:bg-gray-100 transition-colors group"
               >

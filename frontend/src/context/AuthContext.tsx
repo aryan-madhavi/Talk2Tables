@@ -29,6 +29,7 @@ import {
   login  as apiLogin,
   logout as apiLogout,
   getMe,
+  hasSession,
   BackendUser,
 }                           from '../lib/authService';
 
@@ -68,38 +69,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false);   // ← true only after first onAuthStateChanged cycle
   const [error,     setError]     = useState<string | null>(null);
 
+  // Track if login just happened so we can skip the redundant /me call
+  // (signInWithCustomToken triggers onAuthStateChanged → getMe(), but we already have the user)
+  const justLoggedIn = React.useRef(false);
+
   useEffect(() => {
-    // onAuthStateChanged fires once on mount:
-    //   • Immediately if Firebase has no cached session
-    //   • After restoring from IndexedDB if the user was previously signed in
-    //     (this can take up to ~1-2 seconds on a slow device)
-    // We must NOT set loading=false or redirect before this callback fires.
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      // Reset authReady on every auth state change (login/logout/token refresh)
       setAuthReady(false);
 
       if (!fbUser) {
-        // No Firebase session at all — definitely logged out
         setUser(null);
         setLoading(false);
-        setAuthReady(true);   // ready — just not logged in
+        setAuthReady(true);
         return;
       }
 
-      // Firebase has a cached session — verify via /me (single call)
+      // If login() is in progress, skip — both signInWithEmailAndPassword and
+      // signInWithCustomToken fire onAuthStateChanged, we handle user in login() directly
+      if (justLoggedIn.current) {
+        setAuthReady(true);
+        return;
+      }
+
+      // Skip /me if no backend session cookie — Firebase has a stale cached
+      // session but the backend session is gone. This avoids the 401 spam.
+      if (!hasSession()) {
+        await firebaseSignOut(auth);
+        setUser(null);
+        setLoading(false);
+        setAuthReady(true);
+        return;
+      }
+
+      // Firebase has a cached session AND a backend session cookie — verify
       try {
         const profile = await getMe();
         setUser(profile);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : '';
         if (msg.includes('401') || msg.includes('Session') || msg.includes('sign in')) {
-          // Session revoked on backend — sign out Firebase too
           await firebaseSignOut(auth);
         }
         setUser(null);
       } finally {
-        setLoading(false);    // ← ProtectedRoute can now decide
-        setAuthReady(true);   // ← components can now safely fire API calls
+        setLoading(false);
+        setAuthReady(true);
       }
     });
 
@@ -110,16 +124,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     setLoading(true);
-    setAuthReady(false);   // auth not ready during login flow
+    setAuthReady(false);
+    
+    // Use an epoch timestamp or counter instead of a boolean, or just set it
+    // then reset it after a short delay since onAuthStateChanged is async.
+    justLoggedIn.current = true;
     try {
       const data = await apiLogin(email, password);
+      // Wait for signInWithCustomToken's onAuthStateChanged to fire first
+      setTimeout(() => {
+        justLoggedIn.current = false;
+      }, 2000);
       setUser(data.user);
-      // Note: signInWithCustomToken (inside apiLogin) fires onAuthStateChanged,
-      // which will set authReady=true once /me resolves. Don't set it here.
     } catch (err: unknown) {
+      justLoggedIn.current = false; // reset on failure
       const msg = err instanceof Error ? err.message : 'Login failed. Please try again.';
       setError(msg);
-      setAuthReady(true);   // unblock on error so UI isn't stuck
+      setAuthReady(true);
       throw err;
     } finally {
       setLoading(false);
