@@ -96,6 +96,7 @@
     "vite": "^6.4.1",
     "vite-plugin-electron": "^0.29.1",
     "vite-plugin-electron-renderer": "^0.14.6",
+    "vite-plugin-pwa": "^1.2.0",
     "wait-on": "^9.0.4"
   },
   "peerDependencies": {
@@ -151,29 +152,20 @@
       "dist-electron/main.jsc"
     ],
     "linux": {
-      "target": [
-        "AppImage",
-        "deb",
-        "rpm"
-      ],
-      "category": "Utility",
-      "icon": "build/icons"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "ia32"
-          ]
-        },
-        "portable"
-      ],
-      "icon": "build/icons/icon.ico"
-    },
-    "mac": {
-      "target": "dmg"
-    }
+  "target": ["AppImage", "deb", "rpm"],
+  "category": "Utility",
+  "icon": "public/icon.svg"
+},
+"win": {
+  "target": [
+    { "target": "nsis", "arch": ["x64", "ia32"] },
+    "portable"
+  ],
+  "icon": "public/icon.ico"
+},
+"mac": {
+  "target": "dmg",
+  "icon": "public/icon.icns"
+}
   }
 }
