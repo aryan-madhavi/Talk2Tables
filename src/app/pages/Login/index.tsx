@@ -3,7 +3,7 @@
 
 import React, { useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router';
-import { MessageSquare } from 'lucide-react';
+import { Logo } from '../../components/shared/Logo';
 import { LoginForm }  from './components/LoginForm';
 // import { SSOButtons } from './components/SSOButtons';
 import { useAuth }    from '../../../context/AuthContext';
@@ -36,9 +36,7 @@ export default function Login() {
 
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-md">
-              <MessageSquare className="w-8 h-8 text-white" />
-            </div>
+            <Logo size={64} />
           </div>
 
           {/* Heading */}

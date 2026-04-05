@@ -6,7 +6,8 @@ import { Sidebar }   from './Sidebar';
 import { MobileNav } from './MobileNav';
 import { cn }        from '../../../lib/utils';
 import { useAuth }   from '../../../context/AuthContext';
-import { LogOut, MessageSquare } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import { Logo } from '../../components/shared/Logo';
 
 export function AppLayout() {
   const [collapsed, setCollapsed]   = useState(false);
@@ -47,9 +48,7 @@ export function AppLayout() {
 
         {/* Logo */}
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-700 rounded-lg flex items-center justify-center shrink-0">
-            <MessageSquare className="w-4 h-4 text-white" />
-          </div>
+          <Logo size={32} />
           <span className="font-bold text-base text-gray-900">Talk2Tables</span>
         </div>
 

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router';
-import { MessageSquare } from 'lucide-react';
+import { Logo } from '../../components/shared/Logo';
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -88,9 +88,7 @@ export default function Signup() {
         <div className="p-8">
 
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-700 rounded-2xl flex items-center justify-center shadow-md">
-              <MessageSquare className="w-8 h-8 text-white" />
-            </div>
+            <Logo size={64} />
           </div>
 
           <div className="text-center mb-8">
