@@ -57,7 +57,8 @@ router = APIRouter(
 async def my_connections_route(
     current_user: dict = Depends(require_analyst),
 ):
-    uid = current_user["firebase_uid"]
+    uid    = current_user["firebase_uid"]
+    org_id = current_user["org_id"]
     grants = await list_grants_by_user(uid, active_only=True)
     if not grants:
         return {"connections": [], "total": 0}
@@ -65,7 +66,10 @@ async def my_connections_route(
     from connections.services.connection_service import get_connection_by_id
     results = []
     for grant in grants:
-        conn = await get_connection_by_id(grant["connection_id"])
+        # Scope connection lookup to the user's org — prevents leaking cross-org conn details
+        conn = await get_connection_by_id(grant["connection_id"], org_id=org_id)
+        if not conn:
+            continue  # skip grants whose connections are outside this org (stale data guard)
         results.append({
             "grant": {
                 "access_id":  grant.get("access_id"),
@@ -88,6 +92,7 @@ async def my_connections_route(
     summary="Grant a user access to a database",
     description=(
         "Creates a user_db_access document linking a user to a database. "
+        "Both the target user and target connection must belong to the same organization. "
         "Raises 409 if an active grant already exists for this (user, db) pair. "
         "Requires db_manager or admin role."
     ),
@@ -99,11 +104,13 @@ async def create_grant_route(
     logger.info(
         f"[POST /access-grants] uid={body.firebase_uid} "
         f"connection={body.connection_id} permission={body.permission} "
-        f"by={current_user['firebase_uid']}"
+        f"by={current_user['firebase_uid']} org={current_user['org_id']}"
     )
     try:
         grant = await create_access_grant(
-            body, granted_by_uid=current_user["firebase_uid"]
+            body,
+            granted_by_uid=current_user["firebase_uid"],
+            org_id=current_user["org_id"],
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

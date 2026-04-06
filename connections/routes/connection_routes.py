@@ -74,9 +74,13 @@ async def create_connection_route(
 ):
     logger.info(
         f"[POST /connections] name={body.name} db_type={body.db_type} "
-        f"by={current_user['firebase_uid']}"
+        f"by={current_user['firebase_uid']} org={current_user['org_id']}"
     )
-    connection = await create_connection(body, created_by_uid=current_user["firebase_uid"])
+    connection = await create_connection(
+        body,
+        created_by_uid=current_user["firebase_uid"],
+        org_id=current_user["org_id"],
+    )
     # Pre-warm schema cache in the background so first query is cache-hot
     from ai_agent.tools.schema_tools import warm_schema_cache
     background_tasks.add_task(warm_schema_cache, connection["connection_id"])
@@ -99,7 +103,7 @@ async def list_connections_route(
     active_only: bool = False,
     current_user: dict = Depends(require_db_manager),
 ):
-    connections = await list_connections(active_only=active_only)
+    connections = await list_connections(org_id=current_user["org_id"], active_only=active_only)
     return ConnectionListResponse(connections=connections, total=len(connections))
 
 
@@ -114,7 +118,7 @@ async def get_connection_route(
     connection_id: str,
     current_user: dict = Depends(require_db_manager),
 ):
-    connection = await get_connection_by_id(connection_id)
+    connection = await get_connection_by_id(connection_id, org_id=current_user["org_id"])
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -141,7 +145,7 @@ async def update_connection_route(
     current_user: dict = Depends(require_db_manager),
 ):
     logger.info(f"[PATCH /connections/{connection_id}] by={current_user['firebase_uid']}")
-    connection = await update_connection(connection_id, body)
+    connection = await update_connection(connection_id, body, org_id=current_user["org_id"])
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -174,7 +178,7 @@ async def delete_connection_route(
     current_user: dict = Depends(require_admin),
 ):
     logger.info(f"[DELETE /connections/{connection_id}] by={current_user['firebase_uid']}")
-    deleted = await delete_connection(connection_id)
+    deleted = await delete_connection(connection_id, org_id=current_user["org_id"])
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -201,7 +205,7 @@ async def test_connection_route(
     current_user: dict = Depends(require_db_manager),
 ):
     logger.info(f"[POST /connections/{connection_id}/test] by={current_user['firebase_uid']}")
-    result = await test_connection(connection_id)
+    result = await test_connection(connection_id, org_id=current_user["org_id"])
     if result["message"] == f"Connection '{connection_id}' not found.":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -430,7 +434,7 @@ async def activate_connection_route(
     connection_id: str,
     current_user: dict = Depends(require_db_manager),
 ):
-    connection = await set_connection_active(connection_id, is_active=True)
+    connection = await set_connection_active(connection_id, is_active=True, org_id=current_user["org_id"])
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -451,7 +455,7 @@ async def deactivate_connection_route(
     connection_id: str,
     current_user: dict = Depends(require_db_manager),
 ):
-    connection = await set_connection_active(connection_id, is_active=False)
+    connection = await set_connection_active(connection_id, is_active=False, org_id=current_user["org_id"])
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

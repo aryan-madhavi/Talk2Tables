@@ -63,9 +63,10 @@ async def _invalidate_access_cache(firebase_uid: str, connection_id: str) -> Non
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-async def create_access_grant(body: CreateAccessGrantRequest, granted_by_uid: str) -> dict:
+async def create_access_grant(body: CreateAccessGrantRequest, granted_by_uid: str, org_id: str = "") -> dict:
     """
     Grant a user access to a database.
+    Validates org membership: target user and target connection must both belong to org_id.
     Raises ValueError if an active grant already exists for (user, db).
     Invalidates the user's grant list cache after write.
     """
@@ -74,6 +75,22 @@ async def create_access_grant(body: CreateAccessGrantRequest, granted_by_uid: st
     now       = _now_iso()
 
     from google.cloud.firestore_v1.base_query import FieldFilter
+
+    # ── Org boundary validation ──────────────────────────────────────────────
+    if org_id:
+        # Validate the target user belongs to this org
+        target_user_doc = db.collection("users").document(body.firebase_uid).get()
+        if not target_user_doc.exists or target_user_doc.to_dict().get("org_id") != org_id:
+            raise ValueError(
+                f"User '{body.firebase_uid}' does not belong to your organization."
+            )
+        # Validate the target connection belongs to this org
+        target_conn_doc = db.collection("database_connections").document(body.connection_id).get()
+        if not target_conn_doc.exists or target_conn_doc.to_dict().get("org_id") != org_id:
+            raise ValueError(
+                f"Connection '{body.connection_id}' does not belong to your organization."
+            )
+
     existing = (
         db.collection(COLLECTION)
         .where(filter=FieldFilter("firebase_uid",  "==", body.firebase_uid))

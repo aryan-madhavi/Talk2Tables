@@ -111,4 +111,5 @@ class UpdateProfileRequest(BaseModel):
 class SignupRequest(BaseModel):
     firebase_id_token: str
     display_name:      str
+    organization_name: str
  

@@ -290,10 +290,11 @@ async def revoke_session_route(
 async def signup_route(body: SignupRequest, request: Request):
     try:
         result = await signup(
-            id_token     = body.firebase_id_token,
-            display_name = body.display_name,
-            device_info  = request.headers.get("User-Agent", "")[:512],
-            ip_address   = request.client.host if request.client else "",
+            id_token          = body.firebase_id_token,
+            display_name      = body.display_name,
+            organization_name = body.organization_name,
+            device_info       = request.headers.get("User-Agent", "")[:512],
+            ip_address        = request.client.host if request.client else "",
         )
     except ValueError as exc:
         detail = str(exc)

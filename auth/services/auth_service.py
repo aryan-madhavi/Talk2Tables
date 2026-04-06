@@ -97,7 +97,6 @@ async def login(
     if not user.get("is_active", True):
         raise ValueError("Account deactivated. Contact an administrator.")
 
-    # ── Step 3: Create custom token — signed by Service Account ───────────
     # Role + db_user_id travel inside every subsequent Firebase ID token
     custom_token = await _asyncio.to_thread(
         create_custom_token,
@@ -105,6 +104,7 @@ async def login(
         additional_claims = {
             "role":       user["role"],
             "db_user_id": firebase_uid,
+            "org_id":     user.get("org_id"),
         },
     )
 
@@ -181,6 +181,7 @@ async def check_token_active(id_token: str) -> dict:
             "email":      email,
             "role":       cached_token.get("role", "analyst"),
             "db_user_id": firebase_uid,
+            "org_id":     cached_token.get("org_id"),
             "expires_at": expires_at.isoformat(),
             "session_id": None,  # not stored in token cache; cookie holds it
         }
@@ -217,6 +218,7 @@ async def check_token_active(id_token: str) -> dict:
         "email":       email,
         "role":        user["role"],   # authoritative from Firestore
         "db_user_id":  firebase_uid,
+        "org_id":      user.get("org_id"),
         "expires_at":  expires_at.isoformat(),
         "session_id":  session["session_id"],
     }
@@ -293,10 +295,11 @@ async def get_all_sessions(firebase_uid: str) -> list[dict]:
 
 # ------- Signup -------
 async def signup(
-    id_token:     str,
-    display_name: str,
-    device_info:  str,
-    ip_address:   str,
+    id_token:          str,
+    display_name:      str,
+    organization_name: str,
+    device_info:       str,
+    ip_address:        str,
 ) -> dict:
     """
     Register a new admin user.
@@ -311,6 +314,7 @@ async def signup(
     from auth.core.firebase import (
         verify_id_token,
         fs_create_admin_user,
+        fs_create_organization,
         create_custom_token,
         fs_create_session,
     )
@@ -319,6 +323,9 @@ async def signup(
     import asyncio as _asyncio
     claims = await _asyncio.to_thread(verify_id_token, id_token)
     uid    = claims["uid"]
+    
+    org_data = await _asyncio.to_thread(fs_create_organization, uid, organization_name)
+    org_id = org_data["org_id"]
  
     user = await _asyncio.to_thread(
         fs_create_admin_user,
@@ -328,9 +335,18 @@ async def signup(
         photo_url        = claims.get("picture", ""),
         email_verified   = claims.get("email_verified", False),
         sign_in_provider = claims.get("firebase", {}).get("sign_in_provider", "password"),
+        org_id           = org_id,
     )
  
-    custom_token = await _asyncio.to_thread(create_custom_token, uid, {"role": "admin"})
+    custom_token = await _asyncio.to_thread(
+        create_custom_token, 
+        uid, 
+        {
+            "role": "admin", 
+            "db_user_id": uid, 
+            "org_id": org_id
+        }
+    )
  
     expires_at = datetime.now(timezone.utc) + timedelta(days=30)
     session    = await _asyncio.to_thread(

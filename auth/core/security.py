@@ -279,6 +279,7 @@ def verify_request_token(
         "display_name": user.get("display_name", ""),
         "photo_url":    user.get("photo_url", ""),
         "is_active":    user.get("is_active", True),
+        "org_id":       user.get("org_id"),
     }
 
     # ── Step 5: Populate cache (without claims — they change per-request) ─
@@ -344,7 +345,10 @@ def deactivate_account(firebase_uid: str) -> None:
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
-    if ref.get().exists:
+    doc = ref.get()
+    org_id = ""
+    if doc.exists:
+        org_id = doc.to_dict().get("org_id", "")
         ref.update({"is_active": False})
         logger.info(f"[Security] Account deactivated | uid={firebase_uid}")
 
@@ -353,7 +357,7 @@ def deactivate_account(firebase_uid: str) -> None:
     logger.info(f"[Security] {count} session(s) revoked on deactivation | uid={firebase_uid}")
 
     # CRITICAL: wipe cache so the deactivated user is blocked immediately
-    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list(org_id))
 
 
 def reactivate_account(firebase_uid: str) -> None:
@@ -367,11 +371,14 @@ def reactivate_account(firebase_uid: str) -> None:
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
-    if ref.get().exists:
+    doc = ref.get()
+    org_id = ""
+    if doc.exists:
+        org_id = doc.to_dict().get("org_id", "")
         ref.update({"is_active": True})
         logger.info(f"[Security] Account reactivated | uid={firebase_uid}")
 
-    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list(org_id))
 
 
 def force_sign_out(firebase_uid: str, session_id: Optional[str] = None) -> None:
@@ -409,14 +416,16 @@ def update_user_role(firebase_uid: str, new_role: str) -> None:
 
     db  = get_firestore_client()
     ref = db.collection(settings.firestore_users_collection).document(firebase_uid)
-    if not ref.get().exists:
+    doc = ref.get()
+    if not doc.exists:
         raise ValueError(f"User not found in Firestore: {firebase_uid}")
 
+    org_id = doc.to_dict().get("org_id", "")
     ref.update({"role": new_role})
     logger.info(f"[Security] Role updated | uid={firebase_uid} → {new_role}")
 
     # Invalidate — stale role in cache = wrong permissions
-    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list())
+    _cache_invalidate_sync(key_token(firebase_uid), key_user(firebase_uid), key_users_list(org_id))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

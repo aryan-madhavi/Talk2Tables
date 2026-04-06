@@ -43,23 +43,37 @@ def _safe_user(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k not in EXCLUDE}
 
 
-async def _invalidate_user_cache(uid: str) -> None:
+async def _invalidate_user_cache(uid: str, org_id: str = "") -> None:
     """
     Wipe all cache entries for a user.
     MUST be called after any mutation — role change and deactivate
     are security-critical: stale cache = wrong permissions.
+
+    org_id is used to bust the org-scoped users list cache.
+    If not provided, we attempt to read it from the user cache before deleting.
     """
-    await redis_delete(
-        key_user(uid),
-        key_token(uid),       # force re-fetch on user's next request
-        key_users_list(),
-    )
-    logger.debug(f"[Cache] Invalidated user keys — uid={uid}")
+    # Try to recover org_id from the cached user doc before we delete it
+    effective_org_id = org_id
+    if not effective_org_id:
+        cached_user = await redis_get(key_user(uid))
+        if cached_user:
+            effective_org_id = cached_user.get("org_id", "")
+
+    keys_to_delete = [key_user(uid), key_token(uid)]  # always bust these two
+    if effective_org_id:
+        keys_to_delete.append(key_users_list(effective_org_id))
+
+    await redis_delete(*keys_to_delete)
+    logger.debug(f"[Cache] Invalidated user keys — uid={uid} org={effective_org_id}")
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
+async def create_user(body: CreateUserRequest, created_by_uid: str, org_id: str = "") -> dict:
+    """
+    Create a new user in Firebase Auth + Firestore.
+    Inherits org_id from the creating admin — users are always scoped to an org.
+    """
     db = get_firestore_client()
 
     try:
@@ -82,6 +96,7 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
         "photo_url":        None,
         "role":             body.role,
         "is_active":        True,
+        "org_id":           org_id,
         "email_verified":   False,
         "sign_in_provider": "password",
         "created_at":       now,
@@ -89,13 +104,13 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
     }
 
     db.collection(COLLECTION).document(uid).set(doc)
-    logger.info(f"[Users] Created | uid={uid} email={body.email} role={body.role} by={created_by_uid}")
+    logger.info(f"[Users] Created | uid={uid} email={body.email} role={body.role} org={org_id} by={created_by_uid}")
 
     safe = _safe_user(doc)
 
-    # Cache the new user, bust list cache
+    # Cache the new user, bust org-scoped list cache
     await redis_set(key_user(uid), safe, TTL_USER)
-    await redis_delete(key_users_list())
+    await redis_delete(key_users_list(org_id))
 
     return safe
 
@@ -120,29 +135,34 @@ async def get_user_by_uid(uid: str) -> Optional[dict]:
     return safe
 
 
-async def list_users(active_only: bool = False) -> list[dict]:
+async def list_users(org_id: str, active_only: bool = False) -> list[dict]:
     """
+    List users belonging to a specific organization.
+    Strictly scoped to org_id — never leaks users from other tenants.
+
     Flow: Redis → Firestore → populate cache.
-    Full list is cached; active filter applied in Python on cache hit.
+    Full org list is cached; active filter applied in Python on cache hit.
     """
-    cached = await redis_get(key_users_list())
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    cached = await redis_get(key_users_list(org_id))
     if cached:
-        logger.debug("[Cache] HIT users:list")
+        logger.debug(f"[Cache] HIT users:list:{org_id}")
         return [u for u in cached if u.get("is_active")] if active_only else cached
 
     db    = get_firestore_client()
-    query = db.collection(COLLECTION)
+    # Always filter by org_id first — tenant boundary enforced at Firestore level
+    query = db.collection(COLLECTION).where(filter=FieldFilter("org_id", "==", org_id))
 
     if active_only:
-        from google.cloud.firestore_v1.base_query import FieldFilter
         query = query.where(filter=FieldFilter("is_active", "==", True))
 
     docs    = query.stream()
     results = [_safe_user(d.to_dict()) for d in docs]
     results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
 
-    await redis_set(key_users_list(), results, TTL_USERS_LIST)
-    logger.debug(f"[Cache] MISS users:list — cached {len(results)} users")
+    await redis_set(key_users_list(org_id), results, TTL_USERS_LIST)
+    logger.debug(f"[Cache] MISS users:list:{org_id} — cached {len(results)} users")
     return results
 
 
@@ -171,7 +191,7 @@ async def update_user_role(uid: str, new_role: str, changed_by_uid: str) -> Opti
     safe = _safe_user(ref.get().to_dict())
 
     # Invalidate first, then re-populate with fresh data
-    await _invalidate_user_cache(uid)
+    await _invalidate_user_cache(uid, safe.get("org_id", ""))
     await redis_set(key_user(uid), safe, TTL_USER)
 
     return safe
@@ -203,7 +223,7 @@ async def update_user(uid: str, body: UpdateUserRequest) -> Optional[dict]:
 
     safe = _safe_user(ref.get().to_dict())
 
-    await _invalidate_user_cache(uid)
+    await _invalidate_user_cache(uid, safe.get("org_id", ""))
     await redis_set(key_user(uid), safe, TTL_USER)
 
     return safe
@@ -235,7 +255,7 @@ async def set_user_active(uid: str, is_active: bool, changed_by_uid: str) -> Opt
     safe = _safe_user(ref.get().to_dict())
 
     # CRITICAL: bust token cache — deactivated user must be blocked NOW
-    await _invalidate_user_cache(uid)
+    await _invalidate_user_cache(uid, safe.get("org_id", ""))
     await redis_set(key_user(uid), safe, TTL_USER)
 
     return safe
@@ -247,8 +267,12 @@ async def delete_user(uid: str, deleted_by_uid: str) -> bool:
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(uid)
 
-    if not ref.get().exists:
+    snap = ref.get()
+    if not snap.exists:
         return False
+
+    doc = snap.to_dict()
+    org_id = doc.get("org_id", "") if doc else ""
 
     ref.delete()
 
@@ -260,6 +284,6 @@ async def delete_user(uid: str, deleted_by_uid: str) -> bool:
     logger.info(f"[Users] Hard deleted | uid={uid} by={deleted_by_uid}")
 
     # Wipe all traces
-    await _invalidate_user_cache(uid)
+    await _invalidate_user_cache(uid, org_id)
 
     return True

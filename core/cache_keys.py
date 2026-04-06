@@ -40,14 +40,14 @@ def key_token(firebase_uid: str) -> str:
 def key_user(firebase_uid: str) -> str:
     return f"user:{firebase_uid}"
 
-def key_users_list() -> str:
-    return "users:list"
+def key_users_list(org_id: str) -> str:
+    return f"users:list:{org_id}"
 
 def key_connection(connection_id: str) -> str:
     return f"connection:{connection_id}"
 
-def key_connections_list(active_only: bool = False) -> str:
-    return "connections:list:active" if active_only else "connections:list"
+def key_connections_list(org_id: str, active_only: bool = False) -> str:
+    return f"connections:list:{org_id}:active" if active_only else f"connections:list:{org_id}"
 
 def key_access_grant(access_id: str) -> str:
     return f"access:grant:{access_id}"

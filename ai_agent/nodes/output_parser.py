@@ -185,10 +185,11 @@ async def _generate_numerical_insights(question: str, data: list[dict]) -> dict:
         f"Total rows: {total:,}. Columns: {', '.join(columns)}\n"
         f"Sample data ({min(30, total)} rows):\n{sample}\n\n"
         "Analyze EVERY column and return ONLY valid JSON (no markdown, no explanation):\n"
+        "Use the exact schema below, substituting '<col>' with the actual column name.\n"
+        "Each column should be formatted as EITHER 'numeric' OR 'categorical', but not both.\n"
         '{"total_records": <exact int>, "aggregations": {\n'
-        '  "<col>": {"type": "numeric", "min": <n>, "max": <n>, "avg": <n>, "sum": <n>, "null_count": <n>}\n'
-        "  OR\n"
-        '  "<col>": {"type": "categorical", "unique_count": <n>, "null_count": <n>, '
+        '  "<numeric_col>": {"type": "numeric", "min": <n>, "max": <n>, "avg": <n>, "sum": <n>, "null_count": <n>},\n'
+        '  "<categorical_col>": {"type": "categorical", "unique_count": <n>, "null_count": <n>, '
         '"most_common": [{"value": "<v>", "count": <n>}, ...]}\n'
         "}}\n"
         "Rules:\n"
@@ -203,12 +204,13 @@ async def _generate_numerical_insights(question: str, data: list[dict]) -> dict:
         llm      = GeminiProvider().get_model()
         response = await llm.ainvoke(prompt)
         text     = response.content.strip()
-        start    = text.find("{"); end = text.rfind("}") + 1
-        if start == -1 or end == 0:
-            raise ValueError("no JSON object found")
-        result = json.loads(text[start:end])
+        
+        cleaned  = _extract_json(text)
+        result   = json.loads(cleaned)
+        
         if "total_records" not in result or "aggregations" not in result:
             raise ValueError("missing required keys")
+            
         result["total_records"] = total  # always use exact count
         logger.info(f"[NumericalInsights] Gemini OK | cols={len(result['aggregations'])}")
         return result

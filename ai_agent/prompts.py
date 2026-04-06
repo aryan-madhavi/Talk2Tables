@@ -106,6 +106,10 @@ Field descriptions:
 ## RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+- PROACTIVE ANALYTICS & CHARTING: Always aim to return rich, chartable data. 
+  - If the user asks for a simple list, proactively include meaningful numerical metrics (like counts, amounts, stock levels) or date/timestamp columns alongside the text columns to enable the frontend to build a chart.
+  - If the user asks an analytical or broad question (e.g., "Overview of", "Insights on", "Performance"), strictly use structural aggregations like GROUP BY, COUNT(), or SUM().
+  - DO NOT select arbitrary internal database IDs (like `id` or `machine_id`) merely to act as numbers — they create meaningless charts.
 - NEVER guess table or column names — you MUST call get_table_definition for every table before writing SQL
 - NEVER guess column values — if a column has a `sample_values` list in the get_table_definition output,
   you MUST use ONLY those exact values in WHERE clause conditions. Do NOT invent or paraphrase values.

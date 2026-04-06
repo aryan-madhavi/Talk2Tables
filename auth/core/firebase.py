@@ -297,6 +297,14 @@ def fs_upsert_user(
 
     if not doc.exists:
         # First login — create document with default role
+        # Auto-create an organization since they signed up via SSO directly
+        org_id = str(uuid.uuid4())
+        db.collection("organizations").document(org_id).set({
+            "org_id": org_id,
+            "name": f"{display_name or email.split('@')[0]}'s Organization",
+            "created_by": firebase_uid,
+            "created_at": now
+        })
         user_data = {
             "firebase_uid":     firebase_uid,
             "email":            email,
@@ -306,6 +314,7 @@ def fs_upsert_user(
             "sign_in_provider": sign_in_provider,
             "role":             "analyst",  # default RBAC role — change via admin panel
             "is_active":        True,
+            "org_id":           org_id,
             "created_at":       now,
             "last_login_at":    now,
         }
@@ -472,7 +481,20 @@ def fs_revoke_all_sessions(firebase_uid: str) -> int:
     logger.info(f"[Firestore] All sessions revoked | uid={firebase_uid} count={len(sessions)}")
     return len(sessions)
 
-# ------- SignUp -------
+def fs_create_organization(created_by_uid: str, name: str) -> dict:
+    """Creates a new Organization document."""
+    db = get_firestore_client()
+    org_id = str(uuid.uuid4())
+    org_data = {
+        "org_id": org_id,
+        "name": name,
+        "created_by": created_by_uid,
+        "created_at": _now_iso()
+    }
+    db.collection("organizations").document(org_id).set(org_data)
+    logger.info(f"[Firestore] Organization created | org_id={org_id} name='{name}'")
+    return org_data
+
 def fs_create_admin_user(
     firebase_uid:     str,
     email:            str,
@@ -480,6 +502,7 @@ def fs_create_admin_user(
     photo_url:        str,
     email_verified:   bool,
     sign_in_provider: str,
+    org_id:           str,
 ) -> dict:
     """
     Create a brand-new Firestore user document with role = "admin".
@@ -500,6 +523,7 @@ def fs_create_admin_user(
         "sign_in_provider": sign_in_provider,
         "role":             "admin",   # ← always admin for /signup
         "is_active":        True,
+        "org_id":           org_id,
         "last_login_at":    now,
     }
 

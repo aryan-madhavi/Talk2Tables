@@ -636,6 +636,33 @@ def get_table_summary_sync(connection_id: str, schema: str, table: str) -> dict 
     return table_summary
 
 
+async def download_doc(connection_id: str, doc_id: str) -> dict:
+    """Download the raw bytes of a business document."""
+    from auth.core.firebase import get_firestore_client
+    db = get_firestore_client()
+    ref = db.collection(COLLECTION).document(connection_id).collection(DOC_SUB_COL).document(doc_id)
+    doc = ref.get()
+    
+    if not doc.exists:
+        raise ValueError(f"Document '{doc_id}' not found.")
+        
+    data = doc.to_dict()
+    if not data.get("is_active", True):
+        raise ValueError(f"Document '{doc_id}' is deleted.")
+        
+    storage_path = data.get("storage_path", "")
+    if not storage_path or not _storage_exists(storage_path):
+        raise ValueError("Document file not found in storage.")
+        
+    file_bytes = _download_from_storage(storage_path)
+    file_type = data.get("file_type", "txt")
+    
+    return {
+        "filename": data.get("filename", f"document.{file_type}"),
+        "file_bytes": file_bytes,
+        "content_type": _MIME_TYPES.get(file_type, "application/octet-stream")
+    }
+
 async def reprocess_docs(connection_id: str) -> dict:
     """
     Re-process all active docs for a connection.

@@ -162,3 +162,32 @@ async def delete_doc_route(
         )
 
     return {"message": f"Document '{doc_id}' deleted. Table summaries rebuilt."}
+
+
+# ── GET /api/v1/connections/{id}/docs/{doc_id}/download ───────────────────────
+
+@router.get(
+    "/{connection_id}/docs/{doc_id}/download",
+    summary="Download a business documentation file",
+    description="Returns the raw bytes of the documentation file.",
+)
+async def download_doc_route(
+    connection_id: str,
+    doc_id: str,
+    current_user: dict = Depends(require_db_manager),
+):
+    from fastapi.responses import Response
+    from connections.services.doc_service import download_doc
+    try:
+        result = await download_doc(connection_id, doc_id)
+        return Response(
+            content=result["file_bytes"],
+            media_type=result["content_type"],
+            headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'}
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+

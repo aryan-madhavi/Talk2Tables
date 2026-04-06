@@ -62,10 +62,14 @@ async def create_user_route(
 ):
     logger.info(
         f"[POST /users] email={body.email} role={body.role} "
-        f"by={current_user['firebase_uid']}"
+        f"by={current_user['firebase_uid']} org={current_user['org_id']}"
     )
     try:
-        user = await create_user(body, created_by_uid=current_user["firebase_uid"])
+        user = await create_user(
+            body,
+            created_by_uid=current_user["firebase_uid"],
+            org_id=current_user["org_id"],
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     return user
@@ -83,7 +87,7 @@ async def list_users_route(
     active_only: bool = False,
     current_user: dict = Depends(require_db_manager),
 ):
-    users = await list_users(active_only=active_only)
+    users = await list_users(org_id=current_user["org_id"], active_only=active_only)
     return UserListResponse(users=users, total=len(users))
 
 

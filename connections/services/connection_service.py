@@ -43,16 +43,18 @@ def _safe_connection(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "password_enc"}
 
 
-async def _invalidate_connection_cache(connection_id: str) -> None:
+async def _invalidate_connection_cache(connection_id: str, org_id: str = "") -> None:
     """
     Invalidate all cache entries related to a connection.
     Called after any write (create, update, delete, activate, deactivate).
     """
-    await redis_delete(
-        key_connection(connection_id),
-        key_connections_list(active_only=False),
-        key_connections_list(active_only=True),
-    )
+    keys = [key_connection(connection_id)]
+    if org_id:
+        keys += [
+            key_connections_list(org_id, active_only=False),
+            key_connections_list(org_id, active_only=True),
+        ]
+    await redis_delete(*keys)
     logger.debug(f"[Cache] Invalidated connection keys — id={connection_id}")
 
 
@@ -61,9 +63,11 @@ async def _invalidate_connection_cache(connection_id: str) -> None:
 async def create_connection(
     body: CreateConnectionRequest,
     created_by_uid: str,
+    org_id: str,
 ) -> dict:
     """
     Encrypt password and write a new connection to Firestore.
+    Stores org_id on the document for tenant isolation.
     Invalidates the connections list cache.
     Returns safe connection dict (no password_enc).
     """
@@ -83,6 +87,7 @@ async def create_connection(
         "ssl_enabled":    body.ssl_enabled,
         "is_active":      True,
         "description":    body.description,
+        "org_id":         org_id,
         "created_by_uid": created_by_uid,
         "created_at":     now,
         "updated_at":     now,
@@ -91,15 +96,15 @@ async def create_connection(
     }
 
     db.collection(COLLECTION).document(connection_id).set(doc)
-    logger.info(f"[Connections] Created | id={connection_id} name={body.name} by={created_by_uid}")
+    logger.info(f"[Connections] Created | id={connection_id} name={body.name} by={created_by_uid} org={org_id}")
 
     safe = _safe_connection(doc)
 
-    # Cache the new connection, invalidate list caches
+    # Cache the new connection, invalidate org-scoped list caches
     await redis_set(key_connection(connection_id), safe, TTL_CONNECTION)
     await redis_delete(
-        key_connections_list(active_only=False),
-        key_connections_list(active_only=True),
+        key_connections_list(org_id, active_only=False),
+        key_connections_list(org_id, active_only=True),
     )
 
     return safe
@@ -107,15 +112,19 @@ async def create_connection(
 
 # ── Read ──────────────────────────────────────────────────────────────────────
 
-async def get_connection_by_id(connection_id: str) -> Optional[dict]:
+async def get_connection_by_id(connection_id: str, org_id: str = "") -> Optional[dict]:
     """
     Fetch a single connection (safe — no password_enc).
+    If org_id is provided, validates that the connection belongs to that org.
 
     Flow: Redis → Firestore → cache result
     """
     # 1. Cache check
     cached = await redis_get(key_connection(connection_id))
     if cached:
+        if org_id and cached.get("org_id") != org_id:
+            logger.warning(f"[Connections] Cross-org access denied id={connection_id} org={org_id}")
+            return None
         logger.debug(f"[Cache] HIT connection:{connection_id}")
         return cached
 
@@ -125,7 +134,13 @@ async def get_connection_by_id(connection_id: str) -> Optional[dict]:
     if not doc.exists:
         return None
 
-    safe = _safe_connection(doc.to_dict())
+    data = doc.to_dict()
+    # Org boundary check
+    if org_id and data.get("org_id") != org_id:
+        logger.warning(f"[Connections] Cross-org access denied id={connection_id} org={org_id}")
+        return None
+
+    safe = _safe_connection(data)
 
     # 3. Populate cache
     await redis_set(key_connection(connection_id), safe, TTL_CONNECTION)
@@ -150,13 +165,16 @@ async def get_connection_with_password(connection_id: str) -> Optional[dict]:
     return data
 
 
-async def list_connections(active_only: bool = False) -> list[dict]:
+async def list_connections(org_id: str, active_only: bool = False) -> list[dict]:
     """
-    List all connections. Optionally filter to active only.
+    List connections for a specific organization. Optionally filter to active only.
+    Strictly scoped to org_id — never leaks connections from other tenants.
 
     Flow: Redis → Firestore → cache result
     """
-    cache_key = key_connections_list(active_only)
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    cache_key = key_connections_list(org_id, active_only)
 
     # 1. Cache check
     cached = await redis_get(cache_key)
@@ -164,12 +182,11 @@ async def list_connections(active_only: bool = False) -> list[dict]:
         logger.debug(f"[Cache] HIT {cache_key}")
         return cached
 
-    # 2. Firestore fallback
+    # 2. Firestore fallback — always filter by org_id first
     db    = get_firestore_client()
-    query = db.collection(COLLECTION)
+    query = db.collection(COLLECTION).where(filter=FieldFilter("org_id", "==", org_id))
 
     if active_only:
-        from google.cloud.firestore_v1.base_query import FieldFilter
         query = query.where(filter=FieldFilter("is_active", "==", True))
 
     docs    = query.stream()
@@ -178,7 +195,7 @@ async def list_connections(active_only: bool = False) -> list[dict]:
 
     # 3. Populate cache
     await redis_set(cache_key, results, TTL_CONNECTIONS_LIST)
-    logger.debug(f"[Cache] MISS {cache_key} — cached {len(results)} connections")
+    logger.debug(f"[Cache] MISS {cache_key} — cached {len(results)} connections for org={org_id}")
 
     return results
 
@@ -188,14 +205,21 @@ async def list_connections(active_only: bool = False) -> list[dict]:
 async def update_connection(
     connection_id: str,
     body: UpdateConnectionRequest,
+    org_id: str = "",
 ) -> Optional[dict]:
     """
-    Partial update. Invalidates single + list caches after write.
+    Partial update. Validates org_id ownership. Invalidates single + list caches after write.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
 
-    if not ref.get().exists:
+    existing = ref.get()
+    if not existing.exists:
+        return None
+
+    # Org boundary check
+    if org_id and existing.to_dict().get("org_id") != org_id:
+        logger.warning(f"[Connections] Cross-org update denied id={connection_id} org={org_id}")
         return None
 
     updates: dict = {"updated_at": _now_iso()}
@@ -218,7 +242,7 @@ async def update_connection(
     updated = _safe_connection(ref.get().to_dict())
 
     # Invalidate — data changed
-    await _invalidate_connection_cache(connection_id)
+    await _invalidate_connection_cache(connection_id, updated.get("org_id", ""))
     # Re-populate single key with fresh data
     await redis_set(key_connection(connection_id), updated, TTL_CONNECTION)
 
@@ -227,20 +251,29 @@ async def update_connection(
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
-async def delete_connection(connection_id: str) -> bool:
+async def delete_connection(connection_id: str, org_id: str = "") -> bool:
     """
-    Hard-delete. Invalidates all related cache keys.
+    Hard-delete. Validates org_id. Invalidates all related cache keys.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
 
-    if not ref.get().exists:
+    existing = ref.get()
+    if not existing.exists:
+        return False
+
+    doc = existing.to_dict()
+    target_org_id = doc.get("org_id", "") if doc else ""
+
+    # Org boundary check
+    if org_id and target_org_id != org_id:
+        logger.warning(f"[Connections] Cross-org delete denied id={connection_id} org={org_id}")
         return False
 
     ref.delete()
     logger.info(f"[Connections] Deleted | id={connection_id}")
 
-    await _invalidate_connection_cache(connection_id)
+    await _invalidate_connection_cache(connection_id, target_org_id)
 
     return True
 
@@ -270,9 +303,10 @@ def _build_connection_url(conn: dict) -> str:
     return url
 
 
-async def test_connection(connection_id: str) -> dict:
+async def test_connection(connection_id: str, org_id: str = "") -> dict:
     """
     Try to open a live connection to the target database.
+    Validates org_id ownership if provided.
     Updates last_tested_at and last_tested_ok in Firestore regardless of outcome.
     Returns { ok: bool, message: str }.
     NOT cached — always live test.
@@ -314,21 +348,32 @@ async def test_connection(connection_id: str) -> dict:
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
     ref.update({"last_tested_at": now, "last_tested_ok": ok, "updated_at": now})
-    await _invalidate_connection_cache(connection_id)
+    await _invalidate_connection_cache(connection_id, conn.get("org_id", ""))
+
+    # Org boundary check (after fetching to provide a concrete error)
+    if org_id and conn.get("org_id") != org_id:
+        logger.warning(f"[Connections] Cross-org test denied id={connection_id} org={org_id}")
+        return {"ok": False, "message": f"Connection '{connection_id}' not found."}
 
     return {"ok": ok, "message": message}
 
 
 # ── Activate / Deactivate ─────────────────────────────────────────────────────
 
-async def set_connection_active(connection_id: str, is_active: bool) -> Optional[dict]:
+async def set_connection_active(connection_id: str, is_active: bool, org_id: str = "") -> Optional[dict]:
     """
-    Enable or disable a connection. Invalidates all related cache keys.
+    Enable or disable a connection. Validates org_id. Invalidates all related cache keys.
     """
     db  = get_firestore_client()
     ref = db.collection(COLLECTION).document(connection_id)
 
-    if not ref.get().exists:
+    existing = ref.get()
+    if not existing.exists:
+        return None
+
+    # Org boundary check
+    if org_id and existing.to_dict().get("org_id") != org_id:
+        logger.warning(f"[Connections] Cross-org activate/deactivate denied id={connection_id} org={org_id}")
         return None
 
     ref.update({"is_active": is_active, "updated_at": _now_iso()})
@@ -338,7 +383,7 @@ async def set_connection_active(connection_id: str, is_active: bool) -> Optional
     updated = _safe_connection(ref.get().to_dict())
 
     # Invalidate — is_active changed so both list variants are stale
-    await _invalidate_connection_cache(connection_id)
+    await _invalidate_connection_cache(connection_id, updated.get("org_id", ""))
     await redis_set(key_connection(connection_id), updated, TTL_CONNECTION)
 
     return updated
