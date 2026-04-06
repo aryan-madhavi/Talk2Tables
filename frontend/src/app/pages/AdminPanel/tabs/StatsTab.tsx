@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts';
 import { Database, ChevronDown, Loader2, AlertCircle, TrendingUp, CheckCircle2, XCircle, Rows3, Timer } from 'lucide-react';
+import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 import { cn } from '../../../../lib/utils';
 import { listConnections, ConnectionOut } from '../../../../lib/connectionService';
 import { getConnectionStats, ConnectionStats } from '../../../../lib/auditService';
@@ -23,6 +24,43 @@ const QT_COLORS: Record<string, string> = {
   DELETE: '#ef4444',
 };
 
+// ─── Firestore user lookup ────────────────────────────────────────────────────
+
+interface UserInfo {
+  display_name: string;
+  email: string;
+}
+
+async function fetchUserInfoMap(uids: string[]): Promise<Map<string, UserInfo>> {
+  const map = new Map<string, UserInfo>();
+  if (!uids.length) return map;
+
+  const db = getFirestore();
+  const usersRef = collection(db, 'users');
+
+  // Firestore 'in' supports max 30 items per query
+  const chunks: string[][] = [];
+  for (let i = 0; i < uids.length; i += 30) chunks.push(uids.slice(i, i + 30));
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const q = query(usersRef, where('firebase_uid', 'in', chunk));
+      const snap = await getDocs(q);
+      snap.forEach((doc) => {
+        const d = doc.data();
+        map.set(d.firebase_uid as string, {
+          display_name: (d.display_name as string) ?? (d.email as string) ?? d.firebase_uid,
+          email: (d.email as string) ?? '',
+        });
+      });
+    })
+  );
+
+  return map;
+}
+
+// ─── StatCard ────────────────────────────────────────────────────────────────
+
 function StatCard({
   label, value, sub, icon: Icon, color,
 }: { label: string; value: string | number; sub?: string; icon: React.ElementType; color: string }) {
@@ -40,15 +78,18 @@ function StatCard({
   );
 }
 
+// ─── StatsTab ────────────────────────────────────────────────────────────────
+
 export function StatsTab() {
   const [connections,    setConnections]    = useState<ConnectionOut[]>([]);
   const [connLoading,    setConnLoading]    = useState(true);
   const [selectedConnId, setSelectedConnId] = useState('');
   const [days,           setDays]           = useState(30);
 
-  const [stats,   setStats]   = useState<ConnectionStats | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
+  const [stats,       setStats]       = useState<ConnectionStats | null>(null);
+  const [userInfoMap, setUserInfoMap] = useState<Map<string, UserInfo>>(new Map());
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
 
   // Load connections once
   useEffect(() => {
@@ -66,7 +107,13 @@ export function StatsTab() {
     setLoading(true);
     setError(null);
     getConnectionStats(connId, d)
-      .then(setStats)
+      .then(async (data) => {
+        setStats(data);
+        // Enrich top_users with display names from Firestore
+        const uids = data.top_users.map(u => u.firebase_uid);
+        const infoMap = await fetchUserInfoMap(uids);
+        setUserInfoMap(infoMap);
+      })
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load stats'))
       .finally(() => setLoading(false));
   }, []);
@@ -242,11 +289,14 @@ export function StatsTab() {
                     const pct = stats.total_queries > 0
                       ? Math.round((u.query_count / stats.total_queries) * 100)
                       : 0;
+                    const info = userInfoMap.get(u.firebase_uid);
+                    // Show display_name → email → uid as fallback
+                    const label = info?.display_name ?? u.firebase_uid;
                     return (
                       <div key={u.firebase_uid}>
                         <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="font-mono text-gray-500 truncate max-w-[70%]">
-                            {i + 1}. {u.firebase_uid}
+                          <span className="text-gray-700 font-medium truncate max-w-[70%]">
+                            {i + 1}. {label}
                           </span>
                           <span className="font-semibold text-gray-700">{u.query_count} queries</span>
                         </div>
