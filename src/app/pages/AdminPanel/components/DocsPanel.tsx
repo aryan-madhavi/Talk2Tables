@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Upload, X, Loader2, Trash2, CheckCircle,
-  AlertCircle, FileUp, File, FileSpreadsheet,
+  AlertCircle, FileUp, File, FileSpreadsheet, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../../lib/utils';
@@ -10,6 +10,7 @@ import {
   uploadDoc,
   listDocs,
   deleteDoc,
+  downloadDoc,
   DocMetadata,
 } from '../../../../lib/connectionService';
 
@@ -59,7 +60,12 @@ export function DocsPanel({ open, onClose, connectionId, connectionName }: DocsP
   const [deletingId, setDeletingId]   = useState<string | null>(null);
   const [dragOver, setDragOver]       = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [expandedDocs, setExpandedDocs] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleExpand = (docId: string) => {
+    setExpandedDocs(prev => ({ ...prev, [docId]: !prev[docId] }));
+  };
 
   // ── Fetch docs on mount ─────────────────────────────────────────────────────
 
@@ -327,29 +333,44 @@ export function DocsPanel({ open, onClose, connectionId, connectionName }: DocsP
                         )}
                       </div>
 
-                      {/* Delete button */}
-                      <button
-                        onClick={() => handleDelete(doc)}
-                        disabled={isDeleting}
-                        title="Delete document"
-                        className={cn(
-                          'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all',
-                          'text-gray-300 hover:text-red-500 hover:bg-red-50',
-                          'opacity-0 group-hover:opacity-100',
-                          isDeleting && 'opacity-100 cursor-not-allowed',
-                        )}
-                      >
-                        {isDeleting
-                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                          : <Trash2 className="w-4 h-4" />
-                        }
-                      </button>
+                      {/* Actions */}
+                      <div className="flex flex-col gap-1 items-end ml-2">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await downloadDoc(connectionId, doc.doc_id);
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Download failed.');
+                            }
+                          }}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all text-blue-400 hover:text-blue-600 hover:bg-blue-50 opacity-0 group-hover:opacity-100"
+                          title="Download document"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc)}
+                          disabled={isDeleting}
+                          title="Delete document"
+                          className={cn(
+                            'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all',
+                            'text-gray-300 hover:text-red-500 hover:bg-red-50',
+                            'opacity-0 group-hover:opacity-100',
+                            isDeleting && 'opacity-100 cursor-not-allowed',
+                          )}
+                        >
+                          {isDeleting
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <Trash2 className="w-4 h-4" />
+                          }
+                        </button>
+                      </div>
                     </div>
 
                     {/* Matched tables pills */}
                     {doc.tables_matched.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-3 pl-[52px]">
-                        {doc.tables_matched.slice(0, 6).map(t => (
+                        {(expandedDocs[doc.doc_id] ? doc.tables_matched : doc.tables_matched.slice(0, 6)).map(t => (
                           <span
                             key={t}
                             className="px-2 py-0.5 text-[10px] font-medium rounded-full
@@ -359,10 +380,14 @@ export function DocsPanel({ open, onClose, connectionId, connectionName }: DocsP
                           </span>
                         ))}
                         {doc.tables_matched.length > 6 && (
-                          <span className="px-2 py-0.5 text-[10px] font-medium rounded-full
-                                          bg-gray-50 text-gray-500 border border-gray-100">
-                            +{doc.tables_matched.length - 6} more
-                          </span>
+                          <button
+                            onClick={() => toggleExpand(doc.doc_id)}
+                            className="px-2 py-0.5 text-[10px] font-medium rounded-full
+                                      bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-700 
+                                      border border-gray-200 transition-colors cursor-pointer"
+                          >
+                            {expandedDocs[doc.doc_id] ? 'Show less' : `+${doc.tables_matched.length - 6} more`}
+                          </button>
                         )}
                       </div>
                     )}

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { ArrowRight, Eye, EyeOff, Check, X } from 'lucide-react';
 
 interface SignupFormProps {
-  onSubmit: (email: string, password: string, displayName: string) => Promise<void>;
+  onSubmit: (email: string, password: string, displayName: string, organizationName: string) => Promise<void>;
   loading:  boolean;
   error:    string | null;
 }
@@ -22,6 +22,7 @@ const PASSWORD_RULES: PasswordRule[] = [
 ];
 
 export function SignupForm({ onSubmit, loading, error }: SignupFormProps) {
+  const [organizationName, setOrganizationName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email,       setEmail]       = useState('');
   const [password,    setPassword]    = useState('');
@@ -33,12 +34,12 @@ export function SignupForm({ onSubmit, loading, error }: SignupFormProps) {
   const rules        = PASSWORD_RULES.map(r => ({ ...r, ok: r.test(password) }));
   const passwordOk   = rules.every(r => r.ok);
   const confirmOk    = password === confirm && confirm.length > 0;
-  const canSubmit    = displayName.trim() && email && passwordOk && confirmOk && !loading;
+  const canSubmit    = organizationName.trim() && displayName.trim() && email && passwordOk && confirmOk && !loading;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    await onSubmit(email, password, displayName.trim());
+    await onSubmit(email, password, displayName.trim(), organizationName.trim());
   }
 
   return (
@@ -51,6 +52,27 @@ export function SignupForm({ onSubmit, loading, error }: SignupFormProps) {
           <span>{error}</span>
         </div>
       )}
+
+      {/* Organization Name */}
+      <div>
+        <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
+          Organization Name
+        </label>
+        <input
+          type="text"
+          id="organizationName"
+          required
+          autoComplete="organization"
+          placeholder="Acme Corp"
+          value={organizationName}
+          onChange={e => setOrganizationName(e.target.value)}
+          disabled={loading}
+          className="w-full px-4 py-3 rounded-lg border border-gray-300 text-sm
+                     focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+                     disabled:bg-gray-50 disabled:text-gray-400
+                     transition-colors outline-none"
+        />
+      </div>
 
       {/* Display Name */}
       <div>

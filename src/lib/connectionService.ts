@@ -222,3 +222,33 @@ export async function deleteDoc(connectionId: string, docId: string): Promise<{ 
     method: 'DELETE',
   });
 }
+
+/** GET /api/v1/connections/:id/docs/:docId/download — download a documentation file */
+export async function downloadDoc(connectionId: string, docId: string): Promise<void> {
+  const token = await getIdToken();
+  const res = await fetch(`${API_BASE}/connections/${connectionId}/docs/${docId}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Download failed: ${res.status}`);
+  }
+
+  // Get filename from Content-Disposition if present
+  let filename = 'document.file';
+  const disposition = res.headers.get('Content-Disposition');
+  if (disposition && disposition.includes('filename="')) {
+    filename = disposition.split('filename="')[1].split('"')[0];
+  }
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

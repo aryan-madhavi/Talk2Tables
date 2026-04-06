@@ -196,13 +196,14 @@ export async function login(email: string, password: string): Promise<LoginRespo
  *   2. POST /signup → backend creates Firestore doc → custom token
  *   3. signInWithCustomToken → fresh ID token with role='admin'
  */
-export async function signup(idToken: string, displayName: string): Promise<SignupResponse> {
+export async function signup(idToken: string, displayName: string, organizationName: string): Promise<SignupResponse> {
   const res = await fetch(`${API_BASE}/signup`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({
       firebase_id_token: idToken,
       display_name:      displayName,
+      organization_name: organizationName,
     }),
   });
 

@@ -29,7 +29,7 @@ export default function Signup() {
     if (user) navigate(from, { replace: true });
   }, [user, from, navigate]);
 
-  async function handleSignup(email: string, password: string, displayName: string) {
+  async function handleSignup(email: string, password: string, displayName: string, organizationName: string) {
     setError(null);
     setLoading(true);
     const auth = getAuth();
@@ -47,17 +47,16 @@ export default function Signup() {
       // ── Step 2: Set displayName on Firebase Auth profile ───────────────
       await updateProfile(fbUser, { displayName });
 
-      // ── Step 3: POST to backend — creates/updates Firestore doc with role="admin" ──
+      // ── Step 3: POST to backend — creates org + Firestore doc with role="admin" ──
       const idToken = await fbUser.getIdToken();
-      await signup(idToken, displayName);
+      await signup(idToken, displayName, organizationName);
       
       freshFirebaseUser = null; // success path — no cleanup needed
 
-      // Redirect to login page as requested by user
-      navigate('/login', { 
+      // Redirect to dashboard as requested by user
+      navigate('/', { 
         state: { 
-          message: 'Account created successfully! Please sign in.',
-          email: email // optional: pre-fill email if LoginForm supports it
+          message: 'Account created successfully!'
         }, 
         replace: true 
       });

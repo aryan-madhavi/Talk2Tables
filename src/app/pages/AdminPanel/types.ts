@@ -20,6 +20,7 @@ export const DB_DEFAULTS: Record<DbType, DbTypeConfig> = {
 // ─── Connection Form ───────────────────────────────────────────────────────────
 
 export interface ConnectionForm {
+  connection_id?: string;
   name:     string;
   type:     DbType;
   host:     string;
@@ -62,6 +63,7 @@ export function dbConnectionToForm(db: DatabaseConnection): ConnectionForm {
     'PostgreSQL';
 
   return {
+    connection_id: db.connection_id,
     name:     db.name,
     type:     formType,
     host:     db.host,

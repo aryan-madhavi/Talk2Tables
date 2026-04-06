@@ -116,8 +116,8 @@ function RoleDropdown({ user, currentUid, onChange, loading, canEdit }: {
 
 // ── Actions Dropdown ──────────────────────────────────────────────────────────
 
-function ActionsMenu({ user, currentUid, onActivate, onDeactivate, onDelete, onForceLogout, onEdit, onViewLogs, loading }: {
-  user: UserOut; currentUid: string;
+function ActionsMenu({ user, currentUid, isAdmin, onActivate, onDeactivate, onDelete, onForceLogout, onEdit, onViewLogs, loading }: {
+  user: UserOut; currentUid: string; isAdmin: boolean;
   onActivate: () => void; onDeactivate: () => void;
   onDelete: () => void; onForceLogout: () => void;
   onEdit: () => void; onViewLogs: () => void;
@@ -167,14 +167,19 @@ function ActionsMenu({ user, currentUid, onActivate, onDeactivate, onDelete, onF
         <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border
                         border-gray-100 z-30 py-1 animate-in fade-in zoom-in-95 duration-150">
           {item(<ScrollText className="w-4 h-4" />, 'View Logs', onViewLogs, 'text-gray-700 hover:bg-gray-50')}
-          <div className="h-px bg-gray-100 my-1" />
-          {user.is_active
-            ? item(<ShieldOff className="w-4 h-4" />, 'Deactivate', onDeactivate, 'text-orange-600 hover:bg-orange-50', isSelf)
-            : item(<ShieldCheck className="w-4 h-4" />, 'Activate', onActivate, 'text-green-600 hover:bg-green-50')
-          }
-          {item(<LogOut className="w-4 h-4" />, 'Force Logout', onForceLogout, 'text-amber-600 hover:bg-amber-50', isSelf)}
-          <div className="h-px bg-gray-100 my-1" />
-          {item(<Trash2 className="w-4 h-4" />, 'Delete User', onDelete, 'text-red-600 hover:bg-red-50', isSelf)}
+          
+          {isAdmin && (
+            <>
+              <div className="h-px bg-gray-100 my-1" />
+              {user.is_active
+                ? item(<ShieldOff className="w-4 h-4" />, 'Deactivate', onDeactivate, 'text-orange-600 hover:bg-orange-50', isSelf)
+                : item(<ShieldCheck className="w-4 h-4" />, 'Activate', onActivate, 'text-green-600 hover:bg-green-50')
+              }
+              {item(<LogOut className="w-4 h-4" />, 'Force Logout', onForceLogout, 'text-amber-600 hover:bg-amber-50', isSelf)}
+              <div className="h-px bg-gray-100 my-1" />
+              {item(<Trash2 className="w-4 h-4" />, 'Delete User', onDelete, 'text-red-600 hover:bg-red-50', isSelf)}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -632,7 +637,7 @@ export function UsersTab() {
           </div>
         ) : (
           <div className="rounded-xl border border-gray-100 overflow-hidden">
-            <div className="overflow-x-auto w-full">
+            <div className="overflow-x-auto w-full pb-32">
               <table className="w-full text-sm text-left min-w-[800px]">
                 <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
                   <tr>
@@ -652,7 +657,6 @@ export function UsersTab() {
                         expandedUid === user.firebase_uid
                           ? 'bg-blue-50/40 border-l-2 border-l-blue-400'
                           : 'hover:bg-gray-50',
-                        !user.is_active && 'opacity-50',
                       )}>
 
                         {/* Expand chevron */}
@@ -725,6 +729,7 @@ export function UsersTab() {
                           <ActionsMenu
                             user={user}
                             currentUid={currentUser?.firebase_uid ?? ''}
+                            isAdmin={isAdmin}
                             onActivate={() => handleActivate(user)}
                             onDeactivate={() => handleDeactivate(user)}
                             onDelete={() => handleDelete(user)}

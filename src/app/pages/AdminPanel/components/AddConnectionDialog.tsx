@@ -1,5 +1,5 @@
 // src/app/pages/AdminPanel/components/AddConnectionDialog.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Database, X, Eye, EyeOff, Loader2, Wifi,
   Lock, Server, CheckCircle, XCircle, ChevronDown, FileUp, FileText, Trash2,
@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { Field }    from '../../../components/shared/Field';
 import { inputCls } from '../../../components/shared/inputCls';
+import { listDocs, downloadDoc, DocMetadata } from '../../../../lib/connectionService';
 
 // ─── Props ─────────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,21 @@ export function AddConnectionDialog({
   const [testMessage,  setTestMessage]  = useState('');
   const [errors,       setErrors]       = useState<ConnectionFormErrors>({});
   const [docFile,      setDocFile]      = useState<File | null>(null);
+  const [existingDocs, setExistingDocs] = useState<DocMetadata[]>([]);
+  const [docsLoading,  setDocsLoading]  = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditMode && initialData?.connection_id && open) {
+      setDocsLoading(true);
+      listDocs(initialData.connection_id)
+        .then(res => setExistingDocs(res.docs))
+        .catch(err => console.error(err))
+        .finally(() => setDocsLoading(false));
+    } else {
+      setExistingDocs([]);
+    }
+  }, [isEditMode, initialData?.connection_id, open]);
 
   if (!open) return null;
 
@@ -314,6 +329,40 @@ export function AddConnectionDialog({
                   <div className="text-xs text-gray-500">Optional — helps AI understand your data</div>
                 </div>
               </div>
+
+              {/* Show existing docs */}
+              {docsLoading && <div className="text-xs text-gray-400 my-2 px-1">Loading previous docs...</div>}
+              {!docsLoading && existingDocs.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  <div className="text-xs font-semibold text-gray-500 uppercase px-1">Previous Documents</div>
+                  {existingDocs.map(doc => (
+                    <div key={doc.doc_id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white border border-gray-200">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 text-violet-500 shrink-0" />
+                        <span className="text-sm text-gray-700 truncate">{doc.filename}</span>
+                        <span className="text-xs text-gray-400 shrink-0">
+                          {(doc.file_size_bytes / 1024 / 1024).toFixed(1)} MB
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await downloadDoc(initialData!.connection_id!, doc.doc_id);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="text-blue-500 hover:text-blue-700 transition-colors text-xs font-medium"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                  <div className="text-xs font-semibold text-gray-500 uppercase px-1 mt-3">Upload New (adds to existing)</div>
+                </div>
+              )}
+
               {docFile ? (
                 <div className="flex items-center justify-between mt-2 px-3 py-2 rounded-lg bg-white border border-gray-200">
                   <div className="flex items-center gap-2 min-w-0">

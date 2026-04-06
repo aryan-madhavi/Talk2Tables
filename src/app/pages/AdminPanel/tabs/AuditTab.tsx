@@ -113,9 +113,11 @@ export function AuditTab() {
             >
               {connLoading
                 ? <option>Loading…</option>
-                : connections.map(c => (
-                    <option key={c.connection_id} value={c.connection_id}>{c.name}</option>
-                  ))
+                : connections.length === 0
+                  ? <option value="">No databases</option>
+                  : connections.map(c => (
+                      <option key={c.connection_id} value={c.connection_id}>{c.name}</option>
+                    ))
               }
             </select>
             <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
@@ -156,7 +158,7 @@ export function AuditTab() {
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty state (no logs found) */}
       {!loading && !error && logs.length === 0 && selectedConnId && (
         <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
           <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
@@ -164,6 +166,17 @@ export function AuditTab() {
           </div>
           <p className="text-sm font-medium text-gray-600">No audit logs found</p>
           <p className="text-xs text-gray-400">Try adjusting the status filter or selecting a different connection.</p>
+        </div>
+      )}
+
+      {/* Empty state (no connections) */}
+      {!connLoading && connections.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+            <Database className="w-7 h-7 text-gray-300" />
+          </div>
+          <p className="text-sm font-medium text-gray-600">No databases connected</p>
+          <p className="text-xs text-gray-400">Please add a database connection in the Databases tab to view audit logs.</p>
         </div>
       )}
 

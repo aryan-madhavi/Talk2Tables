@@ -143,12 +143,12 @@ export function UserAccessPanel({ user, allConnections, currentUid }: Props) {
   };
 
   const isSelf  = user.firebase_uid === currentUid;
-  const isAdmin = user.role === 'admin';
+  const hasFullAccess = user.role === 'admin' || user.role === 'db_manager';
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // Admins bypass per-connection grants — show informational message instead
-  if (isAdmin) {
+  // Admins and DB Managers bypass per-connection grants — show informational message instead
+  if (hasFullAccess) {
     return (
       <tr className="bg-blue-50/20">
         <td colSpan={6} className="px-6 pb-4 pt-0">
@@ -160,7 +160,7 @@ export function UserAccessPanel({ user, allConnections, currentUid }: Props) {
               <div>
                 <p className="text-sm font-semibold text-blue-800">Full Database Access</p>
                 <p className="text-xs text-blue-500 mt-0.5">
-                  Admins have unrestricted access to all active database connections. No per-database grants are needed.
+                  {user.role === 'admin' ? 'Admins' : 'DB Managers'} have unrestricted access to all active database connections. No per-database grants are needed.
                 </p>
               </div>
             </div>

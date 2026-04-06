@@ -112,9 +112,11 @@ export function StatsTab() {
             >
               {connLoading
                 ? <option>Loading…</option>
-                : connections.map(c => (
-                    <option key={c.connection_id} value={c.connection_id}>{c.name}</option>
-                  ))
+                : connections.length === 0
+                  ? <option value="">No databases</option>
+                  : connections.map(c => (
+                      <option key={c.connection_id} value={c.connection_id}>{c.name}</option>
+                    ))
               }
             </select>
             <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
@@ -147,10 +149,21 @@ export function StatsTab() {
       )}
 
       {/* Loading */}
-      {loading && (
+      {loading && selectedConnId && (
         <div className="flex items-center justify-center py-20 gap-2 text-gray-400">
           <Loader2 className="w-5 h-5 animate-spin" />
           <span className="text-sm">Loading stats…</span>
+        </div>
+      )}
+
+      {/* Empty state (no connections) */}
+      {!connLoading && connections.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center">
+            <Database className="w-7 h-7 text-gray-300" />
+          </div>
+          <p className="text-sm font-medium text-gray-600">No databases connected</p>
+          <p className="text-xs text-gray-400">Please add a database connection in the Databases tab to view usage statistics.</p>
         </div>
       )}
 
