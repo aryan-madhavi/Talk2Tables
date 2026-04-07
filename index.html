@@ -28,6 +28,10 @@
       --grad: linear-gradient(135deg, var(--grad-a), var(--grad-b));
       --grad-text: linear-gradient(135deg, #2dd4bf 0%, #3b82f6 50%, #818cf8 100%);
 
+      /* Download accent — warm amber→orange, distinct from teal/blue */
+      --grad-dl: linear-gradient(135deg, #f59e0b, #f97316);
+      --glow-dl: rgba(249,115,22,.28);
+
       --green:  #10b981;
       --red:    #f43f5e;
       --amber:  #f59e0b;
@@ -61,6 +65,8 @@
         --grad-c: #6366f1;
         --grad: linear-gradient(135deg, #0d9488, #2563eb);
         --grad-text: linear-gradient(135deg, #0d9488 0%, #2563eb 50%, #6366f1 100%);
+        --grad-dl: linear-gradient(135deg, #d97706, #ea580c);
+        --glow-dl: rgba(234,88,12,.2);
 
         --green:  #059669;
         --red:    #e11d48;
@@ -197,6 +203,13 @@
     }
     .nav-links a { transition: color .18s; }
     .nav-links a:hover { color: var(--text); }
+
+    /* nav right group */
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
     .nav-demo {
       font-size: 13.5px;
       font-weight: 600;
@@ -208,6 +221,39 @@
       white-space: nowrap;
     }
     .nav-demo:hover { opacity: .88; transform: translateY(-1px); }
+
+    /* ── Download button — amber/orange accent ── */
+    .nav-dl {
+      font-size: 13.5px;
+      font-weight: 700;
+      padding: 9px 22px;
+      border-radius: 50px;
+      background: var(--grad-dl);
+      color: #fff;
+      transition: opacity .2s, transform .15s;
+      white-space: nowrap;
+      box-shadow: 0 0 18px var(--glow-dl);
+    }
+    .nav-dl:hover { opacity: .88; transform: translateY(-1px); }
+
+    /* hero download button */
+    .btn-download {
+      font-family: var(--sans);
+      font-size: 14.5px;
+      font-weight: 700;
+      padding: 13px 30px;
+      border-radius: 50px;
+      background: var(--grad-dl);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      transition: opacity .2s, transform .15s;
+      box-shadow: 0 0 28px var(--glow-dl);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .btn-download:hover { opacity: .85; transform: translateY(-1px); }
 
     /* ─────────────────────────────────────────
        LAYOUT
@@ -1029,6 +1075,15 @@
       text-align: center;
       font-weight: 700;
     }
+    .mobile-nav .mobile-dl {
+      margin-top: 6px;
+      padding: 13px 16px;
+      background: var(--grad-dl);
+      color: #fff;
+      border-radius: var(--r-lg);
+      text-align: center;
+      font-weight: 700;
+    }
 
     /* ─────────────────────────────────────────
        RESPONSIVE — TABLET  ≤ 1024px
@@ -1044,7 +1099,7 @@
     @media (max-width: 920px) {
       /* nav */
       .nav-links    { display: none; }
-      .nav-demo     { display: none; }
+      .nav-right    { display: none; }
       .nav-hamburger{ display: flex; }
 
       /* hero */
@@ -1099,7 +1154,8 @@
       .hero-sub     { font-size: 15px; }
       .hero-actions { flex-direction: column; }
       .btn-primary,
-      .btn-outline  { width: 100%; text-align: center; justify-content: center; }
+      .btn-outline,
+      .btn-download { width: 100%; text-align: center; justify-content: center; }
 
       /* section sub */
       .section-sub  { font-size: 14.5px; }
@@ -1178,7 +1234,11 @@
       <li><a href="#safety">Safety</a></li>
       <li><a href="#team">Team</a></li>
     </ul>
-    <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="nav-demo">Live Demo ↗</a>
+    <!-- Nav right: Live Demo + Download Now -->
+    <div class="nav-right">
+      <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="nav-demo">Live Demo ↗</a>
+      <a href="downloadPage.html" class="nav-dl">Download</a>
+    </div>
     <button class="nav-hamburger" id="hamburger" aria-label="Toggle menu" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
@@ -1192,6 +1252,7 @@
     <a href="#safety" class="mobile-link">Safety</a>
     <a href="#team" class="mobile-link">Team</a>
     <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="mobile-demo">Live Demo ↗</a>
+    <a href="downloadPage.html" class="mobile-dl">Download Now</a>
   </div>
 
   <!-- HERO -->
@@ -1208,6 +1269,7 @@
           <div class="hero-actions">
             <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="btn-primary">Try Live Demo ↗</a>
             <a href="#features" class="btn-outline">Explore Features</a>
+            <a href="downloadPage.html" class="btn-download">Download Now</a>
           </div>
           <div class="hero-stats">
             <div class="hstat">
@@ -1605,9 +1667,10 @@ WHERE zone = 'B'
   <!-- CTA BANNER -->
   <div class="cta-wrap">
     <h2>Ready to talk to<br /><span class="gtext">your database?</span></h2>
-    <p>Try the live application or explore the codebase to see how it works.</p>
+    <p>Try the live application, download for your OS, or explore the codebase to see how it works.</p>
     <div class="hero-actions">
       <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="btn-primary">Open Live Demo ↗</a>
+      <a href="download.html" class="btn-download">⬇ Download Now</a>
       <a href="#pipeline" class="btn-outline">How It Works</a>
     </div>
   </div>
@@ -1623,6 +1686,7 @@ WHERE zone = 'B'
         <div class="foot-meta">Final Year Project · Computer Engineering · 2025–26<br />Built with Python, FastAPI, React, LangGraph</div>
         <div class="foot-links">
           <a href="#hero">Back to top</a>
+          <a href="download.html">Download</a>
           <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener">Live Demo ↗</a>
         </div>
       </div>
@@ -1644,7 +1708,7 @@ WHERE zone = 'B'
       hamburger.setAttribute('aria-expanded', String(isOpen));
     });
     // close when any mobile nav link is clicked
-    document.querySelectorAll('.mobile-link, .mobile-demo').forEach(el => {
+    document.querySelectorAll('.mobile-link, .mobile-demo, .mobile-dl').forEach(el => {
       el.addEventListener('click', closeMenu);
     });
     // close on outside click
@@ -1774,7 +1838,6 @@ WHERE zone = 'B'
       function goTo(idx) {
         current = Math.max(0, Math.min(idx, total - 1));
         const card = cards[current];
-        // center the card inside the scroll container
         const offset = card.offsetLeft - (carousel.offsetWidth - card.offsetWidth) / 2;
         carousel.scrollTo({ left: offset, behavior: 'smooth' });
         updateDots(current);
@@ -1784,7 +1847,6 @@ WHERE zone = 'B'
       prevBtn.addEventListener('click', () => goTo(current - 1));
       nextBtn.addEventListener('click', () => goTo(current + 1));
 
-      // sync dot when user manually swipes
       let scrollTimer;
       carousel.addEventListener('scroll', () => {
         clearTimeout(scrollTimer);
