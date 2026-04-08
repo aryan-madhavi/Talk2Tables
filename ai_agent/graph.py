@@ -66,7 +66,9 @@ async def node_react_agent(state: AgentState) -> AgentState:
     )
 
     # ── Build tools and compiled inner agent (cached) ────────────────────
-    cache_key = (state["connection_id"], user_role)
+    import hashlib
+    _cs_hash = hashlib.md5(conn_str.encode()).hexdigest()[:8]
+    cache_key = (state["connection_id"], user_role, _cs_hash)
     try:
         llm           = get_llm()
         system_prompt = build_system_prompt(dialect, user_role)

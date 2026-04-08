@@ -246,7 +246,7 @@ async def warm_schema_cache(connection_id: str) -> None:
                 if not table_name:
                     continue
                 try:
-                    table_def_tool.invoke({"table_name": table_name, "schema_name": schema_name})
+                    table_def_tool.invoke({"table_names": table_name, "schema_name": schema_name})
                     count += 1
                 except Exception as exc:
                     logger.debug(f"[warm_schema_cache] Skipped {schema_name}.{table_name}: {exc}")
@@ -527,8 +527,7 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             logger.error(f"[get_schema_list] Failed: {exc}")
             return f"Error listing tables: {exc}"
 
-    @tool
-    def get_table_definition(table_name: str, schema_name: str) -> str:
+    def _get_single_table_definition(table_name: str, schema_name: str) -> str:
         """
         Get the full column definitions for a specific table, including data types,
         nullable flags, default values, and foreign key relationships.
@@ -666,4 +665,27 @@ def make_schema_tools(connection_string: str, connection_id: str) -> list:
             logger.error(f"[get_table_definition] Failed for {schema_name}.{table_name}: {exc}")
             return f"Error fetching table definition: {exc}"
 
-    return [get_schema_list, get_table_definition]
+    @tool
+    def get_table_definitions(table_names: str, schema_name: str) -> str:
+        """
+        Get the full column definitions for ONE OR MORE tables, including data types,
+        nullable flags, default values, and foreign key relationships.
+        For string columns with a small number of distinct values (e.g. status),
+        this also returns a `sample_values` list with exact stored values.
+        Call this before querying any table to know its exact columns.
+
+        Args:
+            table_names: Comma-separated list of table names to inspect (e.g. 'users,orders,products').
+            schema_name: Schema the tables belong to (e.g. 'public', 'mydb').
+        """
+        import json
+        all_results = {}
+        for table_name in [t.strip() for t in table_names.split(',') if t.strip()]:
+            res_str = _get_single_table_definition(table_name, schema_name)
+            try:
+                all_results[table_name] = json.loads(res_str)
+            except Exception:
+                all_results[table_name] = res_str
+        return json.dumps(all_results, separators=(',', ':'))
+
+    return [get_schema_list, get_table_definitions]

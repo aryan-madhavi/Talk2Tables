@@ -136,7 +136,7 @@ app.add_middleware(
 async def limit_request_body(request: Request, call_next):
     # Doc upload endpoint allows up to 100 MB; everything else is 1 MB
     path = request.url.path
-    if "/docs" in path and request.method == "POST":
+    if path.startswith("/api/v1/connections/") and path.endswith("/docs") and request.method == "POST":
         max_bytes = 100 * 1024 * 1024  # 100 MB
     else:
         max_bytes = 1 * 1024 * 1024    # 1 MB
@@ -199,7 +199,7 @@ app.include_router(chat_router)         # /api/v1/chat/*
 
 @app.get("/health", tags=["system"])
 async def health():
-    return {"status": "ok", "service": "talk2tables-backend", "version": "2.0.0"}
+    return {"status": "ok", "service": "talk2tables-backend", "version": app.version}
 
 
 @app.get("/health/redis", tags=["system"])

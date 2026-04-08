@@ -26,7 +26,8 @@ def _build_connection_string(conn: dict) -> str:
     port     = conn["port"]
     database = conn["database_name"]
     user     = conn["username"]
-    password = conn["password"]  # already decrypted by get_connection_with_password()
+    from urllib.parse import quote_plus
+    password = quote_plus(conn["password"])  # properly encode special chars
 
     # Map Firestore db_type values to SQLAlchemy dialect+driver strings
     _DRIVER_MAP = {

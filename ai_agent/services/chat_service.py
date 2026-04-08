@@ -39,10 +39,10 @@ def _now_iso() -> str:
 
 
 def _detect_query_type(sql: str) -> str:
-    """Return first keyword of the SQL as the query type (SELECT, INSERT, etc.)."""
+    """Return the query type label from the SQL, or a semantic label for non-SQL responses."""
     first = (sql or "").strip().upper().split()
     if not first:
-        return "UNKNOWN"
+        return "CONVERSATIONAL"   # explain/describe/follow-up — no SQL executed
     word = first[0]
     # WITH ... SELECT is still a SELECT
     return "SELECT" if word == "WITH" else word if word in {"SELECT", "INSERT", "UPDATE", "DELETE"} else "OTHER"

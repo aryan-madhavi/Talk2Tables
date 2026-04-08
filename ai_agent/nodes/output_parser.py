@@ -30,6 +30,8 @@ import re
 from ai_agent.config import agent_config
 from ai_agent.state import AgentState
 
+logger = logging.getLogger(__name__)
+
 _MAX_ROWS = 10_000
 
 
@@ -231,19 +233,18 @@ def _serialize(value: Any) -> Any:
 
 def _fetch_full_data(connection_string: str, sql: str) -> list[dict]:
     """Re-execute SQL synchronously; called via run_in_executor."""
-    from sqlalchemy import create_engine, text as sa_text
-    _ct    = {"connect_args": {"connect_timeout": 10}}
-    engine = create_engine(connection_string, pool_pre_ping=True, echo=False, **_ct)
+    from sqlalchemy import text as sa_text
+    from ai_agent.tools.schema_tools import _get_engine
+    
+    engine = _get_engine(connection_string)
     try:
         with engine.connect() as cx:
             result  = cx.execute(sa_text(sql))
             columns = list(result.keys())
             rows    = result.fetchmany(_MAX_ROWS)
         return [{col: _serialize(val) for col, val in zip(columns, row)} for row in rows]
-    finally:
-        engine.dispose()
-
-logger = logging.getLogger(__name__)
+    except Exception:
+        raise
 
 _REQUIRED_KEYS = {"sql_query", "summary", "data"}
 
@@ -299,8 +300,14 @@ async def node_output_parser(state: AgentState) -> AgentState:
 
         # Get full data — prefer the cache written by execute_sql tool to avoid
         # a second DB round-trip. Fall back to re-execution on cache miss.
+        #
+        # IMPORTANT: If the LLM returned data:[] AND no cache entry exists, this
+        # is a deliberate conversational response (e.g. "explain the query").
+        # Do NOT re-execute in that case — the LLM recalls SQL from memory with
+        # wrong column names, causing cascading "Unknown column" errors.
         sql      = (parsed.get("sql_query") or "").strip()
         conn_str = state.get("db_connection_string")
+        llm_data = parsed.get("data", [])
         if sql and conn_str and sql.upper().split()[0] in {"SELECT", "WITH"}:
             try:
                 import hashlib as _hashlib
@@ -309,15 +316,25 @@ async def node_output_parser(state: AgentState) -> AgentState:
                 with _full_result_lock:
                     _cached = _full_result_cache.pop(_cache_key, None)
                 if _cached is not None:
+                    # Cache hit — use freshly-fetched rows from execute_sql tool
                     full_data = _cached
                     logger.info(f"[node_output_parser] Full data from cache | rows={len(full_data)}")
-                else:
+                    parsed["data"] = full_data
+                elif llm_data:
+                    # No cache but LLM returned non-empty data — re-fetch to get full result set
                     full_data = await asyncio.to_thread(_fetch_full_data, conn_str, sql)
                     logger.info(f"[node_output_parser] Full data re-fetched | rows={len(full_data)}")
-                parsed["data"] = full_data
+                    parsed["data"] = full_data
+                else:
+                    # Cache miss AND LLM returned data:[] — this is a deliberate
+                    # conversational response (explain/describe). Trust the LLM intent,
+                    # do NOT attempt re-execution. The recalled SQL would have wrong
+                    # column names causing spurious errors.
+                    logger.info("[node_output_parser] Cache miss + data:[] — treating as conversational response, skipping re-execution.")
+                    parsed["sql_query"] = ""
             except Exception as exc:
                 logger.warning(f"[node_output_parser] Full data fetch failed: {exc}")
-                # Fall back to whatever preview the LLM put in data
+                raise ValueError(f"The generated SQL is invalid: {exc}")
 
         # Phase 2 (graph.py) fills numerical_insights + narrative_insights via parallel LLM calls
         total = len(parsed.get("data", []))

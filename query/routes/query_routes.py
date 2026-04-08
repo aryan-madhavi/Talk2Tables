@@ -113,6 +113,7 @@ async def query(
     response_type  = result.get("response_type", "error")
     final_response = result.get("final_response", {})
     exec_ms        = round((_time.perf_counter() - _t0) * 1000, 1)
+    final_response["execution_time_ms"] = exec_ms
 
     # ── 3. Persist messages + audit log + cache invalidate (fire-and-forget) ───
     async def _background_save():
@@ -269,6 +270,7 @@ async def query_stream(
             yield f"event: error\ndata: {_json.dumps({'message': str(exc)})}\n\n"
         finally:
             exec_ms = round((_time.perf_counter() - _t0) * 1000, 1)
+            final_response["execution_time_ms"] = exec_ms
 
             # Fire-and-forget background save (same as regular query)
             async def _background_save():
@@ -499,17 +501,48 @@ async def get_table_schema(
 
         # get_table_definition is the second tool
         get_table_definition = tools[1]
-        result = get_table_definition.invoke({"table_name": table_name, "schema_name": schema_name})
+        result = get_table_definition.invoke({"table_names": table_name, "schema_name": schema_name})
 
         import json
         try:
-            parsed = json.loads(result)
-            if isinstance(parsed, dict) and "columns" in parsed:
-                columns = parsed["columns"]
-                business_context = parsed.get("business_context", "")
-            else:
-                columns = parsed
+            # get_table_definitions returns {"table_name": <columns_or_obj>}
+            outer = json.loads(result)
+            # Unwrap the single table entry
+            table_data = outer.get(table_name, outer)
+
+            if isinstance(table_data, dict) and "columns" in table_data:
+                raw_columns      = table_data["columns"]
+                business_context = table_data.get("business_context", "")
+            elif isinstance(table_data, list):
+                raw_columns      = table_data
                 business_context = ""
+            else:
+                raw_columns      = []
+                business_context = ""
+
+            # Normalize field names: tool uses (nullable, primary_key, references, default)
+            # but the frontend ColumnOut expects  (is_nullable, constraint_type, referenced_table, column_default)
+            columns = []
+            for col in raw_columns:
+                constraint_type = None
+                referenced_table = None
+                if col.get("primary_key"):
+                    constraint_type = "PRIMARY KEY"
+                elif "references" in col:
+                    constraint_type  = "FOREIGN KEY"
+                    referenced_table = col["references"]   # e.g. "defaultdb.addresses.id"
+
+                columns.append({
+                    "column_name":          col.get("column_name", ""),
+                    "data_type":            col.get("data_type", ""),
+                    "is_nullable":          "YES" if col.get("nullable", True) else "NO",
+                    "column_default":       col.get("default", None),
+                    "constraint_type":      constraint_type,
+                    "referenced_table":     referenced_table,
+                    "business_description": col.get("business_description"),
+                    "sample_values":        col.get("sample_values"),
+                })
+
         except Exception:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result)
 
