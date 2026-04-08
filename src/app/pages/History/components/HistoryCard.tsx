@@ -6,10 +6,11 @@ import { QueryHistoryItem } from '../../../../lib/queryService';
 import { favouriteMessage, unfavouriteMessage } from '../../../../lib/chatService';
 
 const TYPE_BADGE: Record<string, string> = {
-  SELECT: 'bg-green-100 text-green-700',
-  INSERT: 'bg-blue-100 text-blue-700',
-  UPDATE: 'bg-amber-100 text-amber-700',
-  DELETE: 'bg-red-100 text-red-700',
+  SELECT:        'bg-green-100 text-green-700',
+  INSERT:        'bg-blue-100 text-blue-700',
+  UPDATE:        'bg-amber-100 text-amber-700',
+  DELETE:        'bg-red-100 text-red-700',
+  CONVERSATIONAL:'bg-purple-100 text-purple-700',
 };
 
 interface HistoryCardProps {

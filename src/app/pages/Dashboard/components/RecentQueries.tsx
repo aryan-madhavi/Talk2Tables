@@ -8,10 +8,11 @@ import { getQueryHistory, QueryHistoryItem } from '../../../../lib/queryService'
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TYPE_DOT: Record<string, string> = {
-  SELECT: 'bg-green-500',
-  UPDATE: 'bg-amber-500',
-  DELETE: 'bg-red-500',
-  INSERT: 'bg-blue-500',
+  SELECT:         'bg-green-500',
+  UPDATE:         'bg-amber-500',
+  DELETE:         'bg-red-500',
+  INSERT:         'bg-blue-500',
+  CONVERSATIONAL: 'bg-purple-500',
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────

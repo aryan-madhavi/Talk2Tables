@@ -108,8 +108,8 @@ export async function getMessages(
   options?: { limit?: number; beforeSeq?: number },
 ): Promise<MessagesResponse> {
   const params = new URLSearchParams();
-  if (options?.limit)     params.set('limit',      String(options.limit));
-  if (options?.beforeSeq) params.set('before_seq', String(options.beforeSeq));
+  if (options?.limit != null)     params.set('limit',      String(options.limit));
+  if (options?.beforeSeq != null) params.set('before_seq', String(options.beforeSeq));
   const qs = params.toString() ? `?${params}` : '';
   return apiFetch<MessagesResponse>(
     `/chat/workspaces/${connectionId}/chats/${chatId}/messages${qs}`,

@@ -17,7 +17,7 @@ const TABS: { id: ResultTab; label: string; icon: React.ElementType }[] = [
 ];
 
 export function ResultTabs({ active, onChange, hasInsights }: ResultTabsProps) {
-  const visibleTabs = TABS.filter(t => t.id !== 'insights' || hasInsights);
+  const visibleTabs = TABS; // Always show all tabs, including Insights
   return (
     <div className="flex items-center border-b border-gray-100 bg-gray-50/50 px-2">
       {visibleTabs.map(tab => (

@@ -36,7 +36,19 @@ export const ResultPanel = React.memo(function ResultPanel({
     );
   }
 
-  const hasInsights = result.data.length > 0;
+  // Show Insights tab when there is actual data OR insights are already populated
+  // (e.g. loaded from Firestore history). insightsLoading alone is not enough —
+  // it's false for conversational responses that returned no data.
+  const hasInsights =
+    result.data.length > 0 ||
+    !!result.insights ||
+    !!result.narrativeInsights;
+
+  React.useEffect(() => {
+    if (activeTab === 'insights' && !hasInsights) {
+      setActiveTab('table');
+    }
+  }, [hasInsights, activeTab]);
 
   return (
     <>

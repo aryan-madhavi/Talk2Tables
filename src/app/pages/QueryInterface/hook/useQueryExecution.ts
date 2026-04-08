@@ -218,7 +218,7 @@ export function useQueryExecution(selectedConnectionId: string) {
               summary:           payload.summary,
               insights:          (payload as any).numerical_insights  ?? undefined,
               narrativeInsights: (payload as any).narrative_insights  ?? undefined,
-              insightsLoading:   true,
+              insightsLoading:   (payload.data?.length ?? 0) > 0,  // only await insights if data was returned
               chartData:     (payload.data || []).slice(0, 10).map(item => {
                 const keys = Object.keys(item);
                 return { name: String(item[keys[0]]), value: Number(item[keys[1]]) || 0 };
@@ -314,7 +314,11 @@ export function useQueryExecution(selectedConnectionId: string) {
   };
 
   const handleMessageClick = (msg: Message) => {
-    if (msg.queryResult) setCurrentResult(msg.queryResult);
+    if (msg.queryResult) {
+       setCurrentResult({ ...msg.queryResult, insightsLoading: false });
+    } else {
+       setCurrentResult(null);
+    }
   };
 
   const updateCurrentResultInsights = (
