@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
-import { getMyConnections } from '../../../lib/accessService';
+import { getMyConnectionsOnly } from '../../../lib/accessService';
 import { listConnections } from '../../../lib/connectionService';
 import { getMessages, favouriteMessage, unfavouriteMessage } from '../../../lib/chatService';
 import { useQueryExecution } from './hook/useQueryExecution';
@@ -50,7 +50,7 @@ export default function QueryInterface() {
       ? listConnections(true).then(res =>
           res.connections.map(c => ({ connection_id: c.connection_id, name: c.name }))
         )
-      : getMyConnections().then(list =>
+      : getMyConnectionsOnly().then(list =>
           list.map(c => ({ connection_id: c.connection_id, name: c.name }))
         );
 

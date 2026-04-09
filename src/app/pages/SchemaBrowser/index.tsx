@@ -27,8 +27,13 @@ export default function SchemaBrowser() {
       ? listConnections(true).then(res =>
           res.connections.map(c => ({ connection_id: c.connection_id, name: c.name }))
         )
-      : getMyConnections().then(list =>
-          list.map(c => ({ connection_id: c.connection_id, name: c.name }))
+      : getMyConnections().then(items =>
+          items
+            .filter(item => {
+              if (!item.grant?.expires_at) return true;
+              return new Date(item.grant.expires_at) > new Date();
+            })
+            .map(item => ({ connection_id: item.connection.connection_id, name: item.connection.name }))
         );
 
     load.then(opts => {

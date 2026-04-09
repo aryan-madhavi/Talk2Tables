@@ -16,11 +16,18 @@ export function SuggestedQueries() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]         = useState(false);
 
-  // Load the user's first connection, then fetch suggestions for it
+  // Load the user's first unexpired connection, then fetch suggestions for it
   useEffect(() => {
     const loadConn = isAdmin || isDbManager
       ? listConnections(true).then(res => res.connections[0]?.connection_id ?? null)
-      : getMyConnections().then(list => list[0]?.connection_id ?? null);
+      : getMyConnections().then(items => {
+          // Find the first connection whose grant has not expired
+          const valid = items.find(item => {
+            if (!item.grant?.expires_at) return true;
+            return new Date(item.grant.expires_at) > new Date();
+          });
+          return valid?.connection.connection_id ?? null;
+        });
 
     setLoading(true);
     setError(false);
