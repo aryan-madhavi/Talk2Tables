@@ -24,6 +24,24 @@ export const ResultPanel = React.memo(function ResultPanel({
 }: ResultPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('table');
 
+  // Show Insights tab when there is actual data OR insights are already populated
+  // (e.g. loaded from Firestore history). insightsLoading alone is not enough —
+  // it's false for conversational responses that returned no data.
+  const hasInsights =
+    !!result &&
+    (result.data.length > 0 ||
+    !!result.insights ||
+    !!result.narrativeInsights);
+
+  // IMPORTANT: This useEffect MUST stay above the early return for `!result`.
+  // Hooks must always be called in the same order — placing a hook after an early
+  // return causes React error #310 (different number of hooks between renders).
+  React.useEffect(() => {
+    if (activeTab === 'insights' && !hasInsights) {
+      setActiveTab('table');
+    }
+  }, [hasInsights, activeTab]);
+
   if (!result) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center">
@@ -35,20 +53,6 @@ export const ResultPanel = React.memo(function ResultPanel({
       </div>
     );
   }
-
-  // Show Insights tab when there is actual data OR insights are already populated
-  // (e.g. loaded from Firestore history). insightsLoading alone is not enough —
-  // it's false for conversational responses that returned no data.
-  const hasInsights =
-    result.data.length > 0 ||
-    !!result.insights ||
-    !!result.narrativeInsights;
-
-  React.useEffect(() => {
-    if (activeTab === 'insights' && !hasInsights) {
-      setActiveTab('table');
-    }
-  }, [hasInsights, activeTab]);
 
   return (
     <>
