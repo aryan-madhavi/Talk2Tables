@@ -2,7 +2,7 @@
 """
 LLM Provider factory with automatic cascading fallback.
 
-Priority order: openrouter → groq → gemini → ollama
+Priority order: groq → gemini → ollama
 Override with LLM_PROVIDER env var.
 """
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import Optional, Any
 from langchain_core.callbacks import AsyncCallbackHandler
 
 from .base import LLMProvider
-from .openrouter import OpenRouterProvider
 from .groq import GroqProvider
 from .gemini import GeminiProvider
 from .ollama import OllamaProvider
@@ -33,13 +32,12 @@ class LLMDebugLogHandler(AsyncCallbackHandler):
                 logger.info(f"Role: {role}\nContent:\n{content}\n" + "-" * 80)
         logger.info("================================================================================\n")
 
-_PRIORITY = ["openrouter", "groq", "gemini", "ollama"]
+_PRIORITY = ["groq", "gemini", "ollama"]
 
 _PROVIDER_MAP: dict[str, type[LLMProvider]] = {
-    "openrouter": OpenRouterProvider,
-    "groq":       GroqProvider,
-    "gemini":     GeminiProvider,
-    "ollama":     OllamaProvider,
+    "groq":   GroqProvider,
+    "gemini": GeminiProvider,
+    "ollama": OllamaProvider,
 }
 
 # ── LLM singleton ─────────────────────────────────────────────────────────────
@@ -103,7 +101,7 @@ def get_llm(preferred: Optional[str] = None):
 
     raise RuntimeError(
         f"No LLM provider could be instantiated. "
-        f"Set at least one of: OPENROUTER_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, or OLLAMA_BASE_URL. "
+        f"Set at least one of: GROQ_API_KEY, GEMINI_API_KEY, or OLLAMA_BASE_URL. "
         f"Last error: {last_error}"
     )
 

@@ -14,7 +14,6 @@ python-multipart==0.0.9        # For file upload (schema docs)
 langgraph>=0.2.28
 langchain-core>=0.3.31
 langchain>=0.3.15
-langchain-openai>=0.2.14       # OpenRouter (ChatOpenAI with base_url)
 langchain-groq>=0.2.3          # Groq
 langchain-google-genai>=2.0.8  # Gemini (LangChain wrapper)
 langchain-ollama>=0.2.3        # Ollama (local)
