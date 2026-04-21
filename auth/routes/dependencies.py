@@ -21,14 +21,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise HTTPException(status_code=401, detail="Invalid token credentials")
             
         db = get_database()
-        from bson import ObjectId
-        try:
-            user = await db["users"].find_one({"_id": ObjectId(user_id)})
-        except Exception:
-            user = await db["users"].find_one({"_id": user_id})
         
-        if user is None or not user.get("is_active", True):
-            raise HTTPException(status_code=401, detail="User not found or inactive")
+        user = await db["users"].find_one({"_id": user_id})
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        if not user.get("is_active", False):
+            raise HTTPException(status_code=401, detail="User account is inactive")
 
         # Use the role from the DATABASE, not the JWT, for maximum security
         current_role = user.get("role", "analyst")

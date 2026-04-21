@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-import logging
 import os
+import sys
+
+# ── CRITICAL: Security Mapping (Must run BEFORE any other imports) ───────────
+if os.environ.get("JWT_SECRET_KEY"):
+    os.environ["jwt_secret_key"] = os.environ["JWT_SECRET_KEY"]
+if os.environ.get("DB_ENCRYPTION_KEY"):
+    os.environ["db_encryption_key"] = os.environ["DB_ENCRYPTION_KEY"]
+
+import logging
 import time
 from contextlib import asynccontextmanager
 
@@ -27,6 +35,9 @@ from query import query_router
 from chat import chat_router
 from core.redis_client import init_redis, close_redis, redis_health
 
+import subprocess
+import time
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level   = settings.log_level.upper(),
@@ -44,7 +55,23 @@ async def lifespan(app: FastAPI):
     logger.info("  Talk2Tables — Starting up")
     logger.info("=" * 60)
 
-    # 1. Initialize MongoDB connection (Replaces Firebase)
+    for name, port, image in [
+        ("talk2tables_redis", 6379,  "docker.io/library/redis:latest"),
+        ("talk2tables_mongo", 27017, "docker.io/library/mongo:latest"),
+    ]:
+        result = subprocess.run(["podman", "start", name], capture_output=True)
+        if result.returncode != 0:
+            subprocess.run([
+                "podman", "run", "-d",
+                "--name", name,
+                "-p", f"{port}:{port}",
+                image
+            ])
+            logger.info(f"🐳  Started new container: {name}")
+        else:
+            logger.info(f"🐳  Resumed existing container: {name}")
+    time.sleep(2)  # let containers initialize
+
     try:
         await connect_to_mongo()
         logger.info("✅  MongoDB connection established")
@@ -52,7 +79,6 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌  MongoDB connection failed: {exc}")
         raise   # Fatal — cannot run without database
 
-    # 2. Redis cache (optional — non-fatal if unavailable)
     try:
         await init_redis()
         if settings.redis_url:
@@ -62,7 +88,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"⚠️   Redis init failed (non-fatal): {exc}")
 
-    # 3. Optional: pre-compile the LangGraph agent
     try:
         from ai_agent import get_agent  # type: ignore
         get_agent()
@@ -82,7 +107,7 @@ async def lifespan(app: FastAPI):
     await close_redis()
     logger.info("Talk2Tables — Shutting down gracefully.")
 
-
+  
 # ── App ───────────────────────────────────────────────────────────────────────
 
 limiter = Limiter(key_func=get_remote_address)
@@ -193,3 +218,9 @@ async def health_redis():
 @app.get("/", tags=["system"])
 async def root():
     return {"message": "Talk2Tables API running. See /docs", "docs": "/docs"}
+
+if __name__ == "__main__":
+    import uvicorn
+    # When bundled, run the uvicorn server directly via the app object
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")

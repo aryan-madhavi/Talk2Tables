@@ -12,7 +12,7 @@ Upload flow:
     7. Invalidate      → Redis: delete docs:summaries:{conn_id}
 """
 from __future__ import annotations
-
+import sys
 import io
 import json
 import logging
@@ -30,11 +30,14 @@ COLLECTION = "business_docs"
 _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 _MAX_TEXT_FOR_LLM = 15000  # chars sent to LLM
 
-_STORAGE_ROOT = "./storage/business_docs"
+# _STORAGE_ROOT = "./storage/business_docs"
 
-_ALLOWED_EXTENSIONS = {
-    "pdf", "docx", "txt", "md", "csv", "xlsx",
-}
+if getattr(sys, 'frozen', False):
+    # AppImage / PyInstaller exe — write to user's home directory
+    _STORAGE_ROOT = os.path.join(os.path.expanduser("~"), ".talk2tables", "storage", "business_docs")
+else:
+    # Normal dev run — write next to this file
+    _STORAGE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "business_docs")
 
 # ── Local Storage helpers ──────────────────────────────────────────────────
 

@@ -90,3 +90,5 @@ media/
 
 # firebase-credentials
 firebase-credentials.json
+
+run_backend

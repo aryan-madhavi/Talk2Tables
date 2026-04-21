@@ -3,10 +3,13 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Optional, List
 from auth.core.security import verify_password, create_access_token, create_refresh_token
+from auth.core.config import settings
 from auth.core.mongo import get_database
+from users.core.encryption import encrypt_user_doc, decrypt_user_doc
 from core.redis_client import redis_set, redis_delete, redis_get
 import uuid
 import logging
+import hashlib
 
 from .dependencies import get_current_user
 from .schemas import (
@@ -35,8 +38,11 @@ class SignupRequest(BaseModel):
 async def signup(request: SignupRequest):
     db = get_database()
     
-    # Check if user exists
-    existing = await db["users"].find_one({"email": request.email})
+    # Create email hash for queryable index (plaintext email cannot be queried if encrypted)
+    email_hash = hashlib.sha256(request.email.lower().encode()).hexdigest()
+    
+    # Check if user exists by email hash
+    existing = await db["users"].find_one({"email_hash": email_hash})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
         
@@ -47,6 +53,7 @@ async def signup(request: SignupRequest):
         "_id": user_id,
         "firebase_uid": user_id, # Compatibility
         "email": request.email,
+        "email_hash": email_hash,  # For queryable lookups
         "password_hash": get_password_hash(request.password),
         "display_name": request.display_name,
         "role": "admin", # Default role changed to admin
@@ -56,15 +63,33 @@ async def signup(request: SignupRequest):
         "created_at": uuid.uuid4().hex # Simple timestamp or just leave it
     }
     
-    await db["users"].insert_one(user_doc)
+    # Encrypt sensitive fields before storage
+    encrypted_doc = encrypt_user_doc(user_doc)
+    await db["users"].insert_one(encrypted_doc)
     
-    # After signup, we can automatically log them in or just return success
-    return {"message": "User created successfully", "uid": user_id}
+    # After signup, automatically log them in for a better UX
+    access_token = create_access_token(subject=user_id, role="admin")
+    refresh_token = create_refresh_token(subject=user_id)
+    
+    # Store refresh token in Redis for session tracking
+    session_id = str(uuid.uuid4())
+    await redis_set(f"session:{user_id}:{session_id}", refresh_token, ttl_seconds=604800)
+    
+    return {
+        "message": "User created successfully", 
+        "uid": user_id,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 
 @router.post("/login")
 async def login(request: LoginRequest):
     db = get_database()
-    user = await db["users"].find_one({"email": request.email})
+    
+    # Create email hash for queryable lookup
+    email_hash = hashlib.sha256(request.email.lower().encode()).hexdigest()
+    user = await db["users"].find_one({"email_hash": email_hash})
     
     if not user or not verify_password(request.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -72,6 +97,9 @@ async def login(request: LoginRequest):
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Account deactivated")
         
+    # Decrypt user data
+    user = decrypt_user_doc(user)
+    
     user_id = str(user["_id"])
     user_role = user.get("role", "analyst")
     access_token = create_access_token(subject=user_id, role=user_role)
@@ -110,6 +138,9 @@ async def get_me(user: dict = Depends(get_current_user)):
     if not user_doc:
          raise HTTPException(status_code=404, detail="User not found")
     
+    # Decrypt user data
+    user_doc = decrypt_user_doc(user_doc)
+    
     return {
         "uid": str(user_doc["_id"]),
         "firebase_uid": str(user_doc["_id"]),
@@ -124,9 +155,12 @@ async def get_me(user: dict = Depends(get_current_user)):
 @router.patch("/me", response_model=MeResponse)
 async def update_profile(body: UpdateProfileRequest, user: dict = Depends(get_current_user)):
     db = get_database()
+    # Encrypt display_name before storage
+    from connections.core.encryption import encrypt_field
+    encrypted_display_name = encrypt_field(body.display_name) if body.display_name else None
     await db["users"].update_one(
         {"_id": user["uid"]},
-        {"$set": {"display_name": body.display_name}}
+        {"$set": {"display_name": encrypted_display_name}}
     )
     return await get_me(user)
 

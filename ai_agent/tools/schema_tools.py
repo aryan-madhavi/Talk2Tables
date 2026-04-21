@@ -143,24 +143,35 @@ async def invalidate_schema_cache(connection_id: str):
     asyncio.create_task(_clear())
 
 async def warm_schema_cache(connection_id: str):
-    """Pre-populate the schema cache for a connection."""
-    from connections.services.connection_service import get_connection_with_password
-    from ai_agent.nodes.entry import _build_connection_string
-    
-    conn = await get_connection_with_password(connection_id)
-    if not conn: return
-    
-    conn_str = _build_connection_string(conn)
-    tools = make_schema_tools(conn_str, connection_id)
-    
-    # Trigger get_schema_list
-    result_raw = await tools[0].ainvoke({})
+    """Pre-populate the schema cache for a connection (non-fatal if fails)."""
     try:
-        tables = json.loads(result_raw)
-        # Warm each table definition
-        for t in tables:
-            await tools[1].ainvoke({"table_name": t["table_name"], "schema_name": t["table_schema"]})
-    except: pass
+        from connections.services.connection_service import get_connection_with_password
+        from ai_agent.nodes.entry import _build_connection_string
+        
+        conn = await get_connection_with_password(connection_id)
+        if not conn: return
+        
+        conn_str = _build_connection_string(conn)
+        tools = make_schema_tools(conn_str, connection_id)
+        
+        # Trigger get_schema_list with better error handling
+        try:
+            result_raw = await tools[0].ainvoke({})
+            try:
+                tables = json.loads(result_raw)
+                # Warm each table definition
+                for t in tables:
+                    try:
+                        await tools[1].ainvoke({"table_name": t["table_name"], "schema_name": t["table_schema"]})
+                    except Exception as e:
+                        logger.warning(f"Could not warm table {t.get('table_name')}: {e}")
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON from schema list")
+        except Exception as e:
+            logger.warning(f"Schema cache warming failed (non-fatal): {e}")
+    except Exception as e:
+        # Catch all to prevent background task from crashing
+        logger.warning(f"Unexpected error in schema cache warming: {e}")
 
 # ── Enum value sampler ────────────────────────────────────────────────────────
 

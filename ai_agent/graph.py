@@ -52,11 +52,12 @@ async def node_react_agent(state: AgentState) -> AgentState:
         f"dialect={dialect} retry={state.get('retry_count', 0)}"
     )
 
-    # ── Build tools and compiled inner agent (cached) ────────────────────
+    # ── Build tools and compiled inner agent (cached by connection + role) ──
     cache_key = (state["connection_id"], user_role)
     try:
         llm           = get_llm()
         system_prompt = build_system_prompt(dialect, user_role)
+
         if cache_key not in _react_agent_cache:
             tools = get_tools(conn_str, user_role, state["connection_id"])
             _react_agent_cache[cache_key] = create_react_agent(llm, tools)
@@ -77,11 +78,14 @@ async def node_react_agent(state: AgentState) -> AgentState:
 
     messages: list = [SystemMessage(content=system_prompt)]
     for turn in trimmed:
-        role    = turn.get("role", "user")
-        content = turn.get("content", "")
-        if not content: continue
-        if role == "user": messages.append(HumanMessage(content=content))
-        elif role == "assistant": messages.append(AIMessage(content=content))
+        role         = turn.get("role", "user")
+        turn_content = turn.get("content", "")
+        if not turn_content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=turn_content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=turn_content))
 
     messages.append(HumanMessage(content=state["natural_language_query"]))
 
@@ -211,7 +215,6 @@ async def run_agent(
             "retry_count": 0, "error_message": None,
         }
         final_state = await agent.ainvoke(initial_state)
-        # ── Phase 2: Disabled by default to save resources ──────────────────
         return {
             "response_type":  final_state.get("response_type", "error"),
             "final_response": final_state.get("final_response", {}),
@@ -254,7 +257,6 @@ async def run_agent_stream(
         }
 
         final_result = None
-        _progress_sent: set[str] = set()
 
         async for event in agent.astream_events(initial_state, version="v2"):
             kind = event.get("event", "")
@@ -263,15 +265,14 @@ async def run_agent_stream(
                 output = event.get("data", {}).get("output", {})
                 if isinstance(output, dict) and output.get("response_type"):
                     final_result = {"response_type": output["response_type"], "final_response": output["final_response"]}
-            
-            # Progress events
+
             if kind == "on_tool_start":
                 msg = f"Running {name}..."
                 yield f"event: progress\ndata: {_json.dumps({'stage': name, 'message': msg})}\n\n"
 
         if final_result is None:
             final_result = {"response_type": "error", "final_response": {"error_message": "No response"}}
-        
+
         yield f"event: result\ndata: {_json.dumps(final_result)}\n\n"
     finally:
         _in_flight.discard(firebase_uid)

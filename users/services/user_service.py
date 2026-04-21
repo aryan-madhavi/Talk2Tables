@@ -5,17 +5,24 @@ Business logic for user management using MongoDB.
 Cache strategy:
     READ  → check Redis first, fallback to MongoDB on miss, populate cache.
     WRITE → write MongoDB first, then invalidate relevant cache keys.
+
+Encryption:
+    All user documents are encrypted at the storage layer using AES-256-GCM.
+    Sensitive fields (email, display_name) are encrypted before insert/update.
+    Fields are decrypted after retrieve.
 """
 from __future__ import annotations
 
 import logging
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
 from auth.core.mongo import get_database
 from auth.core.security import get_password_hash
 from users.routes.schemas import CreateUserRequest, UpdateUserRequest
+from users.core.encryption import encrypt_user_doc, decrypt_user_doc, decrypt_user_docs_list
 from core.redis_client import redis_get, redis_set, redis_delete
 from core.cache_keys import (
     key_user, key_users_list, key_token,
@@ -57,8 +64,9 @@ async def _invalidate_user_cache(user_id: str) -> None:
 async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
     db = get_database()
 
-    # Check for existing email
-    existing = await db[COLLECTION].find_one({"email": body.email})
+    # Create email hash for queryable lookup
+    email_hash = hashlib.sha256(body.email.lower().encode()).hexdigest()
+    existing = await db[COLLECTION].find_one({"email_hash": email_hash})
     if existing:
         raise ValueError(f"Email '{body.email}' is already registered.")
 
@@ -69,6 +77,7 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
         "_id":              user_id,
         "firebase_uid":     user_id, # Compatibility
         "email":            body.email,
+        "email_hash":       email_hash,  # For queryable lookups
         "password_hash":    get_password_hash(body.password),
         "display_name":     body.display_name,
         "photo_url":        None,
@@ -80,9 +89,13 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
         "last_login_at":    None,
     }
 
-    await db[COLLECTION].insert_one(doc)
-    logger.info(f"[Users] Created | user_id={user_id} email={body.email} role={body.role} by={created_by_uid}")
+    # Encrypt sensitive fields before storage
+    encrypted_doc = encrypt_user_doc(doc)
+    
+    await db[COLLECTION].insert_one(encrypted_doc)
+    logger.info(f"[Users] Created | user_id={user_id} role={body.role} by={created_by_uid}")
 
+    # Return unencrypted safe user for API response
     safe = _safe_user(doc)
 
     # Cache the new user, bust list cache
@@ -95,7 +108,7 @@ async def create_user(body: CreateUserRequest, created_by_uid: str) -> dict:
 # ── Read ──────────────────────────────────────────────────────────────────────
 
 async def get_user_by_uid(user_id: str) -> Optional[dict]:
-    """Flow: Redis → MongoDB → populate cache"""
+    """Flow: Redis → MongoDB (decrypt) → populate cache"""
     cached = await redis_get(key_user(user_id))
     if cached:
         logger.debug(f"[Cache] HIT user:{user_id}")
@@ -106,7 +119,9 @@ async def get_user_by_uid(user_id: str) -> Optional[dict]:
     if not doc:
         return None
 
-    safe = _safe_user(doc)
+    # Decrypt encrypted fields from storage
+    decrypted_doc = decrypt_user_doc(doc)
+    safe = _safe_user(decrypted_doc)
     await redis_set(key_user(user_id), safe, TTL_USER)
     logger.debug(f"[Cache] MISS user:{user_id} — cached {TTL_USER}s")
     return safe
@@ -114,7 +129,7 @@ async def get_user_by_uid(user_id: str) -> Optional[dict]:
 
 async def list_users(active_only: bool = False) -> list[dict]:
     """
-    Flow: Redis → MongoDB → populate cache.
+    Flow: Redis → MongoDB (decrypt all) → populate cache.
     """
     cached = await redis_get(key_users_list())
     if cached:
@@ -127,7 +142,10 @@ async def list_users(active_only: bool = False) -> list[dict]:
         query["is_active"] = True
 
     cursor  = db[COLLECTION].find(query).sort("created_at", -1)
-    results = [_safe_user(d) async for d in cursor]
+    results = []
+    async for d in cursor:
+        decrypted = decrypt_user_doc(d)
+        results.append(_safe_user(decrypted))
 
     await redis_set(key_users_list(), results, TTL_USERS_LIST)
     logger.debug(f"[Cache] MISS users:list — cached {len(results)} users")
@@ -169,7 +187,9 @@ async def update_user(user_id: str, body: UpdateUserRequest) -> Optional[dict]:
     
     updates: dict = {}
     if body.display_name is not None:
-        updates["display_name"] = body.display_name
+        # Encrypt display_name before storage
+        from connections.core.encryption import encrypt_field
+        updates["display_name"] = encrypt_field(body.display_name)
 
     if body.is_active is not None:
         updates["is_active"] = body.is_active
@@ -183,12 +203,15 @@ async def update_user(user_id: str, body: UpdateUserRequest) -> Optional[dict]:
         if not result:
             return None
         logger.info(f"[Users] Updated | user_id={user_id} fields={list(updates.keys())}")
-        safe = _safe_user(result)
+        # Decrypt the result before returning
+        decrypted_result = decrypt_user_doc(result)
+        safe = _safe_user(decrypted_result)
     else:
         doc = await db[COLLECTION].find_one({"_id": user_id})
         if not doc:
             return None
-        safe = _safe_user(doc)
+        decrypted_doc = decrypt_user_doc(doc)
+        safe = _safe_user(decrypted_doc)
 
     await _invalidate_user_cache(user_id)
     await redis_set(key_user(user_id), safe, TTL_USER)

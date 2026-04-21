@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,27 +22,27 @@ class Settings(BaseSettings):
     )
 
     # ── Authentication (Local JWT) ──────────────────────────────────────────
-    jwt_secret_key: str = "your-default-secret-change-it"
-    jwt_algorithm:  str = "HS256"
-    access_token_expire_minutes:  int = 60
-    refresh_token_expire_days:    int = 7
+    jwt_secret_key: str = Field("your-default-secret-change-it", alias="JWT_SECRET_KEY")
+    jwt_algorithm:  str = Field("HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes:  int = Field(60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    refresh_token_expire_days:    int = Field(7, alias="REFRESH_TOKEN_EXPIRE_DAYS")
 
     # ── MongoDB (Users, Chats, Sessions, Connections) ────────────────────────
-    mongo_uri:     str = "mongodb://localhost:27017"
-    mongo_db_name: str = "talk2tables_db"
+    mongo_uri:     str = Field("mongodb://localhost:27017", alias="MONGO_URI")
+    mongo_db_name: str = Field("talk2tables_db", alias="MONGO_DB_NAME")
 
     # ── Redis cache (optional) ────────────────────────────────────────────
     # Format: redis://[:password@]host[:port][/db]
-    redis_url: Optional[str] = None
+    redis_url: Optional[str] = Field(None, alias="REDIS_URL")
 
     # ── Database Password Encryption ────────────────────────────────────────
     # AES-256 Key to encrypt your connected database passwords in MongoDB.
-    db_encryption_key: str = "your-64-char-hex-key-here"
+    db_encryption_key: str = Field("your-64-char-hex-key-here", alias="DB_ENCRYPTION_KEY")
 
     # ── Local AI (Ollama) ───────────────────────────────────────────────────
-    llm_provider:    str = "ollama"
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model:    str = "qwen2.5-coder:7b"
+    llm_provider:    str = Field("ollama", alias="LLM_PROVIDER")
+    ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
+    ollama_model:    str = Field("qwen2.5-coder:7b-instruct-q4_K_M", alias="OLLAMA_MODEL")
 
     # ── CORS ──────────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
