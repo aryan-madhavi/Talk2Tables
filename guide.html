@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Developer Guide — Talk2Tables</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%232dd4bf'/><stop offset='100%25' stop-color='%233b82f6'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/><text x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-family='system-ui,sans-serif' font-size='13' font-weight='800' fill='white'>T2T</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── TOKENS ── */
+    :root {
+      --bg:          #07070f;
+      --bg-1:        #0d0d1a;
+      --bg-2:        #111120;
+      --surface:     rgba(255,255,255,.04);
+      --surface-hov: rgba(255,255,255,.07);
+      --border:      rgba(255,255,255,.08);
+      --border-hov:  rgba(255,255,255,.16);
+      --grad-a: #2dd4bf;
+      --grad-b: #3b82f6;
+      --grad-c: #818cf8;
+      --grad:      linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      --grad-text: linear-gradient(135deg, #2dd4bf 0%, #3b82f6 50%, #818cf8 100%);
+      --grad-dl:   linear-gradient(135deg, #f59e0b, #f97316);
+      --glow-dl:   rgba(249,115,22,.28);
+      --green: #10b981; --red: #f43f5e; --amber: #f59e0b;
+      --text:   #f1f1f8;
+      --text-2: #a0a0b8;
+      --text-3: #52526a;
+      --sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+      --r: 10px; --r-lg: 18px; --r-xl: 24px;
+      --glow-teal: rgba(45,212,191,.15);
+      --glow-blue: rgba(59,130,246,.15);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #ffffff; --bg-1: #f8f8fc; --bg-2: #f0f0f8;
+        --surface: rgba(0,0,0,.03); --surface-hov: rgba(0,0,0,.055);
+        --border: rgba(0,0,0,.08); --border-hov: rgba(0,0,0,.16);
+        --grad-a: #0d9488; --grad-b: #2563eb; --grad-c: #6366f1;
+        --grad: linear-gradient(135deg, #0d9488, #2563eb);
+        --grad-text: linear-gradient(135deg, #0d9488 0%, #2563eb 50%, #6366f1 100%);
+        --grad-dl: linear-gradient(135deg, #d97706, #ea580c);
+        --glow-dl: rgba(234,88,12,.2);
+        --green: #059669; --red: #e11d48; --amber: #d97706;
+        --text: #0f0f1a; --text-2: #4a4a6a; --text-3: #9090aa;
+      }
+      .orb-1 { opacity: .3; } .orb-2 { opacity: .2; }
+    }
+
+    /* ── RESET ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--sans); font-size: 15px;
+      line-height: 1.7; overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    ::selection { background: rgba(45,212,191,.2); }
+
+    .gtext {
+      background: var(--grad-text);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── ORBS ── */
+    .orb { position: fixed; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 0; }
+    .orb-1 { width:600px;height:600px;top:-200px;left:-150px;background:radial-gradient(circle,rgba(45,212,191,.18),transparent 70%);opacity:.6; }
+    .orb-2 { width:500px;height:500px;bottom:-100px;right:-100px;background:radial-gradient(circle,rgba(99,102,241,.18),transparent 70%);opacity:.5; }
+    .orb-3 { width:300px;height:300px;top:40%;left:60%;background:radial-gradient(circle,rgba(59,130,246,.1),transparent 70%);opacity:.4; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top:0; left:0; right:0; z-index:100;
+      height:64px; display:flex; align-items:center; justify-content:space-between;
+      padding: 0 max(28px,6vw);
+      border-bottom: 1px solid var(--border);
+      background: rgba(7,7,15,.7);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+    }
+    @media (prefers-color-scheme: light) { nav { background: rgba(255,255,255,.75); } }
+    .nav-logo { font-weight:700; font-size:17px; letter-spacing:-.4px; display:flex; align-items:center; gap:9px; }
+    .nav-logo-mark { width:30px;height:30px;border-radius:8px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0; }
+    .nav-actions { display:flex; gap:10px; align-items:center; }
+    .nav-back {
+      font-size:13.5px; font-weight:600; padding:9px 20px; border-radius:50px;
+      border:1px solid var(--border); color:var(--text-2);
+      transition:border-color .2s, color .2s;
+    }
+    .nav-back:hover { border-color:var(--border-hov); color:var(--text); }
+    .nav-demo {
+      font-size:13.5px; font-weight:600; padding:9px 22px; border-radius:50px;
+      background:var(--grad); color:#fff; transition:opacity .2s, transform .15s;
+    }
+    .nav-demo:hover { opacity:.88; transform:translateY(-1px); }
+
+    /* ── LAYOUT ── */
+    .container { position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:0 max(28px,6vw); }
+    .page-wrap { padding: 112px 0 80px; position:relative; z-index:1; }
+
+    /* ── HERO ── */
+    .guide-hero { text-align:center; padding: 64px 0 72px; }
+    .guide-hero .eyebrow { font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--grad-a);margin-bottom:16px;display:block; }
+    .guide-hero h1 { font-size:clamp(32px,5vw,56px);font-weight:800;letter-spacing:-.04em;line-height:1.1;margin-bottom:18px; }
+    .guide-hero p { font-size:16px;color:var(--text-2);max-width:560px;margin:0 auto 40px;line-height:1.85; }
+
+    .stack-pills { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:48px; }
+    .stack-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 14px; border-radius:50px;
+      border:1px solid var(--border); background:var(--surface);
+      font-size:12.5px; font-weight:600; color:var(--text-2);
+    }
+    .stack-pill .dot { width:5px;height:5px;border-radius:50%;background:var(--grad-a); }
+
+    /* ── TOC SIDEBAR + CONTENT GRID ── */
+    .guide-layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+
+    /* ── TOC ── */
+    .toc {
+      position: sticky;
+      top: 88px;
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      padding: 24px 0;
+      max-height: calc(100vh - 110px);
+      overflow-y: auto;
+    }
+    .toc::-webkit-scrollbar { width: 4px; }
+    .toc::-webkit-scrollbar-track { background: transparent; }
+    .toc::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .toc-title { font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);padding:0 20px 12px;border-bottom:1px solid var(--border);margin-bottom:10px; }
+    .toc-section { padding: 0 10px; margin-bottom: 4px; }
+    .toc-section-label {
+      font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+      color:var(--text-3);padding:6px 10px 2px;display:block;
+    }
+    .toc a {
+      display:block; font-size:13px; font-weight:500; color:var(--text-2);
+      padding:5px 10px; border-radius:6px;
+      transition:background .15s, color .15s;
+      line-height:1.4;
+    }
+    .toc a:hover { background:var(--surface-hov); color:var(--text); }
+    .toc a.active { background:var(--surface-hov); color:var(--grad-a); }
+
+    /* ── CONTENT ── */
+    .guide-content { min-width: 0; }
+
+    /* ── SECTION ── */
+    .guide-section {
+      margin-bottom: 80px;
+      scroll-margin-top: 84px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-icon {
+      width:42px;height:42px;border-radius:12px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:18px;flex-shrink:0;
+      background:linear-gradient(135deg,rgba(45,212,191,.15),rgba(59,130,246,.15));
+      border:1px solid var(--border);
+    }
+    .section-header h2 {
+      font-size:clamp(20px,2.5vw,28px);font-weight:800;letter-spacing:-.03em;line-height:1.15;
+      margin:0;
+    }
+    .section-sub { font-size:14px;color:var(--text-2);margin-top:3px; }
+
+    /* ── MODULE CARD ── */
+    .module-card {
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      background: var(--surface);
+      margin-bottom: 24px;
+      overflow: hidden;
+      transition: border-color .22s;
+    }
+    .module-card:hover { border-color: var(--border-hov); }
+    .module-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-1);
+      display:flex; align-items:center; gap:12px;
+    }
+    .module-tag {
+      font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+      padding:3px 9px;border-radius:50px;
+      background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.2);
+      color:var(--grad-a);flex-shrink:0;
+    }
+    .module-file {
+      font-family:var(--mono);font-size:13px;color:var(--text);font-weight:500;
+    }
+    .module-desc { font-size:13px;color:var(--text-2);margin-left:auto; }
+    .module-body { padding: 20px 24px; }
+    .module-body p { font-size:14px;color:var(--text-2);line-height:1.75;margin-bottom:14px; }
+    .module-body p:last-child { margin-bottom:0; }
+    .module-body strong { color:var(--text);font-weight:600; }
+
+    /* ── TABLES ── */
+    .table-wrap {
+      border:1px solid var(--border);border-radius:var(--r);overflow:hidden;
+      margin:16px 0;
+    }
+    .table-wrap table { width:100%;border-collapse:collapse;font-size:13px; }
+    .table-wrap th {
+      background:var(--bg-2);color:var(--text-3);
+      padding:9px 14px;text-align:left;font-size:11px;font-weight:700;
+      letter-spacing:.07em;text-transform:uppercase;
+      border-bottom:1px solid var(--border);
+    }
+    .table-wrap td {
+      padding:9px 14px;color:var(--text-2);
+      border-bottom:1px solid var(--border);
+      vertical-align:top;line-height:1.6;
+    }
+    .table-wrap tr:last-child td { border-bottom:none; }
+    .table-wrap tr:hover td { background:rgba(255,255,255,.02); }
+    .table-wrap code {
+      font-family:var(--mono);font-size:12px;
+      background:rgba(45,212,191,.08);
+      border:1px solid rgba(45,212,191,.15);
+      color:var(--grad-a);padding:1px 6px;border-radius:4px;
+    }
+
+    /* ── CODE BLOCKS ── */
+    .code-block {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      margin: 16px 0;
+    }
+    .code-block-hd {
+      padding:7px 14px;background:var(--bg-2);
+      font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+      color:var(--text-3);font-family:var(--mono);
+      border-bottom:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .code-block pre {
+      padding:16px 18px;font-family:var(--mono);font-size:12.5px;
+      color:var(--grad-a);line-height:1.7;white-space:pre-wrap;word-break:break-word;
+      background:rgba(45,212,191,.02);
+    }
+
+    /* ── INLINE CODE ── */
+    code {
+      font-family:var(--mono);font-size:12px;
+      background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.15);
+      color:var(--grad-a);padding:1px 6px;border-radius:4px;
+    }
+
+    /* ── FACT STRIPS (key-value rows) ── */
+    .fact-strip {
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:1px;border:1px solid var(--border);border-radius:var(--r-lg);
+      overflow:hidden;margin:20px 0;
+    }
+    .fact-item {
+      padding:16px 20px;background:var(--surface);
+      border-right:1px solid var(--border);
+    }
+    .fact-item:last-child { border-right:none; }
+    .fact-label { font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:4px; }
+    .fact-val { font-size:15px;font-weight:700;letter-spacing:-.02em; background:var(--grad-text);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text; }
+
+    /* ── ROLE BADGES ── */
+    .role-grid { display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0; }
+    .role-card {
+      border:1px solid var(--border);border-radius:var(--r);
+      padding:14px 16px;background:var(--surface);
+    }
+    .role-name { font-family:var(--mono);font-size:13px;font-weight:600;color:var(--grad-a);margin-bottom:4px; }
+    .role-level { font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px; }
+    .role-desc { font-size:12.5px;color:var(--text-2); }
+
+    /* ── Q&A CARDS ── */
+    .qa-card {
+      border:1px solid var(--border);border-radius:var(--r-lg);
+      background:var(--surface);margin-bottom:16px;overflow:hidden;
+      transition:border-color .22s;
+    }
+    .qa-card:hover { border-color:var(--border-hov); }
+    .qa-q {
+      padding:16px 22px;background:var(--bg-1);border-bottom:1px solid var(--border);
+      display:flex;align-items:flex-start;gap:12px;
+      font-weight:700;font-size:15px;letter-spacing:-.02em;cursor:pointer;
+    }
+    .qa-q-badge {
+      flex-shrink:0;width:26px;height:26px;border-radius:8px;
+      background:var(--grad);display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:800;color:#fff;margin-top:1px;
+    }
+    .qa-a { padding:18px 22px 20px; }
+    .qa-a p { font-size:14px;color:var(--text-2);line-height:1.75;margin-bottom:12px; }
+    .qa-a p:last-child { margin-bottom:0; }
+    .qa-a ol, .qa-a ul { padding-left:20px; }
+    .qa-a li { font-size:14px;color:var(--text-2);line-height:1.75;margin-bottom:6px; }
+    .qa-a strong { color:var(--text);font-weight:600; }
+
+    /* ── STEP LIST ── */
+    .step-list { list-style:none;padding:0;margin:14px 0; }
+    .step-list li {
+      display:flex;gap:14px;align-items:flex-start;
+      padding:12px 0;border-bottom:1px solid var(--border);
+    }
+    .step-list li:last-child { border-bottom:none; }
+    .step-num {
+      flex-shrink:0;width:24px;height:24px;border-radius:50%;
+      background:var(--grad);display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:800;color:#fff;margin-top:1px;
+    }
+    .step-body { font-size:14px;color:var(--text-2);line-height:1.7; }
+    .step-body strong { color:var(--text);font-weight:600; }
+
+    /* ── PIPELINE VISUAL ── */
+    .pipeline {
+      display:flex;flex-direction:column;gap:0;
+      border:1px solid var(--border);border-radius:var(--r-lg);
+      overflow:hidden;margin:16px 0;
+    }
+    .pipe-node {
+      display:flex;align-items:center;gap:16px;
+      padding:14px 20px;border-bottom:1px solid var(--border);
+      background:var(--surface);transition:background .2s;
+    }
+    .pipe-node:last-child { border-bottom:none; }
+    .pipe-node:hover { background:var(--surface-hov); }
+    .pipe-node-icon { font-size:16px;flex-shrink:0; }
+    .pipe-node-name { font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);min-width:180px; }
+    .pipe-node-desc { font-size:13px;color:var(--text-2); }
+    .pipe-arrow {
+      padding:8px 20px;text-align:center;
+      font-size:18px;color:var(--text-3);
+      background:var(--bg-1);border-bottom:1px solid var(--border);
+    }
+
+    /* ── CACHE TIER ── */
+    .cache-tier {
+      display:grid;grid-template-columns:repeat(3,1fr);
+      gap:1px;border:1px solid var(--border);border-radius:var(--r);
+      overflow:hidden;margin:14px 0;
+    }
+    .cache-item { padding:14px 16px;background:var(--surface);text-align:center; }
+    .cache-item:nth-child(1) .cache-label { color:var(--green); }
+    .cache-item:nth-child(2) .cache-label { color:var(--amber); }
+    .cache-item:nth-child(3) .cache-label { color:var(--red); }
+    .cache-label { font-size:13px;font-weight:700;margin-bottom:4px; }
+    .cache-meta { font-size:11.5px;color:var(--text-3); }
+
+    /* ── INFO CALLOUT ── */
+    .callout {
+      border:1px solid rgba(45,212,191,.2);border-radius:var(--r);
+      background:rgba(45,212,191,.05);padding:14px 18px;margin:14px 0;
+      display:flex;gap:12px;align-items:flex-start;
+    }
+    .callout-icon { font-size:16px;flex-shrink:0;margin-top:1px; }
+    .callout-body { font-size:13.5px;color:var(--text-2);line-height:1.7; }
+    .callout-body strong { color:var(--text);font-weight:600; }
+    .callout.warn { border-color:rgba(245,158,11,.2);background:rgba(245,158,11,.05); }
+
+    /* ── SECURITY TABLE ── */
+    .security-badge {
+      display:inline-flex;align-items:center;gap:5px;
+      font-size:11px;font-weight:700;padding:2px 8px;border-radius:50px;
+    }
+    .badge-green { background:rgba(16,185,129,.12);color:var(--green);border:1px solid rgba(16,185,129,.2); }
+    .badge-red   { background:rgba(244,63,94,.1);color:var(--red);border:1px solid rgba(244,63,94,.15); }
+    .badge-amber { background:rgba(245,158,11,.1);color:var(--amber);border:1px solid rgba(245,158,11,.15); }
+
+    /* ── TECH STACK GRID ── */
+    .stack-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin:16px 0; }
+    .stack-item {
+      border:1px solid var(--border);border-radius:var(--r);
+      padding:14px 16px;background:var(--surface);
+      display:flex;gap:12px;align-items:flex-start;
+      transition:border-color .2s,background .2s;
+    }
+    .stack-item:hover { border-color:var(--border-hov);background:var(--surface-hov); }
+    .stack-layer-label { font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:4px; }
+    .stack-tech { font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px; }
+    .stack-why { font-size:12px;color:var(--text-2); }
+
+    /* ── REVEAL ── */
+    .reveal { opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease; }
+    .reveal.vis { opacity:1;transform:none; }
+    .reveal-d1 { transition-delay:.08s; }
+    .reveal-d2 { transition-delay:.16s; }
+    .reveal-d3 { transition-delay:.24s; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top:1px solid var(--border);padding:40px 0;
+      position:relative;z-index:1;background:var(--bg-1);
+    }
+    .foot-inner { display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap; }
+    .foot-logo { font-size:16px;font-weight:700;letter-spacing:-.03em;display:flex;align-items:center;gap:8px; }
+    .foot-meta { font-size:12.5px;color:var(--text-3);text-align:center; }
+    .foot-links { display:flex;gap:28px;font-size:13px;color:var(--text-2); }
+    .foot-links a { transition:color .18s; }
+    .foot-links a:hover { color:var(--text); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      .guide-layout { grid-template-columns:1fr; }
+      .toc { display:none; }
+      .role-grid { grid-template-columns:1fr; }
+      .cache-tier { grid-template-columns:1fr; }
+      .module-desc { display:none; }
+    }
+    @media (max-width: 600px) {
+      .stack-grid { grid-template-columns:1fr; }
+      .fact-strip { grid-template-columns:1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ORBs -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <!-- NAV -->
+  <nav>
+    <a href="index.html" class="nav-logo">
+      <div class="nav-logo-mark">T2T</div>
+      Talk2Tables
+    </a>
+    <div class="nav-actions">
+      <a href="index.html" class="nav-back">← Home</a>
+      <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener" class="nav-demo">Live Demo ↗</a>
+    </div>
+  </nav>
+
+  <div class="page-wrap">
+    <!-- HERO -->
+    <div class="container">
+      <div class="guide-hero reveal">
+        <span class="eyebrow">Developer Reference</span>
+        <h1>Project <span class="gtext">Deep-Dive</span><br/>Guide</h1>
+        <p>A comprehensive walkthrough of every module, file, and design decision powering Talk2Tables — the AI-powered Natural Language to SQL assistant.</p>
+        <div class="stack-pills">
+          <span class="stack-pill"><span class="dot"></span> FastAPI + LangGraph</span>
+          <span class="stack-pill"><span class="dot"></span> React + TypeScript</span>
+          <span class="stack-pill"><span class="dot"></span> Firebase + Redis</span>
+          <span class="stack-pill"><span class="dot"></span> Diploma FYP 2025–26</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- GUIDE LAYOUT -->
+    <div class="container">
+      <div class="guide-layout">
+
+        <!-- TOC -->
+        <aside class="toc">
+          <div class="toc-title">Contents</div>
+          <div class="toc-section">
+            <span class="toc-section-label">Overview</span>
+            <a href="#what-is">What is Talk2Tables?</a>
+            <a href="#architecture">Architecture</a>
+          </div>
+          <div class="toc-section">
+            <span class="toc-section-label">Backend</span>
+            <a href="#main">main.py</a>
+            <a href="#auth">auth/</a>
+            <a href="#connections">connections/</a>
+            <a href="#access">access/</a>
+            <a href="#ai-agent">ai_agent/ (Core)</a>
+            <a href="#core">core/</a>
+          </div>
+          <div class="toc-section">
+            <span class="toc-section-label">Frontend</span>
+            <a href="#frontend">Frontend Overview</a>
+          </div>
+          <div class="toc-section">
+            <span class="toc-section-label">Reference</span>
+            <a href="#key-concepts">Key Concepts (Q&A)</a>
+            <a href="#tech-stack">Tech Stack</a>
+            <a href="#security">Security Summary</a>
+          </div>
+        </aside>
+
+        <!-- CONTENT -->
+        <main class="guide-content">
+
+          <!-- ── WHAT IS TALK2TABLES ── -->
+          <section id="what-is" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">📌</div>
+              <div>
+                <h2>What is Talk2Tables?</h2>
+                <div class="section-sub">Natural Language → SQL → Insights, automatically</div>
+              </div>
+            </div>
+
+            <div class="module-body" style="padding:0;margin-bottom:24px;">
+              <p>Talk2Tables is a <strong>Natural Language to SQL</strong> web application. A user types a question in plain English — e.g., <em>"Show me top 5 customers by revenue"</em> — and the AI automatically understands which tables to use, writes the correct SQL, executes it safely, and returns results, a chart, and business insights.</p>
+            </div>
+
+            <div class="fact-strip reveal reveal-d1">
+              <div class="fact-item"><div class="fact-label">Databases</div><div class="fact-val">5+</div></div>
+              <div class="fact-item"><div class="fact-label">RBAC Roles</div><div class="fact-val">4</div></div>
+              <div class="fact-item"><div class="fact-label">Cache Tiers</div><div class="fact-val">2</div></div>
+              <div class="fact-item"><div class="fact-label">LLM Fallbacks</div><div class="fact-val">4</div></div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Key Features</div>
+              </div>
+              <div class="module-body">
+                <div class="pipeline">
+                  <div class="pipe-node"><div class="pipe-node-icon">🗄️</div><div class="pipe-node-name">Multi-DB Support</div><div class="pipe-node-desc">MySQL, PostgreSQL, MSSQL, Oracle, MariaDB</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">🔐</div><div class="pipe-node-name">RBAC (4 roles)</div><div class="pipe-node-desc">analyst · power_user · db_manager · admin</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">🏢</div><div class="pipe-node-name">Multi-tenant</div><div class="pipe-node-desc">Each company's data fully isolated via org_id</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">⚡</div><div class="pipe-node-name">Real-time Streaming</div><div class="pipe-node-desc">SSE progress events as the agent works</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">💾</div><div class="pipe-node-name">Two-tier Cache</div><div class="pipe-node-desc">Redis (fast) → Firestore (persistent)</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">🛡️</div><div class="pipe-node-name">SQL Injection Protection</div><div class="pipe-node-desc">Regex guards + DDL blocking + parameterized queries</div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── ARCHITECTURE ── -->
+          <section id="architecture" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🏗️</div>
+              <div>
+                <h2>High-Level Architecture</h2>
+                <div class="section-sub">How a user question becomes SQL results</div>
+              </div>
+            </div>
+
+            <div class="pipeline reveal reveal-d1">
+              <div class="pipe-node"><div class="pipe-node-icon">🌐</div><div class="pipe-node-name">User (Browser)</div><div class="pipe-node-desc">React Frontend — src/ · Firebase Auth ID Token as Bearer</div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-node"><div class="pipe-node-icon">⚙️</div><div class="pipe-node-name">FastAPI Backend</div><div class="pipe-node-desc">main.py  (port 8080) · auth / connections / access / query / chat</div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-node"><div class="pipe-node-icon">🤖</div><div class="pipe-node-name">LangGraph AI Agent</div><div class="pipe-node-desc">entry_node → react_agent_node → output_parser_node</div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-node"><div class="pipe-node-icon">✦</div><div class="pipe-node-name">Phase 2 — Parallel Insights</div><div class="pipe-node-desc">Gemini: numerical_insights + narrative_insights via asyncio.gather()</div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-node"><div class="pipe-node-icon">🔥</div><div class="pipe-node-name">Storage + Cache</div><div class="pipe-node-desc">Firebase Firestore (all data) · Redis (optional, 2-tier fallback)</div></div>
+            </div>
+
+            <div class="code-block reveal reveal-d2">
+              <div class="code-block-hd"><span>API Routes</span></div>
+              <pre>/api/v1/auth/*           ← Login, Signup, Logout
+/api/v1/connections/*    ← Manage DB connections
+/api/v1/access-grants/*  ← Grant/revoke user access to DBs
+/api/v1/users/*          ← User management
+/api/v1/query            ← THE CORE — NL → SQL → Results
+/api/v1/chat/*           ← Chat history</pre>
+            </div>
+
+            <div class="callout reveal reveal-d3">
+              <div class="callout-icon">💡</div>
+              <div class="callout-body"><strong>No PostgreSQL for app data.</strong> All application data (users, sessions, connections, access grants, chat history) lives in Firebase Firestore. The only SQL databases are the <em>user's own databases</em> that Talk2Tables queries on their behalf.</div>
+            </div>
+          </section>
+
+          <!-- ── MAIN.PY ── -->
+          <section id="main" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔷</div>
+              <div>
+                <h2>backend/main.py</h2>
+                <div class="section-sub">Application entry point — FastAPI setup, middleware, lifespan</div>
+              </div>
+            </div>
+
+            <div class="table-wrap reveal reveal-d1">
+              <table>
+                <thead><tr><th>Function/Section</th><th>What it does</th></tr></thead>
+                <tbody>
+                  <tr><td><code>lifespan(app)</code></td><td>Startup/shutdown hook. Initialises Firebase Admin SDK → Firestore → Redis → LangGraph agent in order</td></tr>
+                  <tr><td><code>limit_request_body()</code></td><td>Middleware: rejects requests &gt; 1 MB (100 MB for doc uploads)</td></tr>
+                  <tr><td><code>add_security_headers()</code></td><td>Adds X-Frame-Options, X-XSS-Protection and other security headers</td></tr>
+                  <tr><td><code>add_response_time()</code></td><td>Adds <code>X-Response-Time</code> header to every response</td></tr>
+                  <tr><td><code>global_exception_handler()</code></td><td>Catches any unhandled exception and returns a 500 JSON response</td></tr>
+                  <tr><td><code>health()</code></td><td>GET <code>/health</code> — returns <code>{"status": "ok"}</code></td></tr>
+                  <tr><td><code>health_redis()</code></td><td>GET <code>/health/redis</code> — pings Redis and reports latency</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="callout reveal reveal-d2">
+              <div class="callout-icon">⚡</div>
+              <div class="callout-body"><strong>Rate limiting</strong> is provided by <code>slowapi</code>, keyed on the user's IP address. All routers are registered with URL prefixes during startup.</div>
+            </div>
+          </section>
+
+          <!-- ── AUTH ── -->
+          <section id="auth" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔐</div>
+              <div>
+                <h2>MODULE: auth/</h2>
+                <div class="section-sub">Firebase-based authentication, sessions, and RBAC</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Dependencies</div>
+                <span class="module-file">auth/routes/dependencies.py</span>
+                <span class="module-desc">FastAPI dependency injection</span>
+              </div>
+              <div class="module-body">
+                <p>Every protected route uses one of these dependencies to verify a request.</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>get_current_user()</code></td><td>Extracts Bearer token from <code>Authorization</code> header → calls <code>verify_request_token()</code> → returns user dict</td></tr>
+                      <tr><td><code>require_role(*roles)</code></td><td>Exact whitelist check — user's role must be in the list</td></tr>
+                      <tr><td><code>require_min_role(role)</code></td><td>Hierarchy check — user's level must be ≥ the given role</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p><strong>Role hierarchy:</strong></p>
+                <div class="role-grid">
+                  <div class="role-card"><div class="role-name">analyst</div><div class="role-level">Level 0</div><div class="role-desc">SELECT only, on explicitly assigned DBs</div></div>
+                  <div class="role-card"><div class="role-name">power_user</div><div class="role-level">Level 1</div><div class="role-desc">SELECT + write on assigned DBs</div></div>
+                  <div class="role-card"><div class="role-name">db_manager</div><div class="role-level">Level 2</div><div class="role-desc">Manages connections &amp; grants</div></div>
+                  <div class="role-card"><div class="role-name">admin</div><div class="role-level">Level 3</div><div class="role-desc">Full control over everything</div></div>
+                </div>
+                <p><strong>Auth flow per request:</strong></p>
+                <ol class="step-list">
+                  <li><div class="step-num">1</div><div class="step-body">Extract <code>Authorization: Bearer &lt;token&gt;</code> header</div></li>
+                  <li><div class="step-num">2</div><div class="step-body">Call <code>verify_request_token()</code> in a thread (Firebase SDK is sync)</div></li>
+                  <li><div class="step-num">3</div><div class="step-body">Redis cache check → return immediately if hit (55-min TTL)</div></li>
+                  <li><div class="step-num">4</div><div class="step-body">Firestore user check (cache miss only)</div></li>
+                  <li><div class="step-num">5</div><div class="step-body">Firestore session check (cache miss only)</div></li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Service</div>
+                <span class="module-file">auth/services/auth_service.py</span>
+                <span class="module-desc">Auth business logic</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>login(id_token, device_info, ip)</code></td><td>Verifies Firebase ID token → upserts user in Firestore → creates custom token with role claims → creates session doc → returns <code>{custom_token, session_id, user}</code></td></tr>
+                      <tr><td><code>signup(id_token, display_name, ...)</code></td><td>Registers a new admin user; creates Organization + user doc in Firestore</td></tr>
+                      <tr><td><code>logout(uid, session_id)</code></td><td>Revokes specific Firestore session + Firebase refresh tokens</td></tr>
+                      <tr><td><code>logout_all(uid)</code></td><td>Revokes ALL sessions + Firebase tokens</td></tr>
+                      <tr><td><code>update_profile(uid, display_name)</code></td><td>Updates display name in Firestore + busts Redis cache</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="callout">
+                  <div class="callout-icon">🔑</div>
+                  <div class="callout-body"><strong>Custom token trick:</strong> <code>login()</code> returns a custom token (not the raw Firebase token). The frontend calls <code>signInWithCustomToken(token)</code> — this embeds <code>role</code> and <code>org_id</code> claims so every subsequent request carries them. Firebase tokens live 1 hour, but sessions can be up to 8 hours. Redis caches the decoded token for 55 minutes.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── CONNECTIONS ── -->
+          <section id="connections" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔷</div>
+              <div>
+                <h2>MODULE: connections/</h2>
+                <div class="section-sub">DB credential management — passwords encrypted with AES/Fernet</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Service</div>
+                <span class="module-file">connections/services/connection_service.py</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>create_connection(body, uid, org_id)</code></td><td>Encrypts password, writes to Firestore with <code>org_id</code> for tenant isolation; invalidates list cache</td></tr>
+                      <tr><td><code>get_connection_by_id(id, org_id)</code></td><td>Redis → Firestore. Validates <code>org_id</code> to prevent cross-tenant access. Never returns <code>password_enc</code></td></tr>
+                      <tr><td><code>get_connection_with_password(id)</code></td><td>Internal-only. Fetches from Firestore + decrypts password. <strong>NOT cached</strong> — passwords never go in Redis</td></tr>
+                      <tr><td><code>test_connection(id, org_id)</code></td><td>Executes <code>SELECT 1</code> via SQLAlchemy to confirm connectivity. Updates <code>last_tested_at</code> in Firestore</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="callout warn">
+                  <div class="callout-icon">⚠️</div>
+                  <div class="callout-body"><strong>Security:</strong> <code>_safe_connection()</code> strips <code>password_enc</code> before any API response. Passwords are encrypted with AES/Fernet. Org boundary is validated on every read/write.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── ACCESS ── -->
+          <section id="access" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔷</div>
+              <div>
+                <h2>MODULE: access/</h2>
+                <div class="section-sub">Controls which user can query which database, and with what permission</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Service</div>
+                <span class="module-file">access/services/access_service.py</span>
+                <span class="module-desc">Firestore: user_db_access/{access_id}</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>create_access_grant(...)</code></td><td>Grants a user access to a DB. Validates org membership for both user AND connection. Blocks duplicates</td></tr>
+                      <tr><td><code>verify_access(uid, conn_id)</code></td><td><strong>THE HOTTEST PATH.</strong> Called before every single query. Redis → Firestore. Returns <code>(True, "ok")</code> or <code>(False, reason)</code></td></tr>
+                      <tr><td><code>revoke_access_grant(id, uid)</code></td><td><strong>Soft delete</strong> — sets <code>is_active=False</code> and <code>revoked_at</code>. Cache invalidated IMMEDIATELY (security critical)</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p><strong>verify_access() return codes:</strong></p>
+                <div class="code-block">
+                  <pre>(True,  "ok")                  → access allowed
+(False, "no_grant")            → no grant exists at all
+(False, "revoked")             → grant.is_active == False
+(False, "expired")             → grant.expires_at is in the past
+(False, "write_not_permitted") → write required but only "read" granted</pre>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── AI AGENT ── -->
+          <section id="ai-agent" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🤖</div>
+              <div>
+                <h2>MODULE: ai_agent/ — The Core Engine</h2>
+                <div class="section-sub">Converts natural language to SQL using a LangGraph state machine</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">State</div>
+                <span class="module-file">ai_agent/state.py</span>
+                <span class="module-desc">AgentState TypedDict</span>
+              </div>
+              <div class="module-body">
+                <p><code>AgentState</code> is a <code>TypedDict</code> passed between all nodes in the graph.</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Field</th><th>Set by</th><th>Purpose</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>natural_language_query</code></td><td>Route handler</td><td>User's question</td></tr>
+                      <tr><td><code>connection_id</code></td><td>Route handler</td><td>Which database</td></tr>
+                      <tr><td><code>user_role</code></td><td>Route handler</td><td>RBAC role</td></tr>
+                      <tr><td><code>chat_history</code></td><td>Route handler</td><td>Previous messages for context</td></tr>
+                      <tr><td><code>db_connection_string</code></td><td><code>entry_node</code></td><td>Built SQLAlchemy URL</td></tr>
+                      <tr><td><code>db_dialect</code></td><td><code>entry_node</code></td><td>mysql / postgresql / mssql / oracle</td></tr>
+                      <tr><td><code>agent_output</code></td><td><code>react_agent_node</code></td><td>Raw JSON string from LLM</td></tr>
+                      <tr><td><code>final_response</code></td><td><code>output_parser_node</code></td><td>Structured dict for the frontend</td></tr>
+                      <tr><td><code>retry_count</code></td><td><code>output_parser_node</code></td><td>Number of retries so far</td></tr>
+                      <tr><td><code>error_message</code></td><td>Any node</td><td>Set on failure to route to END</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Graph</div>
+                <span class="module-file">ai_agent/graph.py</span>
+                <span class="module-desc">LangGraph outer graph + safety guards</span>
+              </div>
+              <div class="module-body">
+                <p><strong>Graph flow:</strong></p>
+                <div class="pipeline">
+                  <div class="pipe-node"><div class="pipe-node-icon">▶</div><div class="pipe-node-name">START</div><div class="pipe-node-desc"></div></div>
+                  <div class="pipe-arrow">↓</div>
+                  <div class="pipe-node"><div class="pipe-node-icon">1</div><div class="pipe-node-name">entry_node</div><div class="pipe-node-desc">Verify access → fetch credentials → build SQLAlchemy URL</div></div>
+                  <div class="pipe-arrow">↓ success &nbsp;&nbsp;&nbsp; ↓ error → END</div>
+                  <div class="pipe-node"><div class="pipe-node-icon">2</div><div class="pipe-node-name">react_agent_node</div><div class="pipe-node-desc">LLM ReAct loop → calls schema + SQL tools</div></div>
+                  <div class="pipe-arrow">↓ success &nbsp;&nbsp;&nbsp; ↓ error → END</div>
+                  <div class="pipe-node"><div class="pipe-node-icon">3</div><div class="pipe-node-name">output_parser_node</div><div class="pipe-node-desc">Parse JSON → if fail: retry (max 3) → loop back to step 2</div></div>
+                  <div class="pipe-arrow">↓ success</div>
+                  <div class="pipe-node"><div class="pipe-node-icon">■</div><div class="pipe-node-name">END</div><div class="pipe-node-desc">Phase 2 insights via asyncio.gather()</div></div>
+                </div>
+                <p style="margin-top:18px;"><strong>Two safety guards in run_agent():</strong></p>
+                <ol class="step-list">
+                  <li><div class="step-num">1</div><div class="step-body"><strong>Write-intent pre-flight:</strong> Regex checks if a read-only <code>analyst</code> is asking for INSERT/UPDATE/DELETE — blocks immediately without calling the LLM</div></li>
+                  <li><div class="step-num">2</div><div class="step-body"><strong>In-flight deduplication:</strong> Prevents the same user from having two concurrent queries running (saves LLM tokens, prevents race conditions)</div></li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d3">
+              <div class="module-header">
+                <div class="module-tag">Tools</div>
+                <span class="module-file">ai_agent/tools/schema_tools.py</span>
+                <span class="module-desc">LangChain tool functions for schema inspection</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Tool</th><th>Args</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>get_schema_list()</code></td><td>none</td><td>Returns all table names and schemas in the DB as JSON array</td></tr>
+                      <tr><td><code>get_table_definitions(table_names)</code></td><td>comma-separated names</td><td>Returns column definitions, data types, PKs, FKs, and sample enum values</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p><strong>Two-tier cache strategy (fastest first):</strong></p>
+                <div class="cache-tier">
+                  <div class="cache-item"><div class="cache-label">Redis</div><div class="cache-meta">~1ms · TTL 1 hour</div></div>
+                  <div class="cache-item"><div class="cache-label">Firestore</div><div class="cache-meta">~80ms · source of truth</div></div>
+                  <div class="cache-item"><div class="cache-label">Live DB</div><div class="cache-meta">variable · writes back to both</div></div>
+                </div>
+                <div class="callout">
+                  <div class="callout-icon">🎯</div>
+                  <div class="callout-body"><strong>Enum sampling:</strong> For VARCHAR/TEXT/CHAR columns with ≤ 20 distinct values, the tool runs <code>SELECT DISTINCT</code> and returns real stored values. The system prompt tells the LLM: <em>you MUST use ONLY these exact values in WHERE clauses.</em> This prevents hallucinated filter values.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal">
+              <div class="module-header">
+                <div class="module-tag">Tools</div>
+                <span class="module-file">ai_agent/tools/query_tools.py</span>
+                <span class="module-desc">SQL execution with 4-layer safety pipeline</span>
+              </div>
+              <div class="module-body">
+                <p><strong>4-layer safety pipeline (in order):</strong></p>
+                <ol class="step-list">
+                  <li><div class="step-num">1</div><div class="step-body"><strong>Injection guard</strong> — regex-blocks: <code>; statement</code>, <code>xp_cmdshell</code>, <code>EXEC(</code>, <code>INTO OUTFILE</code>, <code>SLEEP()</code>, <code>WAITFOR DELAY</code>, <code>BENCHMARK()</code></div></li>
+                  <li><div class="step-num">2</div><div class="step-body"><strong>DDL guard</strong> — blocks: <code>DROP</code>, <code>TRUNCATE</code>, <code>CREATE</code>, <code>ALTER</code>, <code>RENAME</code>, <code>GRANT</code>, <code>REVOKE</code></div></li>
+                  <li><div class="step-num">3</div><div class="step-body"><strong>RBAC write check</strong> — INSERT/UPDATE/DELETE/MERGE require role in <code>{admin, power_user, db_manager}</code></div></li>
+                  <li><div class="step-num">4</div><div class="step-body"><strong>Auto-LIMIT</strong> — SELECT queries without a LIMIT get <code>LIMIT 1000</code> appended automatically</div></li>
+                </ol>
+                <div class="callout">
+                  <div class="callout-icon">💡</div>
+                  <div class="callout-body"><strong>Full data cache trick:</strong> The tool fetches up to 10,000 rows but sends only a <strong>3-row preview</strong> back to the LLM (saves tokens). Full rows are stored in <code>_full_result_cache</code> (in-memory, keyed by MD5). The <code>output_parser</code> pops from this cache — avoiding a second DB roundtrip.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Prompts</div>
+                <span class="module-file">ai_agent/prompts.py</span>
+                <span class="module-desc">System prompt builder</span>
+              </div>
+              <div class="module-body">
+                <p><code>build_system_prompt(dialect, user_role)</code> builds the complete instruction set injected into the ReAct agent. Key sections:</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>#</th><th>Section</th><th>Purpose</th></tr></thead>
+                    <tbody>
+                      <tr><td>1</td><td>Identity</td><td>"You are a Database Query Assistant…"</td></tr>
+                      <tr><td>2</td><td>Tools Available</td><td>Explains <code>get_schema_list</code>, <code>get_table_definitions</code>, <code>execute_sql</code></td></tr>
+                      <tr><td>3</td><td>Execution Workflow</td><td>Mandatory Step 1–5 order</td></tr>
+                      <tr><td>4</td><td>Response Format</td><td>Exact JSON schema the LLM must return</td></tr>
+                      <tr><td>5</td><td>Rules</td><td>Never guess column names; always use sample_values; never skip execute_sql</td></tr>
+                      <tr><td>6</td><td>User Permissions</td><td>Appended based on role — analyst gets read-only; power_user gets write-with-confirmation</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Providers</div>
+                <span class="module-file">ai_agent/providers/</span>
+                <span class="module-desc">LLM provider factory with cascading fallback</span>
+              </div>
+              <div class="module-body">
+                <div class="pipeline">
+                  <div class="pipe-node"><div class="pipe-node-icon">1</div><div class="pipe-node-name">openrouter.py</div><div class="pipe-node-desc">OpenRouter — aggregates many models; primary provider</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">2</div><div class="pipe-node-name">groq.py</div><div class="pipe-node-desc">Groq — fast inference; first fallback</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">3</div><div class="pipe-node-name">gemini.py</div><div class="pipe-node-desc">Google Gemini — also used for Phase 2 insights</div></div>
+                  <div class="pipe-node"><div class="pipe-node-icon">4</div><div class="pipe-node-name">ollama.py</div><div class="pipe-node-desc">Ollama — local models; last resort</div></div>
+                </div>
+                <p>Override priority with <code>LLM_PROVIDER</code> env var. <code>get_llm(preferred)</code> returns the singleton <code>ChatModel</code>, trying each provider in order until one works.</p>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d3">
+              <div class="module-header">
+                <div class="module-tag">Chat</div>
+                <span class="module-file">ai_agent/services/chat_service.py</span>
+                <span class="module-desc">Conversation memory — Firestore structure</span>
+              </div>
+              <div class="module-body">
+                <div class="code-block">
+                  <div class="code-block-hd">Firestore Structure</div>
+                  <pre>users/{uid}/workspaces/{connection_id}/
+    chats/{chat_id}/
+        messages/u_0001   ← user message (turn 1)
+        messages/a_0001   ← assistant message (turn 1)
+        messages/u_0002   ← user message (turn 2)
+        messages/a_0002   ← assistant message (turn 2)</pre>
+                </div>
+                <div class="callout">
+                  <div class="callout-icon">💾</div>
+                  <div class="callout-body"><code>append_messages()</code> is an <strong>atomic Firestore transaction</strong> — it increments <code>turn_count</code> on the chat doc + writes user message + assistant message in one operation. <code>get_messages()</code> fetches the last 12 messages (6 turns) for conversational context.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── CORE ── -->
+          <section id="core" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔷</div>
+              <div>
+                <h2>MODULE: core/</h2>
+                <div class="section-sub">Redis client, cache key registry, and shared utilities</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Redis</div>
+                <span class="module-file">core/redis_client.py</span>
+              </div>
+              <div class="module-body">
+                <div class="callout warn">
+                  <div class="callout-icon">⚠️</div>
+                  <div class="callout-body"><strong>Why no singleton pool:</strong> On Windows with <code>uvicorn --reload</code>, the event loop is replaced — any persistent connection holds a reference to the OLD loop → <code>RuntimeError</code>. Solution: create a fresh <code>redis.asyncio.Redis</code> per call.</div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>What it does</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>redis_get(key)</code></td><td>JSON-decode a cached value. Returns <code>None</code> on miss, error, or 3-second timeout</td></tr>
+                      <tr><td><code>redis_set(key, value, ttl)</code></td><td>JSON-encode and SET with TTL. Returns <code>True</code> on success</td></tr>
+                      <tr><td><code>redis_delete(*keys)</code></td><td>Delete one or more exact keys</td></tr>
+                      <tr><td><code>redis_delete_pattern(pattern)</code></td><td>Delete all keys matching a glob pattern using <code>SCAN</code> (production-safe — won't block Redis)</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Cache Keys</div>
+                <span class="module-file">core/cache_keys.py</span>
+                <span class="module-desc">Central registry of all Redis keys and TTLs</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Key pattern</th><th>TTL</th><th>What it stores</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>token:{uid}</code></td><td>55 min</td><td>Decoded Firebase token claims</td></tr>
+                      <tr><td><code>user:{uid}</code></td><td>5 min</td><td>User profile dict</td></tr>
+                      <tr><td><code>access:{uid}:{conn_id}</code></td><td>2 min</td><td>Access grant for verify_access()</td></tr>
+                      <tr><td><code>schema:{conn_id}:_tables</code></td><td>1 hour</td><td>Table list from schema tools</td></tr>
+                      <tr><td><code>schema:{conn_id}:{schema}__{table}</code></td><td>1 hour</td><td>Column definitions</td></tr>
+                      <tr><td><code>suggestions:{conn_id}</code></td><td>24 hours</td><td>AI-generated query suggestions</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── FRONTEND ── -->
+          <section id="frontend" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">⚛️</div>
+              <div>
+                <h2>Frontend</h2>
+                <div class="section-sub">React + TypeScript + Vite · Hash-based routing for Electron compatibility</div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d1">
+              <div class="module-header">
+                <div class="module-tag">Routes</div>
+                <span class="module-file">frontend/src/app/routes.tsx</span>
+                <span class="module-desc">createHashRouter — Electron-compatible</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Route</th><th>Component</th><th>Access</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>/login</code></td><td><code>Login</code></td><td>Public</td></tr>
+                      <tr><td><code>/signup</code></td><td><code>Signup</code></td><td>Public</td></tr>
+                      <tr><td><code>/</code></td><td><code>Dashboard</code></td><td>Protected (any auth user)</td></tr>
+                      <tr><td><code>/query</code></td><td><code>QueryInterface</code></td><td>Protected</td></tr>
+                      <tr><td><code>/schema</code></td><td><code>SchemaBrowser</code></td><td>Protected</td></tr>
+                      <tr><td><code>/admin</code></td><td><code>AdminPanel</code></td><td>Protected + requires <code>db_manager</code>+</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d2">
+              <div class="module-header">
+                <div class="module-tag">Auth Context</div>
+                <span class="module-file">frontend/src/context/AuthContext.tsx</span>
+                <span class="module-desc">Global auth state — Firebase onAuthStateChanged</span>
+              </div>
+              <div class="module-body">
+                <p><strong>Boot sequence (runs on every page load/refresh):</strong></p>
+                <ol class="step-list">
+                  <li><div class="step-num">1</div><div class="step-body"><code>loading = true</code> — spinner shown, NO redirect yet</div></li>
+                  <li><div class="step-num">2</div><div class="step-body">Firebase <code>onAuthStateChanged</code> fires (0–2s)</div></li>
+                  <li><div class="step-num">3</div><div class="step-body">If <code>fbUser</code> exists → check backend session via <code>GET /me</code> → set user</div></li>
+                  <li><div class="step-num">4</div><div class="step-body">If <code>fbUser</code> is null → set <code>user = null</code></div></li>
+                  <li><div class="step-num">5</div><div class="step-body"><code>loading = false</code> → ProtectedRoute now decides: allow or redirect to <code>/login</code></div></li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="module-card reveal reveal-d3">
+              <div class="module-header">
+                <div class="module-tag">API Service</div>
+                <span class="module-file">frontend/src/lib/queryService.ts</span>
+                <span class="module-desc">Two modes: standard + SSE streaming</span>
+              </div>
+              <div class="module-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Function</th><th>Endpoint</th><th>How it works</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>executeQuery(payload)</code></td><td><code>POST /api/v1/query</code></td><td>Standard request-response. Waits for full result</td></tr>
+                      <tr><td><code>executeQueryStream(payload, callbacks)</code></td><td><code>POST /api/v1/query/stream</code></td><td>SSE streaming. Fires <code>onProgress</code> events while agent works, then <code>onResult</code> and <code>onInsights</code></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="code-block">
+                  <div class="code-block-hd">SSE Event Types</div>
+                  <pre>event: progress  → { stage, message }  (e.g., "Inspecting table structure...")
+event: result    → full QueryResponse with data
+event: insights  → { numerical_insights, narrative_insights }
+event: error     → { message }</pre>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── KEY CONCEPTS ── -->
+          <section id="key-concepts" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔑</div>
+              <div>
+                <h2>Key Concepts (Q&amp;A)</h2>
+                <div class="section-sub">Common interview / viva questions answered in depth</div>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d1">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q1</div>
+                What is LangGraph and why did you use it?
+              </div>
+              <div class="qa-a">
+                <p>LangGraph is a framework for building <strong>stateful, multi-step AI workflows</strong> as directed graphs. We use it because:</p>
+                <ul>
+                  <li>It manages the flow <code>entry → react_agent → output_parser</code> with conditional routing</li>
+                  <li>It supports <strong>retry loops</strong> — if the LLM returns invalid JSON, the graph automatically loops back to the <code>react_agent</code> (up to 3 times)</li>
+                  <li>The <code>StateGraph</code> pattern makes error states explicit — any node can set <code>error_message</code> and route to END immediately</li>
+                  <li>Built on LangChain, giving us tool-calling abstraction</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d2">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q2</div>
+                What is the ReAct pattern?
+              </div>
+              <div class="qa-a">
+                <p><strong>ReAct = Reasoning + Acting.</strong> The LLM alternates between:</p>
+                <ol>
+                  <li><strong>Thought</strong> — decides what to do</li>
+                  <li><strong>Action</strong> — calls a tool (e.g., <code>get_schema_list</code>, <code>execute_sql</code>)</li>
+                  <li><strong>Observation</strong> — reads the tool's output</li>
+                  <li>Repeats until it has enough information to answer</li>
+                </ol>
+                <p>In our system, <code>create_react_agent(llm, tools)</code> implements this loop internally. The LLM autonomously decides when to call which tool.</p>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d3">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q3</div>
+                How does the two-tier cache work?
+              </div>
+              <div class="qa-a">
+                <div class="cache-tier">
+                  <div class="cache-item"><div class="cache-label">1. Redis</div><div class="cache-meta">~1ms hit → return immediately</div></div>
+                  <div class="cache-item"><div class="cache-label">2. Firestore</div><div class="cache-meta">~80ms · populate Redis → return</div></div>
+                  <div class="cache-item"><div class="cache-label">3. Live DB</div><div class="cache-meta">variable · write back to both</div></div>
+                </div>
+                <p>Cache TTLs are short (2 min) for security-sensitive data (access grants) and long (1 hour) for stable data (schema). Cache is <strong>invalidated immediately</strong> on write — revoked access takes effect instantly.</p>
+              </div>
+            </div>
+
+            <div class="qa-card reveal">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q4</div>
+                How is SQL injection prevented?
+              </div>
+              <div class="qa-a">
+                <ol>
+                  <li><strong>Input-level regex</strong> in <code>_check_injection()</code> — blocks <code>EXEC(</code>, <code>xp_cmdshell</code>, <code>SLEEP()</code>, <code>INTO OUTFILE</code>, semicolons followed by other statements</li>
+                  <li><strong>DDL blocking</strong> — <code>DROP</code>, <code>CREATE</code>, <code>ALTER</code>, <code>TRUNCATE</code> are always blocked regardless of user role</li>
+                  <li><strong>Parameterized execution</strong> — SQLAlchemy uses <code>text()</code> with bound parameters, never string concatenation</li>
+                </ol>
+                <p>Additionally, <code>LIMIT 1000</code> is auto-added to any SELECT without a limit.</p>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d1">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q5</div>
+                What is the RBAC system?
+              </div>
+              <div class="qa-a">
+                <div class="code-block">
+                  <pre>analyst    (0) — read-only SELECT on explicitly granted DBs
+power_user (1) — SELECT + write on granted DBs
+db_manager (2) — manage connections and grants
+admin      (3) — unrestricted access to everything</pre>
+                </div>
+                <p>RBAC is enforced at <strong>three independent layers</strong>:</p>
+                <ol>
+                  <li><strong>FastAPI dependency</strong> (<code>require_min_role</code>) — checks the JWT claim at the HTTP layer</li>
+                  <li><strong>Agent prompt</strong> — the system prompt tells the LLM what the user can/cannot do</li>
+                  <li><strong>Tool layer</strong> — <code>execute_sql</code> independently re-checks the role before any write operation</li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d2">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q6</div>
+                How does multi-tenancy work?
+              </div>
+              <div class="qa-a">
+                <p>Every resource document in Firestore has an <code>org_id</code> field. All Firestore queries filter by <code>org_id</code>:</p>
+                <ul>
+                  <li>Users belong to one org</li>
+                  <li>Database connections belong to one org</li>
+                  <li>Access grants validate that both the target user AND the target connection belong to the requesting admin's org</li>
+                  <li>Redis cache keys are scoped: <code>connections:list:{org_id}</code> — so Org A never sees Org B's connections</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d3">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q7</div>
+                How does SSE streaming work?
+              </div>
+              <div class="qa-a">
+                <ol>
+                  <li>FastAPI returns a <code>StreamingResponse</code> with content-type <code>text/event-stream</code></li>
+                  <li>The backend iterates <code>agent.astream_events(...)</code> from LangGraph</li>
+                  <li>On <code>on_chain_start → entry</code>: yields <code>event: progress</code> "Connecting to database…"</li>
+                  <li>On <code>on_tool_start → get_schema_list</code>: yields <code>event: progress</code> "Loading schema…"</li>
+                  <li>On <code>on_tool_start → execute_sql</code>: yields <code>event: progress</code> "Executing SQL…"</li>
+                  <li>On <code>on_chain_end → LangGraph</code>: yields <code>event: result</code> with full data</li>
+                  <li>Phase 2 insights are yielded as <code>event: insights</code></li>
+                </ol>
+                <p>The frontend's <code>executeQueryStream()</code> reads the <code>ReadableStream</code> body, splits on <code>\n\n</code>, parses each event block, and fires callbacks (<code>onProgress</code>, <code>onResult</code>, <code>onInsights</code>).</p>
+              </div>
+            </div>
+
+            <div class="qa-card reveal">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q8</div>
+                What is the system prompt and why is it important?
+              </div>
+              <div class="qa-a">
+                <p>The system prompt is the instruction set injected into the LLM at the start of every conversation. It:</p>
+                <ul>
+                  <li>Tells the LLM which tools are available and how to use them in <strong>mandatory order</strong></li>
+                  <li>Specifies the <strong>exact JSON schema</strong> the LLM must return (title, sql_query, summary, total_records, data)</li>
+                  <li>Enforces that the LLM MUST call <code>execute_sql</code> (never fabricate results)</li>
+                  <li>Contains dialect-specific SQL syntax hints (MySQL vs PostgreSQL differences)</li>
+                  <li>Injects the user's role permissions (analyst = read-only, power_user = write with confirmation)</li>
+                  <li>Handles edge cases: conversational questions (no tools), out-of-scope queries (reject), write confirmations</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d1">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q9</div>
+                How does the output parser retry mechanism work?
+              </div>
+              <div class="qa-a">
+                <ol>
+                  <li><code>node_output_parser</code> tries to <code>json.loads()</code> the LLM's output</li>
+                  <li>If parsing fails (e.g., LLM returned plain text instead of JSON):
+                    <ul>
+                      <li>If <code>retry_count &lt; max_retries (3)</code>: increments <code>retry_count</code> and returns state WITHOUT <code>final_response</code></li>
+                      <li>The graph router sees no <code>final_response</code> + <code>retry_count &gt; 0</code> → routes back to <code>react_agent</code></li>
+                      <li>A nudge message is added: <em>"Your previous response was not formatted correctly. Return ONLY valid JSON…"</em></li>
+                    </ul>
+                  </li>
+                  <li>If <code>retry_count &gt;= max_retries</code>: returns error response</li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d2">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q10</div>
+                Explain the chat/conversation memory system.
+              </div>
+              <div class="qa-a">
+                <p>Each user has a <strong>workspace</strong> per database connection. Within each workspace, they can have multiple <strong>chats</strong>. Each chat stores <strong>messages</strong> as a Firestore sub-collection.</p>
+                <p>Before each query, <code>get_messages()</code> fetches the last 12 messages (6 conversation turns) from Firestore. These are injected as <code>HumanMessage</code>/<code>AIMessage</code> objects into the LangGraph agent's initial state — giving it conversational context.</p>
+                <p>After each query, <code>append_messages()</code> writes both the user's question and the AI's full response atomically in a Firestore transaction. Message IDs use a turn-prefix system: <code>u_0001</code>, <code>a_0001</code>, <code>u_0002</code>, <code>a_0002</code>… ensuring predictable ordering.</p>
+              </div>
+            </div>
+
+            <div class="qa-card reveal reveal-d3">
+              <div class="qa-q">
+                <div class="qa-q-badge">Q11</div>
+                What happens behind the scenes when a user types a question?
+              </div>
+              <div class="qa-a">
+                <ol class="step-list">
+                  <li><div class="step-num">1</div><div class="step-body">Frontend calls <code>executeQueryStream()</code> with <code>{connection_id, chat_input, chat_id}</code></div></li>
+                  <li><div class="step-num">2</div><div class="step-body">Backend calls <code>get_or_create_chat()</code> + <code>get_messages()</code> for history</div></li>
+                  <li><div class="step-num">3</div><div class="step-body"><code>run_agent_stream()</code> is called. Two pre-flight guards run (write-intent check, in-flight dedup)</div></li>
+                  <li><div class="step-num">4</div><div class="step-body"><code>entry_node</code> verifies access grant → fetches decrypted DB credentials → builds SQLAlchemy URL</div></li>
+                  <li><div class="step-num">5</div><div class="step-body">LLM calls <code>get_schema_list</code> → gets list of all tables</div></li>
+                  <li><div class="step-num">6</div><div class="step-body">LLM calls <code>get_table_definitions</code> → gets column definitions + sample values for relevant tables</div></li>
+                  <li><div class="step-num">7</div><div class="step-body">LLM constructs SQL → calls <code>execute_sql</code> → gets results (3-row preview + full in cache)</div></li>
+                  <li><div class="step-num">8</div><div class="step-body"><code>output_parser_node</code> parses JSON, pops full data from cache, yields <code>event: result</code></div></li>
+                  <li><div class="step-num">9</div><div class="step-body">Phase 2: <code>asyncio.gather()</code> calls two Gemini functions in parallel → yields <code>event: insights</code></div></li>
+                  <li><div class="step-num">10</div><div class="step-body"><code>append_messages()</code> writes both messages to Firestore in one atomic transaction</div></li>
+                  <li><div class="step-num">11</div><div class="step-body">Frontend renders: data table, chart tab, insights tab, history item</div></li>
+                </ol>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── TECH STACK ── -->
+          <section id="tech-stack" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">📋</div>
+              <div>
+                <h2>Quick Reference: Tech Stack</h2>
+                <div class="section-sub">Every technology and why it was chosen</div>
+              </div>
+            </div>
+
+            <div class="stack-grid reveal reveal-d1">
+              <div class="stack-item"><div><div class="stack-layer-label">Backend Framework</div><div class="stack-tech">FastAPI (Python)</div><div class="stack-why">Async, fast, auto-generates Swagger UI</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">AI Orchestration</div><div class="stack-tech">LangGraph</div><div class="stack-why">Stateful multi-step agent with retry loops</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">LLM</div><div class="stack-tech">Groq / Gemini / OpenRouter / Ollama</div><div class="stack-why">Cascading fallback; Gemini for insights</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Target Database</div><div class="stack-tech">MySQL, PostgreSQL, MSSQL, Oracle</div><div class="stack-why">Multi-DB support via SQLAlchemy</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Auth + App DB</div><div class="stack-tech">Firebase Admin SDK + Firestore</div><div class="stack-why">No PostgreSQL — all app data in Firestore</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Cache</div><div class="stack-tech">Redis (optional) + Firestore</div><div class="stack-why">Two-tier: fast Redis → persistent Firestore</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Frontend</div><div class="stack-tech">React + TypeScript + Vite</div><div class="stack-why">Modern SPA with type safety</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Routing</div><div class="stack-tech">React Router (Hash)</div><div class="stack-why">Works in Electron/desktop app</div></div></div>
+              <div class="stack-item"><div><div class="stack-layer-label">Password Encryption</div><div class="stack-tech">Fernet (AES-128-CBC)</div><div class="stack-why">Symmetric encryption for DB passwords at rest</div></div></div>
+            </div>
+          </section>
+
+          <!-- ── SECURITY ── -->
+          <section id="security" class="guide-section reveal">
+            <div class="section-header">
+              <div class="section-icon">🔒</div>
+              <div>
+                <h2>Security Summary</h2>
+                <div class="section-sub">Every threat and how it's mitigated</div>
+              </div>
+            </div>
+
+            <div class="table-wrap reveal reveal-d1">
+              <table>
+                <thead><tr><th>Threat</th><th>How mitigated</th></tr></thead>
+                <tbody>
+                  <tr><td>SQL Injection</td><td>Regex pattern guards + SQLAlchemy parameterized queries</td></tr>
+                  <tr><td>DDL attacks (DROP TABLE)</td><td>First-keyword check blocks DDL always, regardless of role</td></tr>
+                  <tr><td>Unauthorized DB access</td><td><code>verify_access()</code> called before every query</td></tr>
+                  <tr><td>Cross-tenant data leak</td><td>All Firestore queries filtered by <code>org_id</code></td></tr>
+                  <tr><td>Privilege escalation</td><td>Role checked at HTTP layer + prompt layer + tool layer</td></tr>
+                  <tr><td>Password exposure</td><td>AES encrypted at rest; never cached in Redis</td></tr>
+                  <tr><td>Token replay</td><td>Firebase token verified via RS256 signature; session revocable</td></tr>
+                  <tr><td>DDoS / spam</td><td>Rate limiting (slowapi) + in-flight dedup per user</td></tr>
+                  <tr><td>XSS / Clickjacking</td><td>Security headers middleware (X-Frame-Options, CSP)</td></tr>
+                  <tr><td>Large payload attacks</td><td>Request body size limit (1 MB default, 100 MB doc upload)</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div class="foot-inner">
+        <div class="foot-logo">
+          <div class="nav-logo-mark" style="width:26px;height:26px;font-size:11px;">T2T</div>
+          Talk2Tables
+        </div>
+        <div class="foot-meta">Final Year Project · Computer Engineering · 2025–26<br />Built with Python, FastAPI, React, LangGraph</div>
+        <div class="foot-links">
+          <a href="index.html">Home</a>
+          <a href="download.html">Download</a>
+          <a href="https://talk2tables-prod.netlify.app/" target="_blank" rel="noopener">Live Demo ↗</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /* scroll reveal */
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
+    }, { threshold: 0.06 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    /* active TOC link */
+    const sections = document.querySelectorAll('.guide-section');
+    const tocLinks = document.querySelectorAll('.toc a');
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          const id = e.target.id;
+          tocLinks.forEach(l => {
+            l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    sections.forEach(s => io.observe(s));
+  </script>
+</body>
+</html>

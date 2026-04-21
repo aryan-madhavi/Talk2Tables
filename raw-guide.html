@@ -1,0 +1,1741 @@
+<h1 id="talk2tables">🎓 Talk2Tables</h1>
+<blockquote>
+<p><strong>Project</strong>: Talk2Tables — AI-Powered Conversational SQL
+Assistant<br />
+<strong>Stack</strong>: FastAPI + LangGraph (Backend) · React +
+TypeScript (Frontend) · Firebase · Redis<br />
+<strong>Diploma Final Year Project — Mumbai, 2025–26</strong></p>
+</blockquote>
+<hr />
+<h2 id="what-is-talk2tables">📌 WHAT IS TALK2TABLES?</h2>
+<p>Talk2Tables is a <strong>Natural Language to SQL</strong> web
+application. A user types a question in plain English (e.g., <em>“Show
+me top 5 customers by revenue”</em>) and the AI automatically:</p>
+<ol type="1">
+<li>Understands which database tables to use</li>
+<li>Writes the correct SQL query</li>
+<li>Executes it safely</li>
+<li>Returns results, a chart, and business insights</li>
+</ol>
+<p><strong>Key Features:</strong></p>
+<ul>
+<li>Multi-database support: MySQL, PostgreSQL, MSSQL, Oracle,
+MariaDB</li>
+<li>Role-Based Access Control (RBAC) — 4 roles: <code>analyst</code>,
+<code>power_user</code>, <code>db_manager</code>,
+<code>admin</code></li>
+<li>Multi-tenant organizations (each company’s data is isolated)</li>
+<li>Real-time streaming responses (SSE)</li>
+<li>Two-tier caching: Redis (fast) → Firestore (persistent)</li>
+<li>SQL injection protection &amp; DDL blocking</li>
+<li>Business document upload for context enrichment</li>
+</ul>
+<hr />
+<h2 id="high-level-architecture">🏗️ HIGH-LEVEL ARCHITECTURE</h2>
+<pre><code>User (Browser)
+    │
+    ▼
+[React Frontend] — src/
+    │  ← Firebase Auth (ID Token as Bearer)
+    ▼
+[FastAPI Backend] — main.py  (port 8080)
+    │
+    ├── /api/v1/auth/*           ← Login, Signup, Logout
+    ├── /api/v1/connections/*    ← Manage DB connections
+    ├── /api/v1/access-grants/*  ← Grant/revoke user access to DBs
+    ├── /api/v1/users/*          ← User management
+    ├── /api/v1/query            ← THE CORE — NL → SQL → Results
+    └── /api/v1/chat/*           ← Chat history
+         │
+         ▼
+    [LangGraph AI Agent]
+         │
+         ├── entry_node          → fetch DB credentials from Firestore
+         ├── react_agent_node    → LLM calls tools to write+run SQL
+         │       ├── get_schema_list       (tool)
+         │       ├── get_table_definitions (tool)
+         │       └── execute_sql           (tool)
+         └── output_parser_node → parse JSON response, retry if bad
+              │
+              ▼
+         [Parallel Phase 2]
+              ├── Gemini → numerical_insights (stats per column)
+              └── Gemini → narrative_insights (3 plain-English cards)
+         │
+         ▼
+    Storage: Firebase Firestore  (all data, NO PostgreSQL)
+    Cache:   Redis               (optional, 2-tier fallback)</code></pre>
+<hr />
+<h2 id="full-file-by-file-breakdown">📂 FULL FILE-BY-FILE BREAKDOWN</h2>
+<hr />
+<h3 id="backend-root">🔷 BACKEND ROOT</h3>
+<hr />
+<h4
+id="backendmain.py-application-entry-point"><code>backend/main.py</code>
+— Application Entry Point</h4>
+<p><strong>What it does:</strong> Creates and starts the FastAPI
+app.</p>
+<table>
+<colgroup>
+<col style="width: 21%" />
+<col style="width: 78%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function/Section</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>lifespan(app)</code></td>
+<td>Startup/shutdown hook. Initialises Firebase Admin SDK → Firestore →
+Redis → LangGraph agent in order</td>
+</tr>
+<tr class="even">
+<td><code>limit_request_body()</code></td>
+<td>Middleware: rejects requests &gt; 1 MB (100 MB for doc uploads)</td>
+</tr>
+<tr class="odd">
+<td><code>add_security_headers()</code></td>
+<td>Middleware: adds X-Frame-Options, X-XSS-Protection etc.</td>
+</tr>
+<tr class="even">
+<td><code>add_response_time()</code></td>
+<td>Middleware: adds <code>X-Response-Time</code> header to every
+response</td>
+</tr>
+<tr class="odd">
+<td><code>global_exception_handler()</code></td>
+<td>Catches any unhandled exception and returns 500 JSON</td>
+</tr>
+<tr class="even">
+<td><code>health()</code></td>
+<td>GET <code>/health</code> — returns
+<code>{"status": "ok"}</code></td>
+</tr>
+<tr class="odd">
+<td><code>health_redis()</code></td>
+<td>GET <code>/health/redis</code> — pings Redis and reports
+latency</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Router registration (what URL prefix each
+handles):</strong></p>
+<pre><code>auth_router       → /api/v1/auth/*
+connections_router→ /api/v1/connections/*
+docs_router       → /api/v1/connections/*/docs
+users_router      → /api/v1/users/*
+access_router     → /api/v1/access-grants/*
+query_router      → /api/v1/query, /api/v1/schema/*
+chat_router       → /api/v1/chat/*</code></pre>
+<p><strong>Rate limiting:</strong> Uses <code>slowapi</code> keyed on
+the user’s IP address.</p>
+<hr />
+<h3 id="module-auth">🔷 MODULE: <code>auth/</code></h3>
+<p>This module handles <strong>everything
+authentication-related</strong>.</p>
+<hr />
+<h4
+id="authroutesdependencies.py-fastapi-dependency-injection"><code>auth/routes/dependencies.py</code>
+— FastAPI Dependency Injection</h4>
+<p><strong>Purpose:</strong> Every protected route uses one of these
+dependencies to verify a request.</p>
+<table>
+<colgroup>
+<col style="width: 19%" />
+<col style="width: 80%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>get_current_user()</code></td>
+<td>Extracts Bearer token from <code>Authorization</code> header → calls
+<code>verify_request_token()</code> → returns user dict</td>
+</tr>
+<tr class="even">
+<td><code>require_role(*roles)</code></td>
+<td>Exact whitelist check — user’s role must be in the list</td>
+</tr>
+<tr class="odd">
+<td><code>require_min_role(role)</code></td>
+<td>Hierarchy check — user’s level must be ≥ the given role</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Role hierarchy (numbers are levels):</strong></p>
+<pre><code>analyst    (0) — SELECT only, assigned DBs only
+power_user (1) — SELECT + write, assigned DBs
+db_manager (2) — manages connections &amp; grants
+admin      (3) — full control</code></pre>
+<p><strong>Shortcut aliases used in routes:</strong></p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>require_admin      <span class="op">=</span> require_role(<span class="st">&quot;admin&quot;</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>require_db_manager <span class="op">=</span> require_min_role(<span class="st">&quot;db_manager&quot;</span>)  <span class="co"># db_manager + admin</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>require_power_user <span class="op">=</span> require_min_role(<span class="st">&quot;power_user&quot;</span>)  <span class="co"># power_user + db_manager + admin</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>require_analyst    <span class="op">=</span> require_min_role(<span class="st">&quot;analyst&quot;</span>)     <span class="co"># all authenticated users</span></span></code></pre></div>
+<p><strong>Auth flow per request:</strong></p>
+<ol type="1">
+<li>Extract <code>Authorization: Bearer &lt;token&gt;</code> header</li>
+<li>Call <code>verify_request_token()</code> in a thread (Firebase SDK
+is sync)</li>
+<li>Redis cache check → return immediately if hit (55-min TTL)</li>
+<li>Firestore user check (cache miss only)</li>
+<li>Firestore session check (cache miss only)</li>
+</ol>
+<hr />
+<h4
+id="authservicesauth_service.py-auth-business-logic"><code>auth/services/auth_service.py</code>
+— Auth Business Logic</h4>
+<table>
+<colgroup>
+<col style="width: 22%" />
+<col style="width: 77%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>login(id_token, device_info, ip)</code></td>
+<td>Verifies Firebase ID token → upserts user in Firestore → creates
+custom token with role claims → creates session doc → returns
+<code>{custom_token, session_id, user}</code></td>
+</tr>
+<tr class="even">
+<td><code>signup(id_token, display_name, org_name, ...)</code></td>
+<td>Registers a new admin user; creates Organization + user doc in
+Firestore; returns same shape as <code>login()</code></td>
+</tr>
+<tr class="odd">
+<td><code>check_token_active(id_token)</code></td>
+<td>Checks if token is valid + session exists. Redis fast-path →
+Firestore fallback</td>
+</tr>
+<tr class="even">
+<td><code>logout(uid, session_id)</code></td>
+<td>Revokes specific Firestore session + Firebase refresh tokens</td>
+</tr>
+<tr class="odd">
+<td><code>logout_all(uid)</code></td>
+<td>Revokes ALL sessions + Firebase tokens</td>
+</tr>
+<tr class="even">
+<td><code>update_profile(uid, display_name)</code></td>
+<td>Updates display name in Firestore + busts Redis cache</td>
+</tr>
+<tr class="odd">
+<td><code>revoke_single_session(uid, session_id)</code></td>
+<td>Revokes one session without affecting other devices; invalidates
+token cache immediately</td>
+</tr>
+<tr class="even">
+<td><code>get_all_sessions(uid)</code></td>
+<td>Returns all active sessions for a user</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key design decisions:</strong></p>
+<ul>
+<li>No PostgreSQL — all auth data is in Firestore</li>
+<li><code>login()</code> returns a <strong>custom token</strong> (not
+the raw Firebase token). The frontend calls
+<code>signInWithCustomToken(token)</code> — this embeds
+<code>role</code> and <code>org_id</code> claims so every subsequent
+request carries them.</li>
+<li>Firebase tokens live 1 hour, but our session can be up to 8 hours.
+Redis caches the decoded token for 55 minutes.</li>
+</ul>
+<hr />
+<h3 id="module-connections">🔷 MODULE: <code>connections/</code></h3>
+<p>Manages database connection credentials. Password stored encrypted in
+Firestore.</p>
+<hr />
+<h4
+id="connectionsservicesconnection_service.py"><code>connections/services/connection_service.py</code></h4>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 69%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>create_connection(body, uid, org_id)</code></td>
+<td>Encrypts password, writes to Firestore with <code>org_id</code> for
+tenant isolation; invalidates list cache</td>
+</tr>
+<tr class="even">
+<td><code>get_connection_by_id(id, org_id)</code></td>
+<td>Redis → Firestore. Validates <code>org_id</code> to prevent
+cross-tenant access. Never returns <code>password_enc</code></td>
+</tr>
+<tr class="odd">
+<td><code>get_connection_with_password(id)</code></td>
+<td>Internal-only. Fetches from Firestore + decrypts password.
+<strong>NOT cached</strong> — passwords never go in Redis</td>
+</tr>
+<tr class="even">
+<td><code>list_connections(org_id, active_only)</code></td>
+<td>Lists all connections scoped to one org. Redis → Firestore</td>
+</tr>
+<tr class="odd">
+<td><code>update_connection(id, body, org_id)</code></td>
+<td>Partial update. Re-encrypts password if provided. Validates org
+ownership</td>
+</tr>
+<tr class="even">
+<td><code>delete_connection(id, org_id)</code></td>
+<td>Hard delete from Firestore. Validates org ownership</td>
+</tr>
+<tr class="odd">
+<td><code>test_connection(id, org_id)</code></td>
+<td>Executes <code>SELECT 1</code> via SQLAlchemy to confirm
+connectivity. Updates <code>last_tested_at</code> in Firestore</td>
+</tr>
+<tr class="even">
+<td><code>set_connection_active(id, is_active, org_id)</code></td>
+<td>Enables/disables a connection</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Security design:</strong></p>
+<ul>
+<li><code>_safe_connection()</code> strips <code>password_enc</code>
+before any response</li>
+<li>Passwords are encrypted with AES/Fernet
+(<code>connections/core/encryption.py</code>)</li>
+<li>Org boundary is validated on every read/write to prevent tenant data
+leakage</li>
+</ul>
+<hr />
+<h3 id="module-access">🔷 MODULE: <code>access/</code></h3>
+<p>Controls which user can query which database, and with what
+permission.</p>
+<hr />
+<h4
+id="accessservicesaccess_service.py"><code>access/services/access_service.py</code></h4>
+<p><strong>Firestore collection:</strong>
+<code>user_db_access/{access_id}</code></p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 74%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>create_access_grant(body, uid, org_id)</code></td>
+<td>Grants a user access to a DB. Validates org membership for both the
+user AND the connection. Blocks duplicates</td>
+</tr>
+<tr class="even">
+<td><code>get_grant_by_id(access_id)</code></td>
+<td>Fetch single grant. Redis → Firestore</td>
+</tr>
+<tr class="odd">
+<td><code>list_grants_by_user(uid, active_only)</code></td>
+<td>All grants for a user. Redis → Firestore</td>
+</tr>
+<tr class="even">
+<td><code>list_grants_by_connection(conn_id)</code></td>
+<td>All users who can query a DB. Not cached</td>
+</tr>
+<tr class="odd">
+<td><code>update_access_grant(id, body)</code></td>
+<td>Changes permission, expiry, or note. Invalidates cache</td>
+</tr>
+<tr class="even">
+<td><code>revoke_access_grant(id, uid)</code></td>
+<td><strong>Soft delete</strong> — sets <code>is_active=False</code> and
+<code>revoked_at</code>. Cache invalidated IMMEDIATELY (security
+critical)</td>
+</tr>
+<tr class="odd">
+<td><code>verify_access(uid, conn_id)</code></td>
+<td>THE HOTTEST PATH. Called before every single query. Redis →
+Firestore. Returns <code>(True, "ok")</code> or
+<code>(False, reason)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>verify_access()</code> return codes:</strong></p>
+<pre><code>(True,  &quot;ok&quot;)                  → access allowed
+(False, &quot;no_grant&quot;)            → no grant exists at all
+(False, &quot;revoked&quot;)             → grant.is_active == False
+(False, &quot;expired&quot;)             → grant.expires_at is in the past
+(False, &quot;write_not_permitted&quot;) → write required but only &quot;read&quot; granted</code></pre>
+<p><strong>Expiry check (<code>_is_expired()</code>):</strong> Compares
+<code>expires_at</code> (ISO string on the grant doc) against the
+current UTC time.</p>
+<hr />
+<h3 id="module-ai_agent-the-core-engine">🔷 MODULE:
+<code>ai_agent/</code> — THE CORE ENGINE</h3>
+<p>This is the most important module. It converts natural language to
+SQL using a <strong>LangGraph state machine</strong>.</p>
+<hr />
+<h4 id="ai_agentstate.py-shared-state"><code>ai_agent/state.py</code> —
+Shared State</h4>
+<p><code>AgentState</code> is a <code>TypedDict</code> passed between
+all nodes in the graph:</p>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 25%" />
+<col style="width: 44%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Set by</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>natural_language_query</code></td>
+<td>Route handler</td>
+<td>User’s question</td>
+</tr>
+<tr class="even">
+<td><code>connection_id</code></td>
+<td>Route handler</td>
+<td>Which database</td>
+</tr>
+<tr class="odd">
+<td><code>firebase_uid</code></td>
+<td>Route handler</td>
+<td>Who is querying</td>
+</tr>
+<tr class="even">
+<td><code>user_role</code></td>
+<td>Route handler</td>
+<td>RBAC role</td>
+</tr>
+<tr class="odd">
+<td><code>chat_id</code></td>
+<td>Route handler</td>
+<td>Conversation ID</td>
+</tr>
+<tr class="even">
+<td><code>chat_history</code></td>
+<td>Route handler</td>
+<td>Previous messages for context</td>
+</tr>
+<tr class="odd">
+<td><code>db_connection_string</code></td>
+<td><code>entry_node</code></td>
+<td>Built SQLAlchemy URL</td>
+</tr>
+<tr class="even">
+<td><code>db_dialect</code></td>
+<td><code>entry_node</code></td>
+<td>mysql / postgresql / mssql / oracle</td>
+</tr>
+<tr class="odd">
+<td><code>agent_output</code></td>
+<td><code>react_agent_node</code></td>
+<td>Raw JSON string from LLM</td>
+</tr>
+<tr class="even">
+<td><code>response_type</code></td>
+<td><code>output_parser_node</code></td>
+<td>“results” or “error”</td>
+</tr>
+<tr class="odd">
+<td><code>final_response</code></td>
+<td><code>output_parser_node</code></td>
+<td>Structured dict for the frontend</td>
+</tr>
+<tr class="even">
+<td><code>retry_count</code></td>
+<td><code>output_parser_node</code></td>
+<td>Number of retries so far</td>
+</tr>
+<tr class="odd">
+<td><code>error_message</code></td>
+<td>Any node</td>
+<td>Set on failure to route to END</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4
+id="ai_agentgraph.py-langgraph-outer-graph"><code>ai_agent/graph.py</code>
+— LangGraph Outer Graph</h4>
+<p><strong>The graph flow:</strong></p>
+<pre><code>START
+  → entry_node
+      ↓ success           ↓ error
+  react_agent_node     →  END
+      ↓ success           ↓ error
+  output_parser_node   →  END
+      ↓ success  ↓ retry (max 3 times)
+      END      react_agent_node</code></pre>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 84%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>build_agent_graph()</code></td>
+<td>Assembles the <code>StateGraph</code> with 3 nodes + conditional
+edges</td>
+</tr>
+<tr class="even">
+<td><code>get_agent()</code></td>
+<td>Singleton — compiles the graph once, reuses it forever</td>
+</tr>
+<tr class="odd">
+<td><code>node_react_agent(state)</code></td>
+<td>Runs the inner ReAct agent. Builds tool list, builds message history
+with chat context, calls <code>agent.ainvoke()</code>.
+<strong>Caches</strong> the compiled inner agent per
+<code>(connection_id, user_role)</code> pair</td>
+</tr>
+<tr class="even">
+<td><code>route_after_entry(state)</code></td>
+<td>If <code>error_message</code> is set → END, else →
+<code>react_agent</code></td>
+</tr>
+<tr class="odd">
+<td><code>route_after_react_agent(state)</code></td>
+<td>If <code>error_message</code> → END, else →
+<code>output_parser</code></td>
+</tr>
+<tr class="even">
+<td><code>route_after_output_parser(state)</code></td>
+<td>If parse succeeded → END; if <code>retry_count &gt; 0</code> and no
+final response → loop back to <code>react_agent</code></td>
+</tr>
+<tr class="odd">
+<td><code>run_agent(...)</code></td>
+<td>Public entry point. Runs guards → invokes graph → runs Phase 2
+(parallel Gemini insights)</td>
+</tr>
+<tr class="even">
+<td><code>run_agent_stream(...)</code></td>
+<td>Streaming version using <code>astream_events()</code>. Yields SSE
+progress events and finally the result</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Two safety guards in <code>run_agent()</code>:</strong></p>
+<ol type="1">
+<li><strong>Write-intent pre-flight:</strong> Regex checks if a
+read-only <code>analyst</code> is asking for INSERT/UPDATE/DELETE —
+blocks immediately without calling the LLM</li>
+<li><strong>In-flight deduplication:</strong> Prevents the same user
+from having two concurrent queries running (saves LLM tokens, prevents
+errors)</li>
+</ol>
+<p><strong>Phase 2 (parallel insights):</strong> After
+<code>run_agent</code> gets the data rows back, it calls two Gemini
+functions in <strong>parallel</strong> using
+<code>asyncio.gather()</code>:</p>
+<ul>
+<li><code>_generate_numerical_insights()</code> — column stats (min,
+max, avg, sum, categories)</li>
+<li><code>_generate_narrative_insights()</code> — 3 business sentences
+(key_finding, business_insight, analyst_note)</li>
+</ul>
+<hr />
+<h4
+id="ai_agentnodesentry.py-entry-node"><code>ai_agent/nodes/entry.py</code>
+— Entry Node</h4>
+<p><strong>Responsibilities (runs before any LLM call):</strong></p>
+<ol type="1">
+<li><strong>Access grant check</strong> — calls
+<code>verify_access()</code>. Skipped for
+<code>admin</code>/<code>db_manager</code> roles.</li>
+<li><strong>Fetch DB credentials</strong> — calls
+<code>get_connection_with_password()</code> from Firestore with
+decrypted password</li>
+<li><strong>Build SQLAlchemy URL</strong> — maps <code>db_type</code> to
+driver string (e.g., <code>mysql+pymysql://...</code>)</li>
+<li><strong>Detect dialect</strong> — from URL prefix
+(mysql/postgresql/mssql/oracle)</li>
+</ol>
+<table>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 82%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>_build_connection_string(conn)</code></td>
+<td>Maps
+<code>{db_type, host, port, database_name, username, password}</code> to
+a SQLAlchemy URL. Calls <code>quote_plus()</code> to safely encode
+special chars in passwords</td>
+</tr>
+<tr class="even">
+<td><code>node_entry(state)</code></td>
+<td>Main entry node function. Returns updated state with
+<code>db_connection_string</code>, <code>db_dialect</code>,
+<code>db_type</code> — or sets <code>error_message</code> and routes to
+END</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Supported DB types → SQLAlchemy drivers:</strong></p>
+<pre><code>mysql     → mysql+pymysql://
+mariadb   → mysql+pymysql://
+postgresql→ postgresql+psycopg2://
+postgres  → postgresql+psycopg2://
+mssql     → mssql+pyodbc://
+oracle    → oracle+oracledb://</code></pre>
+<hr />
+<h4
+id="ai_agentnodesoutput_parser.py-output-parser-node"><code>ai_agent/nodes/output_parser.py</code>
+— Output Parser Node</h4>
+<p><strong>Purpose:</strong> Parses the LLM’s raw string output into a
+structured <code>final_response</code> dict.</p>
+<table>
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 73%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>_extract_json(text)</code></td>
+<td>Strips markdown code fences (<code>```json ```</code>) if the LLM
+wrapped its JSON; falls back to regex to find the JSON object</td>
+</tr>
+<tr class="even">
+<td><code>_serialize(value)</code></td>
+<td>Converts Python types to JSON-safe: <code>datetime</code> → ISO
+string, <code>Decimal</code> → float, <code>bytes</code> → UTF-8
+string</td>
+</tr>
+<tr class="odd">
+<td><code>_fetch_full_data(conn_str, sql)</code></td>
+<td>Re-executes SQL synchronously to get ALL rows (up to 10,000). Called
+via <code>asyncio.to_thread</code></td>
+</tr>
+<tr class="even">
+<td><code>_generate_rich_summary(data, insights, llm_summary)</code></td>
+<td>Builds a data-driven summary string from computed stats (used as
+fallback)</td>
+</tr>
+<tr class="odd">
+<td><code>_generate_numerical_insights(question, data)</code></td>
+<td>Calls Gemini to compute column statistics. Falls back to
+<code>{total_records, aggregations: {}}</code> if Gemini fails</td>
+</tr>
+<tr class="even">
+<td><code>_generate_narrative_insights(question, data)</code></td>
+<td>Calls Gemini to produce 3 business insight sentences</td>
+</tr>
+<tr class="odd">
+<td><code>node_output_parser(state)</code></td>
+<td>Parses <code>agent_output</code> → if success: sets
+<code>response_type="results"</code>. If fail: increments
+<code>retry_count</code> (loops back) or returns error after max
+retries</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Full data cache trick:</strong></p>
+<ul>
+<li>The <code>execute_sql</code> tool fetches ALL rows but only sends 3
+rows preview to the LLM (to save tokens)</li>
+<li>The full rows are stored in <code>_full_result_cache</code>
+(in-memory dict keyed by MD5 of conn+sql)</li>
+<li>The <code>output_parser</code> pops from this cache to get the full
+dataset without re-executing SQL</li>
+</ul>
+<p><strong>Conversational response detection:</strong></p>
+<ul>
+<li>If <code>sql_query</code> is empty AND <code>data</code> is
+<code>[]</code> AND cache miss → it’s a conversational response (e.g.,
+“explain the query”)</li>
+<li>In this case, the parser does NOT re-execute SQL and preserves the
+empty data intentionally</li>
+</ul>
+<hr />
+<h4
+id="ai_agenttoolsschema_tools.py-schema-inspection-tools"><code>ai_agent/tools/schema_tools.py</code>
+— Schema Inspection Tools</h4>
+<p>Two LangChain <code>@tool</code> functions the LLM can call:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 18%" />
+<col style="width: 48%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Tool</th>
+<th>Args</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>get_schema_list()</code></td>
+<td>none</td>
+<td>Returns all table names and schemas in the DB as JSON array</td>
+</tr>
+<tr class="even">
+<td><code>get_table_definitions(table_names, schema_name)</code></td>
+<td>comma-separated table names</td>
+<td>Returns column definitions, data types, PKs, FKs, and sample enum
+values</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Two-tier cache strategy (fastest first):</strong></p>
+<pre><code>1. Redis   (~1ms)   — TTL 1 hour
+2. Firestore (~80ms) — source of truth
+3. Live DB  (~?ms)  — on full cache miss, writes back to both caches</code></pre>
+<p><strong>Firestore cache paths:</strong></p>
+<pre><code>database_connections/{id}/schema_cache/_tables          → list of tables
+database_connections/{id}/schema_cache/{schema}__{table} → column definitions</code></pre>
+<table>
+<colgroup>
+<col style="width: 19%" />
+<col style="width: 80%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>detect_dialect(conn_str)</code></td>
+<td>Returns
+<code>mysql</code>/<code>postgresql</code>/<code>mssql</code>/<code>oracle</code>
+from URL prefix</td>
+</tr>
+<tr class="even">
+<td><code>_get_engine(conn_str)</code></td>
+<td>Returns cached SQLAlchemy engine (pool reuse — avoids reconnect
+overhead)</td>
+</tr>
+<tr class="odd">
+<td><code>_is_fresh(cached_at_iso)</code></td>
+<td>Returns <code>True</code> if the cache entry is &lt; 1 hour old</td>
+</tr>
+<tr class="even">
+<td><code>_sample_enum_values(...)</code></td>
+<td>Runs <code>SELECT DISTINCT</code> on string columns. If ≤ 20
+distinct values, returns them as <code>sample_values</code>. This
+prevents the LLM from guessing wrong WHERE clause values</td>
+</tr>
+<tr class="odd">
+<td><code>_enrich_schema_list(tables, conn_id)</code></td>
+<td>Merges business document descriptions into the table list</td>
+</tr>
+<tr class="even">
+<td><code>_enrich_table_def(columns, ...)</code></td>
+<td>Merges business doc context and column descriptions</td>
+</tr>
+<tr class="odd">
+<td><code>invalidate_schema_cache(conn_id)</code></td>
+<td>Deletes all Redis + Firestore cache entries for a connection (called
+by schema refresh API)</td>
+</tr>
+<tr class="even">
+<td><code>warm_schema_cache(conn_id)</code></td>
+<td>Background task: pre-populates the whole schema cache for a
+connection — so first user query hits cache</td>
+</tr>
+<tr class="odd">
+<td><code>make_schema_tools(conn_str, conn_id)</code></td>
+<td>Factory: returns
+<code>[get_schema_list, get_table_definitions]</code> bound to the
+connection</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Enum sampling:</strong> For
+<code>VARCHAR</code>/<code>TEXT</code>/<code>CHAR</code> columns that
+have ≤ 20 distinct values, the tool runs <code>SELECT DISTINCT</code>
+and returns real stored values. Example: column <code>status</code>
+might return <code>["Active", "On Leave", "Terminated"]</code>. The
+system prompt then tells the LLM: <em>you MUST use ONLY these exact
+values in WHERE clauses</em>.</p>
+<hr />
+<h4
+id="ai_agenttoolsquery_tools.py-sql-execution-tool"><code>ai_agent/tools/query_tools.py</code>
+— SQL Execution Tool</h4>
+<p>One LangChain <code>@tool</code>:</p>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 12%" />
+<col style="width: 56%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Tool</th>
+<th>Args</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>execute_sql(sql_query)</code></td>
+<td>SQL string</td>
+<td>Validates → executes → returns JSON with rows</td>
+</tr>
+</tbody>
+</table>
+<p><strong>4-layer safety pipeline (in order):</strong></p>
+<ol type="1">
+<li><strong>Injection guard</strong> (<code>_check_injection</code>) —
+regex-blocks: <code>; statement</code>, <code>xp_cmdshell</code>,
+<code>EXEC(</code>, <code>INTO OUTFILE</code>, <code>SLEEP()</code>,
+<code>pg_sleep()</code>, <code>WAITFOR DELAY</code>,
+<code>BENCHMARK()</code>, and more</li>
+<li><strong>DDL guard</strong> — blocks: <code>DROP</code>,
+<code>TRUNCATE</code>, <code>CREATE</code>, <code>ALTER</code>,
+<code>RENAME</code>, <code>GRANT</code>, <code>REVOKE</code></li>
+<li><strong>RBAC write check</strong> — if query is
+INSERT/UPDATE/DELETE/MERGE, user’s role must be in
+<code>{admin, power_user, db_manager}</code></li>
+<li><strong>Auto-LIMIT</strong> — SELECT queries without a LIMIT get
+<code>LIMIT 1000</code> appended automatically</li>
+</ol>
+<p><strong>Result handling:</strong></p>
+<ul>
+<li>Fetches up to 10,000 rows</li>
+<li>Sends only <strong>3 rows preview</strong> back to the LLM (saves
+tokens)</li>
+<li>Caches the <strong>full result</strong> in
+<code>_full_result_cache</code> (in-memory, keyed by MD5)</li>
+<li>The <code>output_parser</code> picks up the full result from cache →
+avoids a second DB roundtrip</li>
+</ul>
+<hr />
+<h4
+id="ai_agentprompts.py-system-prompt-builder"><code>ai_agent/prompts.py</code>
+— System Prompt Builder</h4>
+<table>
+<colgroup>
+<col style="width: 39%" />
+<col style="width: 60%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>build_system_prompt(dialect, user_role)</code></td>
+<td>Builds the complete system prompt injected into the ReAct agent</td>
+</tr>
+</tbody>
+</table>
+<p><strong>System prompt sections:</strong></p>
+<ol type="1">
+<li><strong>Identity</strong> — “You are a Database Query
+Assistant…”</li>
+<li><strong>Tools Available</strong> — explains
+<code>get_schema_list</code>, <code>get_table_definitions</code>,
+<code>execute_sql</code></li>
+<li><strong>Execution Workflow</strong> — Step 1-5 mandatory order</li>
+<li><strong>Response Format</strong> — exact JSON schema the LLM must
+return</li>
+<li><strong>Rules</strong> — never guess column names, always use
+<code>sample_values</code>, never skip execute_sql, etc.</li>
+<li><strong>User Permissions</strong> (appended based on role) — analyst
+gets read-only instructions; power_user gets write-with-confirmation
+instructions</li>
+</ol>
+<p><strong>Key rules enforced in the prompt:</strong></p>
+<ul>
+<li>Always call <code>get_schema_list</code> first</li>
+<li>Always call <code>get_table_definitions</code> before querying</li>
+<li>NEVER fabricate data — <code>data</code> array must come from
+<code>execute_sql</code></li>
+<li>For write operations: show query to user and wait for
+<code>yes</code>/<code>confirm</code> before executing</li>
+<li>For conversational questions: return <code>data: []</code> without
+calling any tools</li>
+<li>Out-of-scope queries (server config, env vars, etc.) → reject
+immediately</li>
+</ul>
+<hr />
+<h4
+id="ai_agentproviders-llm-provider-factory"><code>ai_agent/providers/</code>
+— LLM Provider Factory</h4>
+<table>
+<thead>
+<tr class="header">
+<th>File</th>
+<th>Provider</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>openrouter.py</code></td>
+<td>OpenRouter (aggregates many models)</td>
+</tr>
+<tr class="even">
+<td><code>groq.py</code></td>
+<td>Groq (fast inference)</td>
+</tr>
+<tr class="odd">
+<td><code>gemini.py</code></td>
+<td>Google Gemini</td>
+</tr>
+<tr class="even">
+<td><code>ollama.py</code></td>
+<td>Ollama (local models)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Priority order:</strong>
+<code>openrouter → groq → gemini → ollama</code><br />
+Override with <code>LLM_PROVIDER</code> env var.</p>
+<table>
+<colgroup>
+<col style="width: 18%" />
+<col style="width: 81%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>get_llm(preferred)</code></td>
+<td>Returns the singleton LangChain <code>ChatModel</code>. Tries each
+provider in order until one works</td>
+</tr>
+<tr class="even">
+<td><code>LLMDebugLogHandler</code></td>
+<td>Async callback that logs every message sent to the LLM (for
+debugging)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4
+id="ai_agentserviceschat_service.py-chat-history-storage"><code>ai_agent/services/chat_service.py</code>
+— Chat History Storage</h4>
+<p><strong>Firestore structure:</strong></p>
+<pre><code>users/{uid}/workspaces/{connection_id}/
+    chats/{chat_id}/
+        messages/u_0001   ← user message (turn 1)
+        messages/a_0001   ← assistant message (turn 1)
+        messages/u_0002   ← user message (turn 2)
+        messages/a_0002   ← assistant message (turn 2)</code></pre>
+<table>
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 73%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>ensure_workspace(uid, conn_id)</code></td>
+<td>Creates workspace doc if it doesn’t exist</td>
+</tr>
+<tr class="even">
+<td><code>create_chat(uid, conn_id, first_message)</code></td>
+<td>Creates a new chat doc with UUID. Title = first 60 chars of
+first_message</td>
+</tr>
+<tr class="odd">
+<td><code>get_or_create_chat(uid, conn_id, chat_id, msg)</code></td>
+<td>Returns existing <code>chat_id</code> or creates a new chat</td>
+</tr>
+<tr class="even">
+<td><code>get_messages(uid, conn_id, chat_id, limit=12)</code></td>
+<td>Fetches last 12 messages (6 turns) ordered by <code>seq</code>
+field</td>
+</tr>
+<tr class="odd">
+<td><code>append_messages(uid, conn_id, chat_id, ...)</code></td>
+<td><strong>Atomic transaction</strong>: increments
+<code>turn_count</code> on chat doc + writes user message + assistant
+message in one Firestore transaction</td>
+</tr>
+<tr class="even">
+<td><code>_detect_query_type(sql)</code></td>
+<td>Returns <code>SELECT</code>, <code>INSERT</code>,
+<code>UPDATE</code>, <code>DELETE</code>, <code>CONVERSATIONAL</code>,
+or <code>OTHER</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Message IDs are turn-prefixed:</strong></p>
+<ul>
+<li>User messages: <code>u_0001</code>, <code>u_0002</code>, …</li>
+<li>Assistant messages: <code>a_0001</code>, <code>a_0002</code>, …</li>
+<li>Ordering is by the integer <code>seq</code> field
+(<code>user_seq = turn*2 - 1</code>, <code>ai_seq = turn*2</code>)</li>
+</ul>
+<hr />
+<h4
+id="ai_agentsuggestions.py-query-suggestion-generator"><code>ai_agent/suggestions.py</code>
+— Query Suggestion Generator</h4>
+<table>
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 83%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>_get_table_names(conn_id)</code></td>
+<td>Gets table list from Redis → Firestore schema cache</td>
+</tr>
+<tr class="even">
+<td><code>get_suggestions(conn_id, count=6)</code></td>
+<td>Returns N natural-language query suggestions. Redis cache (24h TTL)
+→ LLM call. LLM gets table names and generates varied questions (counts,
+filters, trends, aggregations)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="module-core">🔷 MODULE: <code>core/</code></h3>
+<hr />
+<h4
+id="coreredis_client.py-redis-client"><code>core/redis_client.py</code>
+— Redis Client</h4>
+<p><strong>Why no singleton pool:</strong> On Windows with
+<code>uvicorn --reload</code>, the event loop is replaced — any
+persistent connection holds a reference to the OLD loop →
+<code>RuntimeError</code>. Solution: create a fresh
+<code>redis.asyncio.Redis</code> per call.</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 74%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>init_redis()</code></td>
+<td>Startup check — pings Redis at startup to verify connectivity</td>
+</tr>
+<tr class="even">
+<td><code>close_redis()</code></td>
+<td>Shutdown hook — no-op since no persistent pool</td>
+</tr>
+<tr class="odd">
+<td><code>redis_get(key)</code></td>
+<td>JSON-decode a cached value. Returns <code>None</code> on miss,
+error, or 3-second timeout</td>
+</tr>
+<tr class="even">
+<td><code>redis_set(key, value, ttl)</code></td>
+<td>JSON-encode and SET with TTL. Returns <code>True</code> on
+success</td>
+</tr>
+<tr class="odd">
+<td><code>redis_delete(*keys)</code></td>
+<td>Delete one or more exact keys</td>
+</tr>
+<tr class="even">
+<td><code>redis_delete_pattern(pattern)</code></td>
+<td>Delete all keys matching a glob pattern using <code>SCAN</code>
+(production-safe — won’t block Redis)</td>
+</tr>
+<tr class="odd">
+<td><code>redis_health()</code></td>
+<td>Ping Redis and return a status dict with latency_ms</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4
+id="corecache_keys.py-cache-key-registry"><code>core/cache_keys.py</code>
+— Cache Key Registry</h4>
+<p><strong>Central file defining ALL Redis keys and TTLs:</strong></p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 10%" />
+<col style="width: 40%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Key pattern</th>
+<th>TTL</th>
+<th>What it stores</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>token:{uid}</code></td>
+<td>55 min</td>
+<td>Decoded Firebase token claims</td>
+</tr>
+<tr class="even">
+<td><code>user:{uid}</code></td>
+<td>5 min</td>
+<td>User profile dict</td>
+</tr>
+<tr class="odd">
+<td><code>users:list:{org_id}</code></td>
+<td>2 min</td>
+<td>All users in an org</td>
+</tr>
+<tr class="even">
+<td><code>connection:{id}</code></td>
+<td>2 min</td>
+<td>Single connection doc</td>
+</tr>
+<tr class="odd">
+<td><code>connections:list:{org_id}</code></td>
+<td>2 min</td>
+<td>All connections for an org</td>
+</tr>
+<tr class="even">
+<td><code>access:{uid}:{conn_id}</code></td>
+<td>2 min</td>
+<td>Access grant for verify_access()</td>
+</tr>
+<tr class="odd">
+<td><code>access:user:{uid}</code></td>
+<td>2 min</td>
+<td>All grants for a user</td>
+</tr>
+<tr class="even">
+<td><code>schema:{conn_id}:_tables</code></td>
+<td>1 hour</td>
+<td>Table list from schema tools</td>
+</tr>
+<tr class="odd">
+<td><code>schema:{conn_id}:{schema}__{table}</code></td>
+<td>1 hour</td>
+<td>Column definitions</td>
+</tr>
+<tr class="even">
+<td><code>suggestions:{conn_id}</code></td>
+<td>24 hours</td>
+<td>AI-generated query suggestions</td>
+</tr>
+<tr class="odd">
+<td><code>history:{uid}</code></td>
+<td>2 min</td>
+<td>Query history list</td>
+</tr>
+<tr class="even">
+<td><code>docs:index:{conn_id}</code></td>
+<td>1 hour</td>
+<td>Business doc summary index</td>
+</tr>
+<tr class="odd">
+<td><code>docs:table:{conn_id}:{schema}__{table}</code></td>
+<td>1 hour</td>
+<td>Full table business context</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="frontend">🔷 FRONTEND</h3>
+<hr />
+<h4 id="frontendsrcmain.tsx"><code>frontend/src/main.tsx</code></h4>
+<p>Bootstraps the React app: wraps <code>&lt;App&gt;</code> in
+<code>&lt;AuthProvider&gt;</code> and
+<code>&lt;RouterProvider&gt;</code>.</p>
+<hr />
+<h4
+id="frontendsrcapproutes.tsx-routing"><code>frontend/src/app/routes.tsx</code>
+— Routing</h4>
+<p>Uses <code>createHashRouter</code> (hash-based for Electron/desktop
+compatibility).</p>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 22%" />
+<col style="width: 61%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Route</th>
+<th>Component</th>
+<th>Access</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>/login</code></td>
+<td><code>Login</code></td>
+<td>Public</td>
+</tr>
+<tr class="even">
+<td><code>/signup</code></td>
+<td><code>Signup</code></td>
+<td>Public</td>
+</tr>
+<tr class="odd">
+<td><code>/</code></td>
+<td><code>Dashboard</code></td>
+<td>Protected (any auth user)</td>
+</tr>
+<tr class="even">
+<td><code>/query</code></td>
+<td><code>QueryInterface</code></td>
+<td>Protected</td>
+</tr>
+<tr class="odd">
+<td><code>/history</code></td>
+<td><code>History</code></td>
+<td>Protected</td>
+</tr>
+<tr class="even">
+<td><code>/schema</code></td>
+<td><code>SchemaBrowser</code></td>
+<td>Protected</td>
+</tr>
+<tr class="odd">
+<td><code>/settings</code></td>
+<td><code>Settings</code></td>
+<td>Protected</td>
+</tr>
+<tr class="even">
+<td><code>/reports</code></td>
+<td><code>Reports</code></td>
+<td>Protected</td>
+</tr>
+<tr class="odd">
+<td><code>/admin</code></td>
+<td><code>AdminPanel</code></td>
+<td>Protected + requires <code>db_manager</code> or higher</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4
+id="frontendsrccontextauthcontext.tsx-global-auth-state"><code>frontend/src/context/AuthContext.tsx</code>
+— Global Auth State</h4>
+<p><strong>Boot sequence (runs on every page load/refresh):</strong></p>
+<ol type="1">
+<li><code>loading = true</code> — spinner shown, NO redirect yet</li>
+<li>Firebase <code>onAuthStateChanged</code> fires (0–2s)</li>
+<li>If <code>fbUser</code> exists → check backend session via
+<code>GET /me</code> → set user</li>
+<li>If <code>fbUser</code> is null → set <code>user = null</code></li>
+<li><code>loading = false</code> → ProtectedRoute now decides: allow or
+redirect to <code>/login</code></li>
+</ol>
+<table>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 86%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>loading</code></td>
+<td>TRUE during boot — ProtectedRoute MUST NOT redirect while this is
+true</td>
+</tr>
+<tr class="even">
+<td><code>authReady</code></td>
+<td>TRUE after first onAuthStateChanged cycle — gate API calls behind
+this</td>
+</tr>
+<tr class="odd">
+<td><code>user</code></td>
+<td>Full user profile from Firestore. <code>null</code> = not logged
+in</td>
+</tr>
+<tr class="even">
+<td><code>error</code></td>
+<td>Last login error string</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Role helper booleans (computed from
+<code>user.role</code>):</strong></p>
+<pre><code>isAdmin      → role === &quot;admin&quot;
+isDbManager  → role === &quot;admin&quot; OR &quot;db_manager&quot;
+isPowerUser  → role === &quot;admin&quot; OR &quot;db_manager&quot; OR &quot;power_user&quot;
+isAnalyst    → any logged-in user</code></pre>
+<hr />
+<h4
+id="frontendsrclibqueryservice.ts-query-api-service"><code>frontend/src/lib/queryService.ts</code>
+— Query API Service</h4>
+<p><strong>Two modes of query execution:</strong></p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 16%" />
+<col style="width: 57%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Endpoint</th>
+<th>How it works</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>executeQuery(payload)</code></td>
+<td><code>POST /api/v1/query</code></td>
+<td>Standard request-response. Waits for full result</td>
+</tr>
+<tr class="even">
+<td><code>executeQueryStream(payload, callbacks)</code></td>
+<td><code>POST /api/v1/query/stream</code></td>
+<td>SSE streaming. Fires <code>onProgress</code> events while agent
+works, then <code>onResult</code> and <code>onInsights</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>SSE event types (streaming):</strong></p>
+<pre><code>event: progress  → { stage, message }  (e.g., &quot;Inspecting table structure...&quot;)
+event: result    → full QueryResponse with data
+event: insights  → { numerical_insights, narrative_insights } (Phase 2, after result)
+event: error     → { message }</code></pre>
+<p><strong>Other functions:</strong> | Function | Endpoint | What it
+does | |—|—|—| | <code>getSuggestions(connId)</code> |
+<code>GET /api/v1/query/suggestions</code> | Fetches AI-generated query
+suggestions | | <code>generateInsights(data, question)</code> |
+<code>POST /api/v1/query/insights</code> | On-demand insights for
+existing data | | <code>getQueryHistory(params)</code> |
+<code>GET /api/v1/query/history</code> | Paginated query history |</p>
+<hr />
+<h4
+id="frontendsrclibauthservice.ts"><code>frontend/src/lib/authService.ts</code></h4>
+<p>Handles Firebase Auth calls + backend session management:</p>
+<ul>
+<li><code>login(email, password)</code> → signInWithEmailAndPassword →
+POST <code>/api/v1/auth/login</code> → signInWithCustomToken</li>
+<li><code>logout()</code> → POST <code>/api/v1/auth/logout</code> →
+Firebase signOut</li>
+<li><code>getMe()</code> → GET <code>/api/v1/auth/me</code> → returns
+full user profile</li>
+<li><code>hasSession()</code> → checks localStorage for a session cookie
+marker</li>
+</ul>
+<h4
+id="frontendsrclibconnectionservice.ts"><code>frontend/src/lib/connectionService.ts</code></h4>
+<p>CRUD API calls for managing database connections.</p>
+<h4
+id="frontendsrclibaccessservice.ts"><code>frontend/src/lib/accessService.ts</code></h4>
+<p>API calls for granting/revoking/listing database access grants.</p>
+<h4
+id="frontendsrclibschemaservice.ts"><code>frontend/src/lib/schemaService.ts</code></h4>
+<p>Functions to fetch schema browser data and trigger schema
+refresh.</p>
+<h4
+id="frontendsrclibchatservice.ts"><code>frontend/src/lib/chatService.ts</code></h4>
+<p>API calls for listing chats and loading chat history.</p>
+<hr />
+<h2 id="key-concepts">🔑 KEY CONCEPTS</h2>
+<hr />
+<h3 id="q1-what-is-langgraph-and-why-did-you-use-it">❓ Q1: What is
+LangGraph and why did you use it?</h3>
+<p><strong>A:</strong> LangGraph is a framework for building
+<strong>stateful, multi-step AI workflows</strong> as directed graphs.
+We use it because:</p>
+<ul>
+<li>It manages the flow <code>entry → react_agent → output_parser</code>
+with conditional routing</li>
+<li>It supports <strong>retry loops</strong> — if the LLM returns
+invalid JSON, the graph automatically loops back to the
+<code>react_agent</code> (up to 3 times)</li>
+<li>The <code>StateGraph</code> pattern makes error states explicit —
+any node can set <code>error_message</code> and the graph routes to END
+immediately</li>
+<li>It’s built on LangChain, which gives us tool-calling
+abstraction</li>
+</ul>
+<hr />
+<h3 id="q2-what-is-the-react-pattern">❓ Q2: What is the ReAct
+pattern?</h3>
+<p><strong>A:</strong> ReAct = <strong>Reasoning + Acting</strong>. The
+LLM alternates between:</p>
+<ol type="1">
+<li><strong>Thought</strong> — decides what to do</li>
+<li><strong>Action</strong> — calls a tool (e.g.,
+<code>get_schema_list</code>, <code>execute_sql</code>)</li>
+<li><strong>Observation</strong> — reads the tool’s output</li>
+<li>Repeats until it has enough information to answer</li>
+</ol>
+<p>In our system, <code>create_react_agent(llm, tools)</code> implements
+this loop internally. The LLM autonomously decides when to call which
+tool.</p>
+<hr />
+<h3 id="q3-how-does-the-two-tier-cache-work">❓ Q3: How does the
+two-tier cache work?</h3>
+<p><strong>A:</strong></p>
+<pre><code>Request
+  │
+  ▼
+Redis (~1ms) ──HIT──→ return cached value
+  │
+  MISS
+  │
+  ▼
+Firestore (~80ms) ──HIT──→ populate Redis → return value
+  │
+  MISS
+  │
+  ▼
+Live DB (variable) → populate Redis + Firestore → return value</code></pre>
+<p>Cache TTLs are short (2 min) for security-sensitive data (access
+grants) and long (1 hour) for stable data (schema). Cache is
+<strong>invalidated immediately</strong> on write — revoked access takes
+effect instantly.</p>
+<hr />
+<h3 id="q4-how-is-sql-injection-prevented">❓ Q4: How is SQL injection
+prevented?</h3>
+<p><strong>A:</strong> Three layers:</p>
+<ol type="1">
+<li><strong>Input-level regex</strong> in
+<code>_check_injection()</code> — blocks <code>EXEC(</code>,
+<code>xp_cmdshell</code>, <code>SLEEP()</code>,
+<code>INTO OUTFILE</code>, semicolons followed by other statements,
+etc.</li>
+<li><strong>DDL blocking</strong> — <code>DROP</code>,
+<code>CREATE</code>, <code>ALTER</code>, <code>TRUNCATE</code>, etc. are
+always blocked</li>
+<li><strong>Parameterized execution</strong> — SQLAlchemy uses
+<code>text()</code> with bound parameters, never string
+concatenation</li>
+</ol>
+<p>Additionally, <code>LIMIT 1000</code> is auto-added to any SELECT
+without a limit.</p>
+<hr />
+<h3 id="q5-what-is-the-role-based-access-control-rbac-system">❓ Q5:
+What is the Role-Based Access Control (RBAC) system?</h3>
+<p><strong>A:</strong> Four hierarchical roles:</p>
+<pre><code>analyst    (0) — read-only SELECT on explicitly granted DBs
+power_user (1) — SELECT + write on granted DBs
+db_manager (2) — manage connections and grants; restricted user management
+admin      (3) — unrestricted access to everything</code></pre>
+<p>RBAC is enforced at three levels:</p>
+<ol type="1">
+<li><strong>FastAPI dependency</strong> (<code>require_min_role</code>)
+— checks the JWT claim at the HTTP layer</li>
+<li><strong>Agent prompt</strong> — the system prompt tells the LLM what
+the user can/cannot do</li>
+<li><strong>Tool layer</strong> — <code>execute_sql</code> independently
+re-checks the role before any write operation</li>
+</ol>
+<hr />
+<h3 id="q6-how-does-multi-tenancy-organization-isolation-work">❓ Q6:
+How does multi-tenancy (organization isolation) work?</h3>
+<p><strong>A:</strong> Every resource document in Firestore has an
+<code>org_id</code> field. All Firestore queries filter by
+<code>org_id</code>:</p>
+<ul>
+<li>Users belong to one org</li>
+<li>Database connections belong to one org</li>
+<li>Access grants validate that both the target user AND the target
+connection belong to the requesting admin’s org</li>
+<li>Redis cache keys are scoped: <code>connections:list:{org_id}</code>
+(so Org A never sees Org B’s connections)</li>
+</ul>
+<hr />
+<h3 id="q7-how-does-streaming-sse-work">❓ Q7: How does streaming (SSE)
+work?</h3>
+<p><strong>A:</strong> When the frontend calls
+<code>/api/v1/query/stream</code>:</p>
+<ol type="1">
+<li>FastAPI returns a <code>StreamingResponse</code> with content-type
+<code>text/event-stream</code></li>
+<li>The backend iterates <code>agent.astream_events(...)</code> from
+LangGraph</li>
+<li>On <code>on_chain_start → entry</code>: yields
+<code>event: progress</code> “Connecting to database…”</li>
+<li>On <code>on_tool_start → get_schema_list</code>: yields
+<code>event: progress</code> “Loading schema…”</li>
+<li>On <code>on_tool_start → execute_sql</code>: yields
+<code>event: progress</code> “Executing SQL…”</li>
+<li>On <code>on_chain_end → LangGraph</code>: yields
+<code>event: result</code> with full data</li>
+<li>Finally, Phase 2 insights are yielded as
+<code>event: insights</code></li>
+</ol>
+<p>The frontend’s <code>executeQueryStream()</code> reads the
+<code>ReadableStream</code> body, splits on <code>\n\n</code>, parses
+each event block, and fires callbacks (<code>onProgress</code>,
+<code>onResult</code>, <code>onInsights</code>).</p>
+<hr />
+<h3 id="q8-what-is-the-system-prompt-and-why-is-it-important">❓ Q8:
+What is the system prompt and why is it important?</h3>
+<p><strong>A:</strong> The system prompt is the instruction set injected
+into the LLM at the start of every conversation. It:</p>
+<ul>
+<li>Tells the LLM which tools are available and how to use them in
+<strong>mandatory order</strong></li>
+<li>Specifies the <strong>exact JSON schema</strong> the LLM must return
+(title, sql_query, summary, total_records, data)</li>
+<li>Enforces that the LLM MUST call <code>execute_sql</code> (never
+fabricate results)</li>
+<li>Contains dialect-specific SQL syntax hints (MySQL’s
+<code>NOW()</code> vs PostgreSQL’s <code>NOW()</code> + INTERVAL)</li>
+<li>Injects the user’s role permissions (analyst = read-only, power_user
+= write with confirmation)</li>
+<li>Handles edge cases: conversational questions (no tools needed),
+out-of-scope queries (reject), write confirmations (ask before DML)</li>
+</ul>
+<hr />
+<h3 id="q9-how-does-the-output-parser-retry-mechanism-work">❓ Q9: How
+does the output parser retry mechanism work?</h3>
+<p><strong>A:</strong></p>
+<ol type="1">
+<li><code>node_output_parser</code> tries to <code>json.loads()</code>
+the LLM’s output</li>
+<li>If parsing fails (e.g., LLM returned plain text instead of JSON):
+<ul>
+<li>If <code>retry_count &lt; max_retries (3)</code>: increments
+<code>retry_count</code> and returns state WITHOUT
+<code>final_response</code></li>
+<li>The graph router sees no <code>final_response</code> +
+<code>retry_count &gt; 0</code> → routes back to
+<code>react_agent</code></li>
+<li>A nudge message is added: <em>“Your previous response was not
+formatted correctly. Return ONLY valid JSON…”</em></li>
+</ul></li>
+<li>If <code>retry_count &gt;= max_retries</code>: returns error
+response</li>
+</ol>
+<hr />
+<h3 id="q10-explain-the-chatconversation-memory-system.">❓ Q10: Explain
+the chat/conversation memory system.</h3>
+<p><strong>A:</strong> Each user has a <strong>workspace</strong> per
+database connection. Within each workspace, they can have multiple
+<strong>chats</strong>. Each chat stores <strong>messages</strong> as a
+Firestore sub-collection.</p>
+<p>Before each query, <code>get_messages()</code> fetches the last 12
+messages (6 conversation turns) from Firestore. These are injected as
+<code>HumanMessage</code>/<code>AIMessage</code> objects into the
+LangGraph agent’s initial state — giving it conversational context
+(“what did I ask before?”).</p>
+<p>After each query, <code>append_messages()</code> writes both the
+user’s question and the AI’s full response (including SQL, data,
+insights, status) atomically in a Firestore transaction.</p>
+<p>Message IDs use a turn-prefix system: <code>u_0001</code>,
+<code>a_0001</code>, <code>u_0002</code>, <code>a_0002</code>, …
+ensuring predictable ordering.</p>
+<hr />
+<h3
+id="q11-what-happens-behind-the-scenes-when-a-user-types-a-question">❓
+Q11: What happens behind the scenes when a user types a question?</h3>
+<p><strong>A (step-by-step):</strong></p>
+<ol type="1">
+<li>Frontend calls <code>executeQueryStream()</code> with
+<code>{connection_id, chat_input, chat_id}</code></li>
+<li>Backend route handler calls <code>get_or_create_chat()</code> +
+<code>get_messages()</code> for history</li>
+<li><code>run_agent_stream()</code> is called. Two pre-flight guards run
+(write-intent check, in-flight dedup)</li>
+<li><code>entry_node</code> verifies access grant → fetches decrypted DB
+credentials → builds SQLAlchemy URL</li>
+<li><code>react_agent_node</code> builds system prompt + chat history →
+calls <code>create_react_agent(llm, tools)</code></li>
+<li>LLM calls <code>get_schema_list</code> → gets list of all
+tables</li>
+<li>LLM calls <code>get_table_definitions</code> → gets column
+definitions + sample values for relevant tables</li>
+<li>LLM constructs SQL → calls <code>execute_sql</code> → gets results
+(3-row preview + full in cache)</li>
+<li>LLM returns JSON string:
+<code>{title, sql_query, summary, total_records, data}</code></li>
+<li><code>output_parser_node</code> parses JSON, pops full data from
+cache, yields <code>event: result</code></li>
+<li>Phase 2: <code>asyncio.gather()</code> calls two Gemini functions in
+parallel → yields <code>event: insights</code></li>
+<li><code>append_messages()</code> writes both messages to Firestore in
+one atomic transaction</li>
+<li>Frontend renders: data table, chart tab, insights tab, history
+item</li>
+</ol>
+<hr />
+<h2 id="quick-reference-tech-stack">📋 QUICK REFERENCE: TECH STACK</h2>
+<table>
+<colgroup>
+<col style="width: 18%" />
+<col style="width: 36%" />
+<col style="width: 44%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Layer</th>
+<th>Technology</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Backend Framework</td>
+<td>FastAPI (Python)</td>
+<td>Async, fast, auto-generates Swagger UI</td>
+</tr>
+<tr class="even">
+<td>AI Orchestration</td>
+<td>LangGraph</td>
+<td>Stateful multi-step agent with retry loops</td>
+</tr>
+<tr class="odd">
+<td>LLM</td>
+<td>Groq / Gemini / OpenRouter / Ollama</td>
+<td>Cascading fallback; Gemini for insights</td>
+</tr>
+<tr class="even">
+<td>Database</td>
+<td>MySQL, PostgreSQL, MSSQL, Oracle</td>
+<td>Multi-DB support via SQLAlchemy</td>
+</tr>
+<tr class="odd">
+<td>Auth + DB</td>
+<td>Firebase Admin SDK + Firestore</td>
+<td>No PostgreSQL — all app data in Firestore</td>
+</tr>
+<tr class="even">
+<td>Cache</td>
+<td>Redis (optional) + Firestore</td>
+<td>Two-tier: fast Redis → persistent Firestore</td>
+</tr>
+<tr class="odd">
+<td>Frontend</td>
+<td>React + TypeScript + Vite</td>
+<td>Modern SPA</td>
+</tr>
+<tr class="even">
+<td>Routing</td>
+<td>React Router (Hash)</td>
+<td>Works in Electron/desktop</td>
+</tr>
+<tr class="odd">
+<td>Auth (frontend)</td>
+<td>Firebase Client SDK</td>
+<td><code>getIdToken()</code> → Bearer header</td>
+</tr>
+<tr class="even">
+<td>Deployment</td>
+<td>Uvicorn (backend), Netlify (frontend)</td>
+<td>ASGI server for async Python</td>
+</tr>
+<tr class="odd">
+<td>Password Encryption</td>
+<td>Fernet (AES-128-CBC)</td>
+<td>Symmetric encryption for DB passwords at rest</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="security-summary">🔒 SECURITY SUMMARY</h2>
+<table>
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 72%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Threat</th>
+<th>How mitigated</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>SQL Injection</td>
+<td>Regex pattern guards + SQLAlchemy parameterized queries</td>
+</tr>
+<tr class="even">
+<td>DDL attacks (DROP TABLE)</td>
+<td>First-keyword check blocks DDL always</td>
+</tr>
+<tr class="odd">
+<td>Unauthorized DB access</td>
+<td><code>verify_access()</code> called before every query</td>
+</tr>
+<tr class="even">
+<td>Cross-tenant data leak</td>
+<td>All Firestore queries filtered by <code>org_id</code></td>
+</tr>
+<tr class="odd">
+<td>Privilege escalation</td>
+<td>Role checked at HTTP layer + prompt layer + tool layer</td>
+</tr>
+<tr class="even">
+<td>Password exposure</td>
+<td>AES encrypted at rest; never cached in Redis</td>
+</tr>
+<tr class="odd">
+<td>Token replay</td>
+<td>Firebase token verified via RS256 signature; session revocable</td>
+</tr>
+<tr class="even">
+<td>DDoS / spam</td>
+<td>Rate limiting (slowapi) + in-flight dedup per user</td>
+</tr>
+<tr class="odd">
+<td>XSS / Clickjacking</td>
+<td>Security headers middleware (X-Frame-Options, CSP)</td>
+</tr>
+<tr class="even">
+<td>Large payload attacks</td>
+<td>Request body size limit (1 MB default, 100 MB doc upload)</td>
+</tr>
+</tbody>
+</table>
+<hr />
