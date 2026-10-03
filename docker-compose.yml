@@ -10,8 +10,9 @@ services:
       MYSQL_USER: t2t_user
       MYSQL_PASSWORD: t2t_password
     volumes:
-      - ./mysql_init.sql:/docker-entrypoint-initdb.d/init.sql
-
+      - ./mysql_init.sql:/docker-entrypoint-initdb.d/mysql_init.sql:Z
+      - mysql_data:/var/lib/mysql
+      
   postgres-db:
     image: docker.io/library/postgres:15
     container_name: t2t-postgres
@@ -22,4 +23,9 @@ services:
       POSTGRES_PASSWORD: t2t_password
       POSTGRES_DB: logistics_db
     volumes:
-      - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgres_init.sql:/docker-entrypoint-initdb.d/postgres_init.sql:Z
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  mysql_data: {}
+  postgres_data: {}
