@@ -64,52 +64,72 @@ export interface SignupResponse {
   user:         BackendUser;
 }
 
-// ── Session storage — secure cookie (replaces localStorage) ──────────────────
+// ── Session storage ───────────────────────────────────────────────────────────
 //
-// Why cookies over localStorage?
-//   • localStorage is readable by ANY JS on the page — stolen by XSS.
-//   • Cookies with SameSite=Strict are blocked on cross-origin requests (CSRF).
-//   • Cookies with Secure are HTTPS-only in production.
-//   • Expiry is enforced by the browser automatically at Max-Age.
+// We store the session ID + its expiry in localStorage rather than a cookie.
 //
-// Note: We set from JS (not HttpOnly) because this is a pure SPA with no SSR.
-// If you add a BFF proxy later, move cookie setting there + add HttpOnly.
+// Why localStorage instead of document.cookie?
 //
-// Flags:
-//   SameSite=Strict  — CSRF protection
-//   Secure           — HTTPS only (auto-skipped on http://localhost)
-//   Max-Age=3600     — 1 hour, matches Firebase ID token lifetime
-//   Path=/           — accessible on all routes
+// In Electron, the app is loaded via loadFile() which uses the file:// origin.
+// Chromium does NOT reliably persist document.cookie with Max-Age for file://
+// origins — cookies set on file:// are often treated as session-only and are
+// discarded when the window closes, regardless of Max-Age. This caused the
+// login state to be lost on every app restart.
+//
+// localStorage is reliably persisted to disk by Electron for file:// origins
+// and survives window close/reopen as long as the userData path is stable
+// (see main.ts where we pin userData to ~/.config/Talk2Tables on Linux).
+//
+// Security trade-offs vs. cookies:
+//   • We lose SameSite CSRF protection — acceptable because Electron apps
+//     don't receive cross-origin navigation requests the way a web browser does.
+//   • The session ID is readable by page JS either way (no HttpOnly here),
+//     so the XSS surface is unchanged.
+//   • We manually enforce expiry via a stored timestamp (SESSION_MAX_AGE).
 
 const SESSION_KEY     = 't2t_session_id';
+const SESSION_EXP_KEY = 't2t_session_exp';
 const SESSION_MAX_AGE = 28800; // seconds — 8 hours (matches backend session_expiry_seconds)
 
 export function saveSession(id: string): void {
-  const secure = location.protocol === 'https:' ? '; Secure' : '';
-  document.cookie = [
-    `${SESSION_KEY}=${encodeURIComponent(id)}`,
-    `Max-Age=${SESSION_MAX_AGE}`,
-    'Path=/',
-    'SameSite=Strict',
-    secure,
-  ].join('; ');
+  const expiresAt = Date.now() + SESSION_MAX_AGE * 1000;
+  try {
+    localStorage.setItem(SESSION_KEY, id);
+    localStorage.setItem(SESSION_EXP_KEY, String(expiresAt));
+  } catch {
+    // localStorage unavailable (shouldn't happen in Electron, but guard anyway)
+    console.warn('[auth] localStorage unavailable — session will not persist');
+  }
 }
 
 function getSessionId(): string | null {
-  const match = document.cookie
-    .split('; ')
-    .find(row => row.startsWith(`${SESSION_KEY}=`));
-  return match ? decodeURIComponent(match.split('=')[1]) : null;
+  try {
+    const id  = localStorage.getItem(SESSION_KEY);
+    const exp = localStorage.getItem(SESSION_EXP_KEY);
+    if (!id) return null;
+    // Treat as expired if past stored expiry
+    if (exp && Date.now() > Number(exp)) {
+      clearSession();
+      return null;
+    }
+    return id;
+  } catch {
+    return null;
+  }
 }
 
-/** Check if a backend session cookie exists (used by AuthContext to avoid 401 spam). */
+/** Check if a backend session exists and hasn't locally expired. */
 export function hasSession(): boolean {
   return !!getSessionId();
 }
 
 function clearSession(): void {
-  // Max-Age=0 expires the cookie immediately
-  document.cookie = `${SESSION_KEY}=; Max-Age=0; Path=/; SameSite=Strict`;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_EXP_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 // ── Token helper ──────────────────────────────────────────────────────────────
