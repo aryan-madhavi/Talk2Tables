@@ -2,10 +2,23 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import os from 'os';
 
 app.disableHardwareAcceleration();
 
 const currentDir = __dirname;
+
+// ── Pin userData to a stable path BEFORE app is ready ─────────────────────────
+// AppImages on Linux can run from different mount points each launch, which
+// causes Electron to derive a different userData path and lose all persisted
+// cookies/IndexedDB (= auth state). Pinning to ~/.config/<name> fixes this.
+if (process.platform === 'linux') {
+  app.setPath(
+    'userData',
+    path.join(os.homedir(), '.config', 'talk2tables-admin')
+  );
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 const userDataPath = app.getPath('userData');

@@ -1,5 +1,5 @@
 export function Logo({ size = 32 }: { size?: number }) {
-  const isAdmin = import.meta.env.VITE_ALLOW_SIGNUP !== 'false';
+  const isAdmin = import.meta.env.VITE_ALLOW_SIGNUP !== 'true';
   const id = `t2t-${isAdmin ? 'admin' : 'user'}`;
 
   return (

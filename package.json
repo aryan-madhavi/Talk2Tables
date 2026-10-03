@@ -1,5 +1,5 @@
 {
-  "name": "talk2tables",
+  "name": "talk2tables-admin",
   "private": true,
   "version": "0.0.1",
   "description": "AI-powered conversational SQL assistant for industrial databases.",
@@ -12,8 +12,9 @@
   "scripts": {
     "dev": "vite",
     "dev:admin": "vite --mode admin",
-"dev:user": "vite --mode user",
+    "dev:user": "vite --mode user",
     "build": "vite build",
+    "clean": "rimraf dist dist-electron release",
     "dev:electron": "cross-env ELECTRON=true VITE_DEV_SERVER_URL=http://localhost:5173 concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && node src/electron/build-electron.mjs --watch\"",
     "build:electron": "npm run build:electron:main && electron-builder",
     "build:electron:win": "npm run build:electron:main && electron-builder --win",
@@ -22,10 +23,10 @@
     "build:electron:main": "cross-env ELECTRON=true vite build && node src/electron/build-electron.mjs && npm run compile:bytecode",
     "compile:bytecode": "tsx src/electron/electron-bytecode.ts",
     "build:admin": "vite build --mode admin",
-    "build:admin:electron": "cp build/icon.admin.svg build/icon.svg && npm run build:electron:main -- --mode admin && electron-builder",
-    "build:user:electron": "cp build/icon.user.svg build/icon.svg && npm run build:electron:main -- --mode user && electron-builder",
+    "build:admin:electron": "npm run clean && cp build/icon.admin.svg build/icon.svg && npm run build:electron:main -- --mode admin && electron-builder",
+    "build:user:electron": "npm run clean && cp build/icon.user.svg build/icon.svg && npm run build:electron:main -- --mode user && electron-builder",
     "build:user": "vite build --mode user"
-    },
+  },
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
@@ -147,7 +148,7 @@
         "to": "preload/preload.jsc"
       },
       {
-        "from": "electron/setup.html",
+        "from": "src/electron/setup.html",
         "to": "setup.html"
       }
     ],
@@ -158,9 +159,9 @@
       "dist-electron/main.jsc"
     ],
     "linux": {
-      "target": ["AppImage", "deb", "rpm"],
-      "category": "Office",
-      "icon": "build/icons"
+      "target": ["AppImage"],
+      "category": "Utility",
+      "icon": "build/icon.svg"
     },
     "win": {
       "target": [
