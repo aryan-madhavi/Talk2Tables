@@ -60,7 +60,7 @@ CONTAINERS = [
         "name":  "t2t-mongo",
         "image": "docker.io/library/mongo:latest",
         "port":  "27017:27017",
-        "vol":   "t2t_mongo_data:/data/db",
+        "vol":   "t2t_mongo_data:/data/db:Z",
     },
     {
         "name":  "t2t-redis",
@@ -279,6 +279,7 @@ def stop():
                 os.kill(pid, signal.SIGKILL)
 
         remove_pid()
+        stop_containers()
         ok("Backend stopped.")
 
     except Exception as e:

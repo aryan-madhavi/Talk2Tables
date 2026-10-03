@@ -55,9 +55,9 @@ async def lifespan(app: FastAPI):
     logger.info("  Talk2Tables — Starting up")
     logger.info("=" * 60)
 
-    for name, port, image in [
-        ("talk2tables_redis", 6379,  "docker.io/library/redis:latest"),
-        ("talk2tables_mongo", 27017, "docker.io/library/mongo:latest"),
+    """ for name, port, image in [
+        ("t2t-redis", 6379,  "docker.io/library/redis:latest"),
+        ("t2t-mongo", 27017, "docker.io/library/mongo:latest"),
     ]:
         result = subprocess.run(["podman", "start", name], capture_output=True)
         if result.returncode != 0:
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"🐳  Started new container: {name}")
         else:
             logger.info(f"🐳  Resumed existing container: {name}")
-    time.sleep(2)  # let containers initialize
+    time.sleep(2)  # let containers initialize """
 
     try:
         await connect_to_mongo()
@@ -223,4 +223,4 @@ if __name__ == "__main__":
     import uvicorn
     # When bundled, run the uvicorn server directly via the app object
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
